@@ -429,7 +429,11 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	magnetEntry.SetText(data.MagnetText)
 	sourceContainer := container.NewStack()
 
-	savePathEntry := widget.NewSelectEntry(cfg.UI.RecentSavePaths)
+	savePathEntry := newPathAutocompleteEntry(
+		cfg.UI.RecentSavePaths,
+		a.controller.SuggestDirectories,
+		status.SetText,
+	)
 	savePathEntry.SetText(data.SavePath)
 	categoryEntry := widget.NewSelectEntry(categories)
 	tagsEntry := widget.NewEntry()
@@ -470,25 +474,6 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		}, win)
 	})
 
-	suggestButton := widget.NewButton("Suggest", func() {
-		status.SetText("Loading save path suggestions...")
-		go func() {
-			suggestions, err := a.controller.SuggestDirectories(context.Background(), savePathEntry.Text)
-			fyne.Do(func() {
-				if err != nil {
-					status.SetText("Path suggestions unavailable: " + err.Error())
-					return
-				}
-				if len(suggestions) == 0 {
-					status.SetText("No matching save paths.")
-					return
-				}
-				savePathEntry.SetOptions(mergeUnique(suggestions, cfg.UI.RecentSavePaths))
-				status.SetText("Loaded path suggestions.")
-			})
-		}()
-	})
-
 	updateSource := func(selected string) {
 		if selected == "Torrent file" {
 			sourceContainer.Objects = []fyne.CanvasObject{
@@ -508,7 +493,7 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		widget.NewFormItem("Source type", sourceSelect),
 		widget.NewFormItem("Source", sourceContainer),
 		widget.NewFormItem("Torrent management mode", managementSelect),
-		widget.NewFormItem("Save location", container.NewBorder(nil, nil, nil, suggestButton, savePathEntry)),
+		widget.NewFormItem("Save location", savePathEntry),
 		widget.NewFormItem("Name override", renameEntry),
 		widget.NewFormItem("Category", categoryEntry),
 		widget.NewFormItem("Tags", tagsEntry),
@@ -572,6 +557,7 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	)
 
 	win.SetContent(content)
+	win.SetOnClosed(savePathEntry.Close)
 	win.Show()
 }
 
