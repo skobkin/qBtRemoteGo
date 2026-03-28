@@ -371,9 +371,13 @@ func HumanSpeed(value int64) string {
 }
 
 func HumanETA(seconds int64) string {
+	const infiniteETASeconds = 100 * 24 * 60 * 60
+
 	switch {
 	case seconds < 0:
 		return "Unknown"
+	case seconds >= infiniteETASeconds:
+		return "∞"
 	case seconds == 0:
 		return "Done"
 	case seconds < 60:

@@ -87,3 +87,21 @@ func TestHumanAdded(t *testing.T) {
 		}
 	}
 }
+
+func TestHumanETA(t *testing.T) {
+	cases := map[int64]string{
+		-1:      "Unknown",
+		0:       "Done",
+		59:      "59s",
+		60:      "1m",
+		3660:    "1h 1m",
+		90000:   "1d 1h",
+		8640000: "∞",
+	}
+
+	for seconds, want := range cases {
+		if got := HumanETA(seconds); got != want {
+			t.Fatalf("unexpected ETA for %d: got %q want %q", seconds, got, want)
+		}
+	}
+}
