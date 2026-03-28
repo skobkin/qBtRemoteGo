@@ -179,17 +179,23 @@ func (a *application) buildMainWindow() {
 		a.filterBy.SetSelected("Name")
 	}
 
-	toolbar := container.NewHBox(
+	filterLabel := widget.NewLabel("Filter by")
+	filterSelect := container.NewGridWrap(fyne.NewSize(140, a.filterBy.MinSize().Height), a.filterBy)
+	filterInput := container.NewGridWrap(fyne.NewSize(240, a.filterEntry.MinSize().Height), a.filterEntry)
+	leftTools := container.NewHBox(
 		addButton,
 		removeButton,
 		startButton,
 		stopButton,
 		settingsButton,
-		layout.NewSpacer(),
-		widget.NewLabel("Filter by"),
-		a.filterBy,
-		a.filterEntry,
 	)
+	rightTools := container.NewHBox(
+		filterLabel,
+		filterSelect,
+		filterInput,
+	)
+
+	toolbar := container.NewBorder(nil, nil, leftTools, rightTools)
 
 	center := a.buildTorrentTable()
 	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, a.statusLabel)
