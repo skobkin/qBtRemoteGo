@@ -13,7 +13,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
@@ -46,10 +45,11 @@ type application struct {
 	windowVisible   bool
 	trayAvailable   bool
 
-	list        *widget.List
-	statusLabel *widget.Label
-	filterEntry *widget.Entry
-	filterBy    *widget.Select
+	table        *widget.Table
+	statusLabel  *widget.Label
+	filterEntry  *widget.Entry
+	filterBy     *widget.Select
+	columnWidths map[string]float32
 
 	trayState trayState
 
@@ -62,22 +62,6 @@ type trayState struct {
 	showItem   *fyne.MenuItem
 	speedItem  *fyne.MenuItem
 	quitItem   *fyne.MenuItem
-}
-
-type torrentRow struct {
-	widget.BaseWidget
-	root         *fyne.Container
-	check        *widget.Check
-	name         *widget.Label
-	size         *widget.Label
-	progress     *widget.ProgressBar
-	progressText *widget.Label
-	statusText   *canvas.Text
-	statusBG     *canvas.Rectangle
-	down         *widget.Label
-	up           *widget.Label
-	eta          *widget.Label
-	added        *widget.Label
 }
 
 func Run() error {
@@ -202,64 +186,7 @@ func (a *application) buildMainWindow() {
 		a.filterEntry,
 	)
 
-	headers := []struct {
-		label string
-	}{
-		{"Name"},
-		{"Size"},
-		{"Progress"},
-		{"Status"},
-		{"Down"},
-		{"Up"},
-		{"ETA"},
-		{"Added"},
-	}
-	headerGrid := container.New(layout.NewGridLayoutWithColumns(len(headers)))
-	for _, column := range headers {
-		headerGrid.Add(widget.NewLabel(column.label))
-	}
-	headerRow := container.NewBorder(nil, widget.NewSeparator(), widget.NewLabel(""), nil, headerGrid)
-
-	a.list = widget.NewList(
-		func() int {
-			return len(a.visibleTorrents)
-		},
-		func() fyne.CanvasObject {
-			return newTorrentRow()
-		},
-		func(id widget.ListItemID, item fyne.CanvasObject) {
-			row := item.(*torrentRow)
-			if id < 0 || id >= len(a.visibleTorrents) {
-				return
-			}
-			torrent := a.visibleTorrents[id]
-			row.name.SetText(torrent.Name)
-			row.size.SetText(appcore.HumanBytes(torrent.Size))
-			row.progress.SetValue(torrent.Progress)
-			row.progressText.SetText(fmt.Sprintf("%.1f%%", torrent.Progress*100))
-			row.statusText.Text = appcore.StatusLabel(torrent.State)
-			row.statusText.Color = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
-			row.statusText.Refresh()
-			row.statusBG.FillColor = statusColor(torrent.State)
-			row.statusBG.Refresh()
-			row.down.SetText(appcore.HumanSpeed(torrent.DLSpeed))
-			row.up.SetText(appcore.HumanSpeed(torrent.UPSpeed))
-			row.eta.SetText(appcore.HumanETA(torrent.ETASeconds))
-			row.added.SetText(appcore.HumanAdded(torrent.AddedAt))
-			row.check.SetChecked(a.selection[torrent.Hash])
-			hash := torrent.Hash
-			row.check.OnChanged = func(checked bool) {
-				if checked {
-					a.selection[hash] = true
-				} else {
-					delete(a.selection, hash)
-				}
-			}
-		},
-	)
-	a.list.HideSeparators = true
-
-	center := container.NewBorder(headerRow, nil, nil, nil, a.list)
+	center := a.buildTorrentTable()
 	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, a.statusLabel)
 	a.window.SetContent(container.NewBorder(toolbar, bottom, nil, nil, center))
 
@@ -422,6 +349,7 @@ func (a *application) openSettingsWindow() {
 		if err := a.controller.SaveConfig(updated); err != nil {
 			dialog.ShowError(fmt.Errorf("settings saved with integration warnings:\n%w", err), win)
 		}
+		a.refreshVisibleTorrents()
 		win.Close()
 	})
 
@@ -645,8 +573,8 @@ func (a *application) refreshVisibleTorrents() {
 		cfg.UI.SortColumn,
 		cfg.UI.SortDescending,
 	)
-	if a.list != nil {
-		a.list.Refresh()
+	if a.table != nil {
+		a.table.Refresh()
 	}
 	a.statusLabel.SetText(a.statusText())
 }
@@ -788,44 +716,6 @@ func (a *application) updateTray() {
 	a.trayState.speedItem.Label = label
 	a.trayState.desktopApp.SetSystemTrayMenu(fyne.NewMenu("qBtRemoteGo", a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
 	systray.SetTooltip(label)
-}
-
-func newTorrentRow() *torrentRow {
-	row := &torrentRow{
-		check:        widget.NewCheck("", nil),
-		name:         widget.NewLabel(""),
-		size:         widget.NewLabel(""),
-		progress:     widget.NewProgressBar(),
-		progressText: widget.NewLabel("0%"),
-		statusText:   canvas.NewText("", color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}),
-		statusBG:     canvas.NewRectangle(color.NRGBA{A: 0xff}),
-		down:         widget.NewLabel(""),
-		up:           widget.NewLabel(""),
-		eta:          widget.NewLabel(""),
-		added:        widget.NewLabel(""),
-	}
-
-	status := container.NewMax(row.statusBG, container.NewCenter(row.statusText))
-	progressCell := container.NewBorder(nil, nil, nil, row.progressText, row.progress)
-	grid := container.New(
-		layout.NewGridLayoutWithColumns(8),
-		row.name,
-		row.size,
-		progressCell,
-		status,
-		row.down,
-		row.up,
-		row.eta,
-		row.added,
-	)
-	row.root = container.NewBorder(nil, widget.NewSeparator(), row.check, nil, grid)
-	row.ExtendBaseWidget(row)
-
-	return row
-}
-
-func (r *torrentRow) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(r.root)
 }
 
 func statusColor(state string) color.Color {

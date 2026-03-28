@@ -13,7 +13,12 @@ func TestNormalize(t *testing.T) {
 			BackgroundPollSeconds: -1,
 			FilterBy:              "bad",
 			SortColumn:            "bad",
-			RecentSavePaths:       []string{"", "/data", "/data", "/more"},
+			ColumnWidths: map[string]float32{
+				"name": 320,
+				"bad":  50,
+				"eta":  0,
+			},
+			RecentSavePaths: []string{"", "/data", "/data", "/more"},
 		},
 	}
 
@@ -28,6 +33,9 @@ func TestNormalize(t *testing.T) {
 	if cfg.UI.SortColumn != "added" {
 		t.Fatalf("unexpected sort column: %q", cfg.UI.SortColumn)
 	}
+	if len(cfg.UI.ColumnWidths) != 1 || cfg.UI.ColumnWidths["name"] != 320 {
+		t.Fatalf("unexpected column widths: %#v", cfg.UI.ColumnWidths)
+	}
 	if len(cfg.UI.RecentSavePaths) != 2 {
 		t.Fatalf("unexpected recent paths: %#v", cfg.UI.RecentSavePaths)
 	}
@@ -38,6 +46,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	cfg := Default()
 	cfg.Connection.URL = "https://example.invalid/qbt"
+	cfg.UI.ColumnWidths = map[string]float32{"name": 480, "progress": 160}
 	cfg.UI.RecentSavePaths = []string{"/data/one", "/data/two"}
 
 	if err := Save(path, cfg); err != nil {
@@ -51,6 +60,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 	if loaded.Connection.URL != cfg.Connection.URL {
 		t.Fatalf("unexpected URL: %q", loaded.Connection.URL)
+	}
+	if loaded.UI.ColumnWidths["name"] != 480 {
+		t.Fatalf("unexpected column widths: %#v", loaded.UI.ColumnWidths)
 	}
 	if len(loaded.UI.RecentSavePaths) != 2 {
 		t.Fatalf("unexpected paths: %#v", loaded.UI.RecentSavePaths)

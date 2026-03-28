@@ -391,7 +391,61 @@ func HumanAdded(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Local().Format("2006-01-02 15:04")
+	return humanElapsed(time.Now(), t)
+}
+
+func humanElapsed(now time.Time, then time.Time) string {
+	if then.IsZero() {
+		return ""
+	}
+	if now.Before(then) {
+		now = then
+	}
+
+	totalMinutes := int64(now.Sub(then).Minutes())
+	if totalMinutes <= 0 {
+		return "now"
+	}
+
+	const (
+		minutesPerHour  = int64(60)
+		minutesPerDay   = 24 * minutesPerHour
+		minutesPerMonth = 30 * minutesPerDay
+		minutesPerYear  = 365 * minutesPerDay
+	)
+
+	switch {
+	case totalMinutes >= minutesPerYear:
+		years := totalMinutes / minutesPerYear
+		months := (totalMinutes % minutesPerYear) / minutesPerMonth
+		if months > 0 {
+			return fmt.Sprintf("%dy%dm", years, months)
+		}
+		return fmt.Sprintf("%dy", years)
+	case totalMinutes >= minutesPerMonth:
+		months := totalMinutes / minutesPerMonth
+		days := (totalMinutes % minutesPerMonth) / minutesPerDay
+		if days > 0 {
+			return fmt.Sprintf("%dm%dd", months, days)
+		}
+		return fmt.Sprintf("%dm", months)
+	case totalMinutes >= minutesPerDay:
+		days := totalMinutes / minutesPerDay
+		hours := (totalMinutes % minutesPerDay) / minutesPerHour
+		if hours > 0 {
+			return fmt.Sprintf("%dd%dh", days, hours)
+		}
+		return fmt.Sprintf("%dd", days)
+	case totalMinutes >= minutesPerHour:
+		hours := totalMinutes / minutesPerHour
+		minutes := totalMinutes % minutesPerHour
+		if minutes > 0 {
+			return fmt.Sprintf("%dh%dm", hours, minutes)
+		}
+		return fmt.Sprintf("%dh", hours)
+	default:
+		return fmt.Sprintf("%dm", max(totalMinutes, 1))
+	}
 }
 
 func firstNonEmpty(values ...string) string {

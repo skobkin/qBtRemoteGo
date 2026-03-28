@@ -68,3 +68,22 @@ func TestStatusLabel(t *testing.T) {
 		t.Fatalf("unexpected missing files label")
 	}
 }
+
+func TestHumanAdded(t *testing.T) {
+	now := time.Date(2026, time.March, 29, 12, 0, 0, 0, time.UTC)
+
+	cases := map[string]time.Time{
+		"2y4m":   now.Add(-(2*365*24 + 4*30*24) * time.Hour),
+		"4m10d":  now.Add(-(4*30*24 + 10*24) * time.Hour),
+		"15d10h": now.Add(-(15*24 + 10) * time.Hour),
+		"10h20m": now.Add(-(10*time.Hour + 20*time.Minute)),
+		"12m":    now.Add(-12 * time.Minute),
+		"now":    now,
+	}
+
+	for want, addedAt := range cases {
+		if got := humanElapsed(now, addedAt); got != want {
+			t.Fatalf("unexpected human elapsed for %s: got %q", want, got)
+		}
+	}
+}

@@ -30,15 +30,16 @@ type ConnectionConfig struct {
 }
 
 type UIConfig struct {
-	RememberPathCount     int      `json:"remember_path_count"`
-	PathAutocomplete      bool     `json:"path_autocomplete"`
-	ActivePollSeconds     int      `json:"active_poll_seconds"`
-	BackgroundPollSeconds int      `json:"background_poll_seconds"`
-	StartMinimizedToTray  bool     `json:"start_minimized_to_tray"`
-	FilterBy              string   `json:"filter_by"`
-	SortColumn            string   `json:"sort_column"`
-	SortDescending        bool     `json:"sort_descending"`
-	RecentSavePaths       []string `json:"recent_save_paths"`
+	RememberPathCount     int                `json:"remember_path_count"`
+	PathAutocomplete      bool               `json:"path_autocomplete"`
+	ActivePollSeconds     int                `json:"active_poll_seconds"`
+	BackgroundPollSeconds int                `json:"background_poll_seconds"`
+	StartMinimizedToTray  bool               `json:"start_minimized_to_tray"`
+	FilterBy              string             `json:"filter_by"`
+	SortColumn            string             `json:"sort_column"`
+	SortDescending        bool               `json:"sort_descending"`
+	ColumnWidths          map[string]float32 `json:"column_widths"`
+	RecentSavePaths       []string           `json:"recent_save_paths"`
 }
 
 type IntegrationConfig struct {
@@ -63,6 +64,7 @@ func Default() AppConfig {
 			FilterBy:              "name",
 			SortColumn:            "added",
 			SortDescending:        true,
+			ColumnWidths:          nil,
 			RecentSavePaths:       nil,
 		},
 		Integration: IntegrationConfig{},
@@ -97,6 +99,7 @@ func Normalize(cfg *AppConfig) {
 	if !isValidSortColumn(cfg.UI.SortColumn) {
 		cfg.UI.SortColumn = def.UI.SortColumn
 	}
+	cfg.UI.ColumnWidths = normalizeColumnWidths(cfg.UI.ColumnWidths)
 	cfg.UI.RecentSavePaths = normalizePaths(cfg.UI.RecentSavePaths, cfg.UI.RememberPathCount)
 
 	if cfg.Logging.Level == "" {
@@ -210,4 +213,26 @@ func isValidSortColumn(column string) bool {
 	return slices.Contains([]string{
 		"name", "size", "progress", "status", "down", "up", "eta", "added",
 	}, column)
+}
+
+func normalizeColumnWidths(widths map[string]float32) map[string]float32 {
+	if len(widths) == 0 {
+		return nil
+	}
+
+	out := make(map[string]float32, len(widths))
+	for key, width := range widths {
+		if !isValidSortColumn(key) {
+			continue
+		}
+		if width <= 0 {
+			continue
+		}
+		out[key] = width
+	}
+	if len(out) == 0 {
+		return nil
+	}
+
+	return out
 }
