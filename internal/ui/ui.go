@@ -13,6 +13,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
@@ -47,11 +48,13 @@ type application struct {
 
 	list         *widget.List
 	tableHeader  *torrentHeaderRow
+	tablePreview *canvas.Rectangle
 	tableScroll  *container.Scroll
 	statusLabel  *widget.Label
 	filterEntry  *widget.Entry
 	filterBy     *widget.Select
 	columnWidths map[string]float32
+	previewX     float32
 
 	trayState trayState
 

@@ -106,6 +106,8 @@ func (a *application) buildTorrentTable() fyne.CanvasObject {
 	a.columnWidths = mergeColumnWidths(a.controller.Config().UI.ColumnWidths)
 
 	a.tableHeader = newTorrentHeaderRow(a)
+	a.tablePreview = canvas.NewRectangle(theme.Color(theme.ColorNamePrimary))
+	a.tablePreview.Hide()
 	a.list = widget.NewList(
 		func() int {
 			return len(a.visibleTorrents)
@@ -122,7 +124,7 @@ func (a *application) buildTorrentTable() fyne.CanvasObject {
 	)
 	a.list.HideSeparators = true
 
-	content := container.New(&torrentTableLayout{app: a}, a.tableHeader, a.list)
+	content := container.New(&torrentTableLayout{app: a}, a.tableHeader, a.list, a.tablePreview)
 	a.tableScroll = container.NewHScroll(content)
 
 	return a.tableScroll
@@ -132,6 +134,22 @@ func (a *application) totalColumnWidth() float32 {
 	total := float32(0)
 	for _, spec := range torrentColumnSpecs {
 		total += a.columnWidth(spec)
+	}
+	return total
+}
+
+func (a *application) columnBoundary(key string, widthOverride float32) float32 {
+	total := float32(0)
+	for _, spec := range torrentColumnSpecs {
+		width := a.columnWidth(spec)
+		if spec.key == key {
+			if spec.resizable && widthOverride >= spec.minWidth {
+				width = widthOverride
+			}
+			total += width
+			return total
+		}
+		total += width
 	}
 	return total
 }
@@ -170,6 +188,35 @@ func (a *application) setColumnWidth(spec torrentColumnSpec, width float32, pers
 	if persist {
 		a.persistColumnWidths()
 	}
+}
+
+func (a *application) previewColumnWidth(spec torrentColumnSpec, width float32) {
+	if !spec.resizable || a.tablePreview == nil {
+		return
+	}
+	if width < spec.minWidth {
+		width = spec.minWidth
+	}
+	a.previewX = a.columnBoundary(spec.key, width)
+	headerHeight := torrentHeaderHeight
+	if a.tableHeader != nil {
+		if size := a.tableHeader.Size(); size.Height > 0 {
+			headerHeight = size.Height
+		}
+	}
+	a.tablePreview.Move(fyne.NewPos(a.previewX-1, 0))
+	a.tablePreview.Resize(fyne.NewSize(2, headerHeight))
+	a.tablePreview.Show()
+	a.tablePreview.Refresh()
+}
+
+func (a *application) hideColumnPreview() {
+	if a.tablePreview == nil {
+		return
+	}
+	a.previewX = 0
+	a.tablePreview.Hide()
+	a.tablePreview.Refresh()
 }
 
 func (a *application) persistColumnWidths() {
@@ -415,6 +462,12 @@ func (l *torrentTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size)
 
 	objects[1].Move(fyne.NewPos(0, headerHeight))
 	objects[1].Resize(fyne.NewSize(totalWidth, maxFloat32(size.Height-headerHeight, 0)))
+
+	preview := objects[2]
+	if preview.Visible() {
+		preview.Move(fyne.NewPos(l.app.previewX-1, 0))
+		preview.Resize(fyne.NewSize(2, headerHeight))
+	}
 }
 
 func (l *torrentTableLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
@@ -458,6 +511,7 @@ func (h *columnResizeHandle) Dragged(event *fyne.DragEvent) {
 		h.pendingWidth = h.dragStartWidth
 	}
 	h.pendingWidth += event.Dragged.DX
+	h.app.previewColumnWidth(h.spec, h.pendingWidth)
 }
 
 func (h *columnResizeHandle) DragEnd() {
@@ -469,6 +523,7 @@ func (h *columnResizeHandle) finishDrag() {
 		return
 	}
 	h.app.setColumnWidth(h.spec, h.pendingWidth, true)
+	h.app.hideColumnPreview()
 	h.dragging = false
 	h.pendingWidth = 0
 	h.indicator.FillColor = color.Transparent
@@ -482,6 +537,7 @@ func (h *columnResizeHandle) MouseDown(*desktop.MouseEvent) {
 	h.dragStartWidth = h.app.columnWidth(h.spec)
 	h.pendingWidth = h.dragStartWidth
 	h.dragging = true
+	h.app.previewColumnWidth(h.spec, h.pendingWidth)
 }
 
 func (h *columnResizeHandle) MouseUp(*desktop.MouseEvent) {
