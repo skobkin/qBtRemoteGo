@@ -65,7 +65,8 @@ type trayState struct {
 }
 
 type torrentRow struct {
-	*fyne.Container
+	widget.BaseWidget
+	root         *fyne.Container
 	check        *widget.Check
 	name         *widget.Label
 	size         *widget.Label
@@ -790,36 +791,41 @@ func (a *application) updateTray() {
 }
 
 func newTorrentRow() *torrentRow {
-	check := widget.NewCheck("", nil)
-	name := widget.NewLabel("")
-	size := widget.NewLabel("")
-	progress := widget.NewProgressBar()
-	progressText := widget.NewLabel("0%")
-	statusText := canvas.NewText("", color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
-	statusBG := canvas.NewRectangle(color.NRGBA{A: 0xff})
-	status := container.NewMax(statusBG, container.NewCenter(statusText))
-	down := widget.NewLabel("")
-	up := widget.NewLabel("")
-	eta := widget.NewLabel("")
-	added := widget.NewLabel("")
-
-	progressCell := container.NewBorder(nil, nil, nil, progressText, progress)
-	grid := container.New(layout.NewGridLayoutWithColumns(8), name, size, progressCell, status, down, up, eta, added)
-
-	return &torrentRow{
-		Container:    container.NewBorder(nil, widget.NewSeparator(), check, nil, grid),
-		check:        check,
-		name:         name,
-		size:         size,
-		progress:     progress,
-		progressText: progressText,
-		statusText:   statusText,
-		statusBG:     statusBG,
-		down:         down,
-		up:           up,
-		eta:          eta,
-		added:        added,
+	row := &torrentRow{
+		check:        widget.NewCheck("", nil),
+		name:         widget.NewLabel(""),
+		size:         widget.NewLabel(""),
+		progress:     widget.NewProgressBar(),
+		progressText: widget.NewLabel("0%"),
+		statusText:   canvas.NewText("", color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}),
+		statusBG:     canvas.NewRectangle(color.NRGBA{A: 0xff}),
+		down:         widget.NewLabel(""),
+		up:           widget.NewLabel(""),
+		eta:          widget.NewLabel(""),
+		added:        widget.NewLabel(""),
 	}
+
+	status := container.NewMax(row.statusBG, container.NewCenter(row.statusText))
+	progressCell := container.NewBorder(nil, nil, nil, row.progressText, row.progress)
+	grid := container.New(
+		layout.NewGridLayoutWithColumns(8),
+		row.name,
+		row.size,
+		progressCell,
+		status,
+		row.down,
+		row.up,
+		row.eta,
+		row.added,
+	)
+	row.root = container.NewBorder(nil, widget.NewSeparator(), row.check, nil, grid)
+	row.ExtendBaseWidget(row)
+
+	return row
+}
+
+func (r *torrentRow) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(r.root)
 }
 
 func statusColor(state string) color.Color {
