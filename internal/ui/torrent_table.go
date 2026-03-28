@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"image/color"
 	"strings"
 
@@ -13,8 +12,16 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	appcore "github.com/skobkin/qbtremotego/internal/app"
-	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/qbt"
+)
+
+const (
+	torrentRowHeight     float32 = 40
+	torrentHeaderHeight  float32 = 38
+	headerHandleWidth    float32 = 8
+	headerCellPadding    float32 = 8
+	rowCellPadding       float32 = 6
+	rowEmphasisCellInset float32 = 4
 )
 
 type torrentColumnSpec struct {
@@ -37,25 +44,32 @@ var torrentColumnSpecs = []torrentColumnSpec{
 	{key: "added", label: "Added", defaultWidth: 90, minWidth: 80, resizable: true},
 }
 
-type torrentTableCell struct {
+type torrentHeaderRow struct {
 	widget.BaseWidget
-	app        *application
-	root       *fyne.Container
-	checkWrap  *fyne.Container
-	check      *widget.Check
-	text       *hoverLabel
-	progress   *widget.ProgressBar
-	progressCt *fyne.Container
-	statusBG   *canvas.Rectangle
-	statusTx   *widget.Label
-	statusCt   *fyne.Container
+	app       *application
+	root      *fyne.Container
+	labels    []*widget.Label
+	handles   []*columnResizeHandle
+	separator *widget.Separator
 }
 
-type torrentHeaderCell struct {
+type torrentListRow struct {
 	widget.BaseWidget
-	label  *widget.Label
-	handle *columnResizeHandle
-	root   *fyne.Container
+	app       *application
+	root      *fyne.Container
+	checkWrap *fyne.Container
+	check     *widget.Check
+	name      *hoverLabel
+	size      *hoverLabel
+	progress  *widget.ProgressBar
+	statusBG  *canvas.Rectangle
+	statusTx  *widget.Label
+	statusCt  *fyne.Container
+	down      *hoverLabel
+	up        *hoverLabel
+	eta       *hoverLabel
+	added     *hoverLabel
+	separator *widget.Separator
 }
 
 type columnResizeHandle struct {
@@ -63,8 +77,8 @@ type columnResizeHandle struct {
 	app            *application
 	spec           torrentColumnSpec
 	indicator      *canvas.Rectangle
-	dragStartX     float32
 	dragStartWidth float32
+	pendingWidth   float32
 	dragging       bool
 }
 
@@ -76,87 +90,50 @@ type hoverLabel struct {
 	popup    *widget.PopUp
 }
 
-func (a *application) buildTorrentTable() *widget.Table {
+type torrentHeaderLayout struct {
+	app *application
+}
+
+type torrentRowLayout struct {
+	app *application
+}
+
+type torrentTableLayout struct {
+	app *application
+}
+
+func (a *application) buildTorrentTable() fyne.CanvasObject {
 	a.columnWidths = mergeColumnWidths(a.controller.Config().UI.ColumnWidths)
 
-	table := widget.NewTable(
-		func() (int, int) {
-			return len(a.visibleTorrents), len(torrentColumnSpecs)
+	a.tableHeader = newTorrentHeaderRow(a)
+	a.list = widget.NewList(
+		func() int {
+			return len(a.visibleTorrents)
 		},
 		func() fyne.CanvasObject {
-			return newTorrentTableCell(a)
+			return newTorrentListRow(a)
 		},
-		func(id widget.TableCellID, item fyne.CanvasObject) {
-			cell := item.(*torrentTableCell)
-			if id.Row < 0 || id.Row >= len(a.visibleTorrents) || id.Col < 0 || id.Col >= len(torrentColumnSpecs) {
-				cell.clear()
+		func(id widget.ListItemID, item fyne.CanvasObject) {
+			if id < 0 || id >= len(a.visibleTorrents) {
 				return
 			}
-			a.updateTorrentTableCell(cell, a.visibleTorrents[id.Row], id.Col)
+			item.(*torrentListRow).setTorrent(a.visibleTorrents[id])
 		},
 	)
-	table.ShowHeaderRow = true
-	table.ShowHeaderColumn = false
-	table.CreateHeader = func() fyne.CanvasObject {
-		return newTorrentHeaderCell(a)
-	}
-	table.UpdateHeader = func(id widget.TableCellID, item fyne.CanvasObject) {
-		header := item.(*torrentHeaderCell)
-		if id.Row != -1 || id.Col < 0 || id.Col >= len(torrentColumnSpecs) {
-			header.setColumn(torrentColumnSpecs[0])
-			return
-		}
-		header.setColumn(torrentColumnSpecs[id.Col])
-	}
-	table.HideSeparators = false
-	a.table = table
-	a.applyColumnWidths()
+	a.list.HideSeparators = true
 
-	return table
+	content := container.New(&torrentTableLayout{app: a}, a.tableHeader, a.list)
+	a.tableScroll = container.NewHScroll(content)
+
+	return a.tableScroll
 }
 
-func (a *application) updateTorrentTableCell(cell *torrentTableCell, torrent qbt.Torrent, column int) {
-	switch torrentColumnSpecs[column].key {
-	case "select":
-		cell.showCheck(torrent.Hash, a.selection[torrent.Hash])
-	case "name":
-		cell.showText(torrent.Name, torrent.Name, fyne.TextAlignLeading)
-	case "size":
-		size := appcore.HumanBytes(torrent.Size)
-		cell.showText(size, size, fyne.TextAlignTrailing)
-	case "progress":
-		cell.showProgress(torrent.Progress, fmt.Sprintf("%.1f%%", torrent.Progress*100))
-	case "status":
-		label := appcore.StatusLabel(torrent.State)
-		cell.showStatus(label, statusColor(torrent.State))
-	case "down":
-		speed := appcore.HumanSpeed(torrent.DLSpeed)
-		cell.showText(speed, speed, fyne.TextAlignTrailing)
-	case "up":
-		speed := appcore.HumanSpeed(torrent.UPSpeed)
-		cell.showText(speed, speed, fyne.TextAlignTrailing)
-	case "eta":
-		eta := appcore.HumanETA(torrent.ETASeconds)
-		cell.showText(eta, eta, fyne.TextAlignTrailing)
-	case "added":
-		display := appcore.HumanAdded(torrent.AddedAt)
-		hover := ""
-		if !torrent.AddedAt.IsZero() {
-			hover = torrent.AddedAt.Local().Format("2006-01-02 15:04")
-		}
-		cell.showText(display, hover, fyne.TextAlignTrailing)
-	default:
-		cell.clear()
+func (a *application) totalColumnWidth() float32 {
+	total := float32(0)
+	for _, spec := range torrentColumnSpecs {
+		total += a.columnWidth(spec)
 	}
-}
-
-func (a *application) applyColumnWidths() {
-	if a.table == nil {
-		return
-	}
-	for index, spec := range torrentColumnSpecs {
-		a.table.SetColumnWidth(index, a.columnWidth(spec))
-	}
+	return total
 }
 
 func (a *application) columnWidth(spec torrentColumnSpec) float32 {
@@ -181,11 +158,14 @@ func (a *application) setColumnWidth(spec torrentColumnSpec, width float32, pers
 		a.columnWidths = make(map[string]float32, len(torrentColumnSpecs))
 	}
 	a.columnWidths[spec.key] = width
-	if a.table != nil {
-		index := torrentColumnIndex(spec.key)
-		if index >= 0 {
-			a.table.SetColumnWidth(index, width)
-		}
+	if a.tableHeader != nil {
+		a.tableHeader.Refresh()
+	}
+	if a.list != nil {
+		a.list.Refresh()
+	}
+	if a.tableScroll != nil {
+		a.tableScroll.Refresh()
 	}
 	if persist {
 		a.persistColumnWidths()
@@ -242,95 +222,205 @@ func torrentColumnIndex(key string) int {
 	return -1
 }
 
-func newTorrentTableCell(app *application) *torrentTableCell {
-	cell := &torrentTableCell{
-		app:      app,
-		check:    widget.NewCheck("", nil),
-		text:     newHoverLabel(app.window.Canvas()),
-		progress: widget.NewProgressBar(),
-		statusBG: canvas.NewRectangle(color.Transparent),
-		statusTx: widget.NewLabel(""),
+func newTorrentHeaderRow(app *application) *torrentHeaderRow {
+	row := &torrentHeaderRow{
+		app:       app,
+		labels:    make([]*widget.Label, 0, len(torrentColumnSpecs)),
+		handles:   make([]*columnResizeHandle, 0, len(torrentColumnSpecs)),
+		separator: widget.NewSeparator(),
 	}
-	cell.text.label.Truncation = fyne.TextTruncateEllipsis
-	cell.statusTx.Alignment = fyne.TextAlignCenter
-	cell.statusCt = container.NewMax(cell.statusBG, container.NewCenter(cell.statusTx))
-	cell.progressCt = container.NewMax(cell.progress)
-	cell.checkWrap = container.NewCenter(cell.check)
-	cell.root = container.NewMax(cell.checkWrap, cell.text, cell.progressCt, cell.statusCt)
-	cell.ExtendBaseWidget(cell)
-	cell.clear()
-	return cell
+	objects := make([]fyne.CanvasObject, 0, len(torrentColumnSpecs)*2+1)
+	for _, spec := range torrentColumnSpecs {
+		label := widget.NewLabel(spec.label)
+		label.TextStyle = fyne.TextStyle{Bold: true}
+		if strings.TrimSpace(spec.label) == "" {
+			label.Alignment = fyne.TextAlignCenter
+		} else {
+			label.Alignment = fyne.TextAlignLeading
+		}
+		handle := newColumnResizeHandle(app)
+		handle.setColumn(spec)
+		row.labels = append(row.labels, label)
+		row.handles = append(row.handles, handle)
+		objects = append(objects, label, handle)
+	}
+	objects = append(objects, row.separator)
+	row.root = container.New(&torrentHeaderLayout{app: app}, objects...)
+	row.ExtendBaseWidget(row)
+	return row
 }
 
-func (c *torrentTableCell) clear() {
-	c.check.OnChanged = nil
-	c.checkWrap.Hide()
-	c.text.hidePopup()
-	c.text.Hide()
-	c.progressCt.Hide()
-	c.statusCt.Hide()
+func (r *torrentHeaderRow) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(r.root)
 }
 
-func (c *torrentTableCell) showCheck(hash string, checked bool) {
-	c.clear()
-	c.check.SetChecked(checked)
-	c.check.OnChanged = func(selected bool) {
+func newTorrentListRow(app *application) *torrentListRow {
+	row := &torrentListRow{
+		app:       app,
+		check:     widget.NewCheck("", nil),
+		name:      newHoverLabel(app.window.Canvas()),
+		size:      newHoverLabel(app.window.Canvas()),
+		progress:  widget.NewProgressBar(),
+		statusBG:  canvas.NewRectangle(color.Transparent),
+		statusTx:  widget.NewLabel(""),
+		down:      newHoverLabel(app.window.Canvas()),
+		up:        newHoverLabel(app.window.Canvas()),
+		eta:       newHoverLabel(app.window.Canvas()),
+		added:     newHoverLabel(app.window.Canvas()),
+		separator: widget.NewSeparator(),
+	}
+	row.name.label.Truncation = fyne.TextTruncateEllipsis
+	row.size.label.Truncation = fyne.TextTruncateEllipsis
+	row.down.label.Truncation = fyne.TextTruncateEllipsis
+	row.up.label.Truncation = fyne.TextTruncateEllipsis
+	row.eta.label.Truncation = fyne.TextTruncateEllipsis
+	row.added.label.Truncation = fyne.TextTruncateEllipsis
+	row.statusTx.Alignment = fyne.TextAlignCenter
+	row.statusCt = container.NewMax(row.statusBG, container.NewCenter(row.statusTx))
+	row.checkWrap = container.NewCenter(row.check)
+	row.root = container.New(&torrentRowLayout{app: app},
+		row.checkWrap,
+		row.name,
+		row.size,
+		row.progress,
+		row.statusCt,
+		row.down,
+		row.up,
+		row.eta,
+		row.added,
+		row.separator,
+	)
+	row.ExtendBaseWidget(row)
+	return row
+}
+
+func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
+	r.check.OnChanged = nil
+	r.check.SetChecked(r.app.selection[torrent.Hash])
+	r.check.OnChanged = func(selected bool) {
 		if selected {
-			c.app.selection[hash] = true
+			r.app.selection[torrent.Hash] = true
 			return
 		}
-		delete(c.app.selection, hash)
+		delete(r.app.selection, torrent.Hash)
 	}
-	c.checkWrap.Show()
-}
 
-func (c *torrentTableCell) showText(display string, hover string, alignment fyne.TextAlign) {
-	c.clear()
-	c.text.SetAlignment(alignment)
-	c.text.SetText(display, hover)
-	c.text.Show()
-}
+	r.name.SetAlignment(fyne.TextAlignLeading)
+	r.name.SetText(torrent.Name, torrent.Name)
 
-func (c *torrentTableCell) showProgress(value float64, _ string) {
-	c.clear()
-	c.progress.SetValue(value)
-	c.progressCt.Show()
-}
+	size := appcore.HumanBytes(torrent.Size)
+	r.size.SetAlignment(fyne.TextAlignTrailing)
+	r.size.SetText(size, size)
 
-func (c *torrentTableCell) showStatus(text string, fill color.Color) {
-	c.clear()
-	c.statusTx.SetText(text)
-	c.statusBG.FillColor = fill
-	c.statusBG.Refresh()
-	c.statusCt.Show()
-}
+	r.progress.SetValue(torrent.Progress)
 
-func (c *torrentTableCell) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(c.root)
-}
+	r.statusTx.SetText(appcore.StatusLabel(torrent.State))
+	r.statusBG.FillColor = statusColor(torrent.State)
+	r.statusBG.Refresh()
 
-func newTorrentHeaderCell(app *application) *torrentHeaderCell {
-	cell := &torrentHeaderCell{
-		label:  widget.NewLabel(""),
-		handle: newColumnResizeHandle(app),
+	down := appcore.HumanSpeed(torrent.DLSpeed)
+	r.down.SetAlignment(fyne.TextAlignTrailing)
+	r.down.SetText(down, down)
+
+	up := appcore.HumanSpeed(torrent.UPSpeed)
+	r.up.SetAlignment(fyne.TextAlignTrailing)
+	r.up.SetText(up, up)
+
+	eta := appcore.HumanETA(torrent.ETASeconds)
+	r.eta.SetAlignment(fyne.TextAlignTrailing)
+	r.eta.SetText(eta, eta)
+
+	added := appcore.HumanAdded(torrent.AddedAt)
+	hover := ""
+	if !torrent.AddedAt.IsZero() {
+		hover = torrent.AddedAt.Local().Format("2006-01-02 15:04")
 	}
-	cell.label.TextStyle = fyne.TextStyle{Bold: true}
-	cell.root = container.NewBorder(nil, widget.NewSeparator(), nil, cell.handle, cell.label)
-	cell.ExtendBaseWidget(cell)
-	return cell
+	r.added.SetAlignment(fyne.TextAlignTrailing)
+	r.added.SetText(added, hover)
 }
 
-func (c *torrentHeaderCell) setColumn(spec torrentColumnSpec) {
-	c.label.SetText(spec.label)
-	c.label.Alignment = fyne.TextAlignLeading
-	if strings.TrimSpace(spec.label) == "" {
-		c.label.Alignment = fyne.TextAlignCenter
+func (r *torrentListRow) MinSize() fyne.Size {
+	return fyne.NewSize(r.app.totalColumnWidth(), torrentRowHeight)
+}
+
+func (r *torrentListRow) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(r.root)
+}
+
+func (l *torrentHeaderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	x := float32(0)
+	for index, spec := range torrentColumnSpecs {
+		width := l.app.columnWidth(spec)
+		label := objects[index*2]
+		handle := objects[index*2+1]
+
+		labelRightPad := headerCellPadding
+		if spec.resizable {
+			labelRightPad += headerHandleWidth
+		}
+		labelWidth := maxFloat32(width-headerCellPadding-labelRightPad, 0)
+		label.Move(fyne.NewPos(x+headerCellPadding, 0))
+		label.Resize(fyne.NewSize(labelWidth, maxFloat32(size.Height-1, 0)))
+
+		handle.Move(fyne.NewPos(x+width-headerHandleWidth, 0))
+		handle.Resize(fyne.NewSize(headerHandleWidth, maxFloat32(size.Height-1, 0)))
+		x += width
 	}
-	c.handle.setColumn(spec)
+
+	separator := objects[len(objects)-1]
+	separator.Move(fyne.NewPos(0, maxFloat32(size.Height-1, 0)))
+	separator.Resize(fyne.NewSize(x, 1))
 }
 
-func (c *torrentHeaderCell) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(c.root)
+func (l *torrentHeaderLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(l.app.totalColumnWidth(), torrentHeaderHeight)
+}
+
+func (l *torrentRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	x := float32(0)
+	for index, spec := range torrentColumnSpecs {
+		width := l.app.columnWidth(spec)
+		obj := objects[index]
+		if spec.key == "select" {
+			obj.Move(fyne.NewPos(x, 0))
+			obj.Resize(fyne.NewSize(width, maxFloat32(size.Height-1, 0)))
+			x += width
+			continue
+		}
+
+		inset := rowCellPadding
+		if spec.key == "progress" || spec.key == "status" {
+			inset = rowEmphasisCellInset
+		}
+		obj.Move(fyne.NewPos(x+inset, 1))
+		obj.Resize(fyne.NewSize(maxFloat32(width-inset*2, 0), maxFloat32(size.Height-2, 0)))
+		x += width
+	}
+
+	separator := objects[len(objects)-1]
+	separator.Move(fyne.NewPos(0, maxFloat32(size.Height-1, 0)))
+	separator.Resize(fyne.NewSize(x, 1))
+}
+
+func (l *torrentRowLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(l.app.totalColumnWidth(), torrentRowHeight)
+}
+
+func (l *torrentTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	headerHeight := objects[0].MinSize().Height
+	totalWidth := l.app.totalColumnWidth()
+
+	objects[0].Move(fyne.NewPos(0, 0))
+	objects[0].Resize(fyne.NewSize(totalWidth, headerHeight))
+
+	objects[1].Move(fyne.NewPos(0, headerHeight))
+	objects[1].Resize(fyne.NewSize(totalWidth, maxFloat32(size.Height-headerHeight, 0)))
+}
+
+func (l *torrentTableLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	headerHeight := objects[0].MinSize().Height
+	listHeight := objects[1].MinSize().Height
+	return fyne.NewSize(l.app.totalColumnWidth(), headerHeight+listHeight)
 }
 
 func newColumnResizeHandle(app *application) *columnResizeHandle {
@@ -364,32 +454,38 @@ func (h *columnResizeHandle) Dragged(event *fyne.DragEvent) {
 	}
 	if !h.dragging {
 		h.dragging = true
-		h.dragStartX = event.Position.X
 		h.dragStartWidth = h.app.columnWidth(h.spec)
+		h.pendingWidth = h.dragStartWidth
 	}
-	h.app.setColumnWidth(h.spec, h.dragStartWidth+(event.Position.X-h.dragStartX), false)
+	h.pendingWidth += event.Dragged.DX
 }
 
 func (h *columnResizeHandle) DragEnd() {
-	if !h.spec.resizable {
-		return
-	}
-	h.dragging = false
-	h.indicator.FillColor = color.Transparent
-	h.indicator.Refresh()
-	h.app.persistColumnWidths()
+	h.finishDrag()
 }
 
-func (h *columnResizeHandle) MouseDown(event *desktop.MouseEvent) {
+func (h *columnResizeHandle) finishDrag() {
+	if !h.spec.resizable || !h.dragging {
+		return
+	}
+	h.app.setColumnWidth(h.spec, h.pendingWidth, true)
+	h.dragging = false
+	h.pendingWidth = 0
+	h.indicator.FillColor = color.Transparent
+	h.indicator.Refresh()
+}
+
+func (h *columnResizeHandle) MouseDown(*desktop.MouseEvent) {
 	if !h.spec.resizable {
 		return
 	}
-	h.dragStartX = event.Position.X
 	h.dragStartWidth = h.app.columnWidth(h.spec)
+	h.pendingWidth = h.dragStartWidth
 	h.dragging = true
 }
 
 func (h *columnResizeHandle) MouseUp(*desktop.MouseEvent) {
+	h.finishDrag()
 }
 
 func (h *columnResizeHandle) MouseIn(*desktop.MouseEvent) {
@@ -412,11 +508,41 @@ func (h *columnResizeHandle) MouseOut() {
 }
 
 func (h *columnResizeHandle) MinSize() fyne.Size {
-	return fyne.NewSize(8, 1)
+	return fyne.NewSize(headerHandleWidth, 1)
 }
 
 func (h *columnResizeHandle) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(h.indicator)
+	return &columnResizeHandleRenderer{handle: h, objects: []fyne.CanvasObject{h.indicator}}
+}
+
+type columnResizeHandleRenderer struct {
+	handle  *columnResizeHandle
+	objects []fyne.CanvasObject
+}
+
+func (r *columnResizeHandleRenderer) Layout(size fyne.Size) {
+	lineWidth := float32(2)
+	r.handle.indicator.Move(fyne.NewPos(maxFloat32(size.Width-lineWidth, 0), 0))
+	r.handle.indicator.Resize(fyne.NewSize(lineWidth, size.Height))
+}
+
+func (r *columnResizeHandleRenderer) MinSize() fyne.Size {
+	return r.handle.MinSize()
+}
+
+func (r *columnResizeHandleRenderer) Refresh() {
+	canvas.Refresh(r.handle.indicator)
+}
+
+func (r *columnResizeHandleRenderer) Destroy() {
+}
+
+func (r *columnResizeHandleRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *columnResizeHandleRenderer) BackgroundColor() color.Color {
+	return color.Transparent
 }
 
 func newHoverLabel(canvas fyne.Canvas) *hoverLabel {
@@ -477,6 +603,9 @@ func (h *hoverLabel) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(h.label)
 }
 
-func defaultColumnWidths() map[string]float32 {
-	return mergeColumnWidths(config.Default().UI.ColumnWidths)
+func maxFloat32(a float32, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
 }

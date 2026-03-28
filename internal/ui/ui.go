@@ -45,7 +45,9 @@ type application struct {
 	windowVisible   bool
 	trayAvailable   bool
 
-	table        *widget.Table
+	list         *widget.List
+	tableHeader  *torrentHeaderRow
+	tableScroll  *container.Scroll
 	statusLabel  *widget.Label
 	filterEntry  *widget.Entry
 	filterBy     *widget.Select
@@ -573,8 +575,8 @@ func (a *application) refreshVisibleTorrents() {
 		cfg.UI.SortColumn,
 		cfg.UI.SortDescending,
 	)
-	if a.table != nil {
-		a.table.Refresh()
+	if a.list != nil {
+		a.list.Refresh()
 	}
 	a.statusLabel.SetText(a.statusText())
 }
