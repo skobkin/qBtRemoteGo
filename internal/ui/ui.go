@@ -431,12 +431,24 @@ func (a *application) openSettingsWindow() {
 		win.Close()
 	})
 
-	content := container.NewVScroll(container.NewVBox(
-		widget.NewCard("Connection", "", container.NewVBox(connectionForm, testButton, testStatus)),
-		widget.NewCard("UI", "", uiForm),
-		widget.NewCard("Integration", "", integrationForm),
-		container.NewHBox(layout.NewSpacer(), saveButton),
-	))
+	tabs := container.NewAppTabs(
+		container.NewTabItem("Connection", container.NewPadded(container.NewVBox(
+			connectionForm,
+			testButton,
+			testStatus,
+		))),
+		container.NewTabItem("UI", container.NewPadded(uiForm)),
+		container.NewTabItem("Integration", container.NewPadded(integrationForm)),
+	)
+	tabs.SetTabLocation(container.TabLocationTop)
+
+	content := container.NewBorder(
+		nil,
+		container.NewPadded(container.NewHBox(layout.NewSpacer(), saveButton)),
+		nil,
+		nil,
+		tabs,
+	)
 
 	win.SetContent(content)
 	win.Show()
