@@ -203,34 +203,19 @@ func (a *application) buildMainWindow() {
 
 	headers := []struct {
 		label string
-		key   string
 	}{
-		{"Name", "name"},
-		{"Size", "size"},
-		{"Progress", "progress"},
-		{"Status", "status"},
-		{"Down", "down"},
-		{"Up", "up"},
-		{"ETA", "eta"},
-		{"Added", "added"},
+		{"Name"},
+		{"Size"},
+		{"Progress"},
+		{"Status"},
+		{"Down"},
+		{"Up"},
+		{"ETA"},
+		{"Added"},
 	}
 	headerGrid := container.New(layout.NewGridLayoutWithColumns(len(headers)))
 	for _, column := range headers {
-		col := column
-		headerGrid.Add(widget.NewButton(a.sortLabel(col.label, col.key), func() {
-			cfg := a.controller.Config()
-			if cfg.UI.SortColumn == col.key {
-				cfg.UI.SortDescending = !cfg.UI.SortDescending
-			} else {
-				cfg.UI.SortColumn = col.key
-				cfg.UI.SortDescending = false
-			}
-			if err := a.controller.SaveLocalUI(cfg); err != nil {
-				a.logger.Warn("persist sort", "error", err)
-			}
-			a.refreshVisibleTorrents()
-			a.buildMainWindow()
-		}))
+		headerGrid.Add(widget.NewLabel(column.label))
 	}
 	headerRow := container.NewBorder(nil, widget.NewSeparator(), widget.NewLabel(""), nil, headerGrid)
 
@@ -346,6 +331,10 @@ func (a *application) openSettingsWindow() {
 	backgroundPoll.Validator = numberValidator
 	startMinimized := widget.NewCheck("", nil)
 	startMinimized.SetChecked(cfg.UI.StartMinimizedToTray)
+	sortBy := widget.NewSelect(sortColumnLabels(), nil)
+	sortBy.SetSelected(sortColumnLabel(cfg.UI.SortColumn))
+	sortDescending := widget.NewCheck("", nil)
+	sortDescending.SetChecked(cfg.UI.SortDescending)
 
 	registerMagnet := widget.NewCheck("", nil)
 	registerMagnet.SetChecked(cfg.Integration.RegisterMagnetHandler)
@@ -367,6 +356,8 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Torrent list update time (seconds)", activePoll),
 		widget.NewFormItem("Background update time (seconds)", backgroundPoll),
 		widget.NewFormItem("Start minimized to tray", startMinimized),
+		widget.NewFormItem("Sort by", sortBy),
+		widget.NewFormItem("Descending order", sortDescending),
 	)
 
 	integrationForm := widget.NewForm(
@@ -421,6 +412,8 @@ func (a *application) openSettingsWindow() {
 		updated.UI.ActivePollSeconds = activeSeconds
 		updated.UI.BackgroundPollSeconds = backgroundSeconds
 		updated.UI.StartMinimizedToTray = startMinimized.Checked
+		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
+		updated.UI.SortDescending = sortDescending.Checked
 		updated.Integration.RegisterMagnetHandler = registerMagnet.Checked
 		updated.Integration.RegisterTorrentHandler = registerTorrent.Checked
 		updated.Integration.StartWithSystem = startWithSystem.Checked
@@ -796,17 +789,6 @@ func (a *application) updateTray() {
 	systray.SetTooltip(label)
 }
 
-func (a *application) sortLabel(label string, key string) string {
-	cfg := a.controller.Config()
-	if cfg.UI.SortColumn != key {
-		return label
-	}
-	if cfg.UI.SortDescending {
-		return label + " ↓"
-	}
-	return label + " ↑"
-}
-
 func newTorrentRow() *torrentRow {
 	check := widget.NewCheck("", nil)
 	name := widget.NewLabel("")
@@ -900,4 +882,63 @@ func mergeUnique(primary []string, secondary []string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+func sortColumnLabels() []string {
+	return []string{
+		"Name",
+		"Size",
+		"Progress",
+		"Status",
+		"Download speed",
+		"Upload speed",
+		"ETA",
+		"Added",
+	}
+}
+
+func sortColumnLabel(key string) string {
+	switch strings.TrimSpace(key) {
+	case "name":
+		return "Name"
+	case "size":
+		return "Size"
+	case "progress":
+		return "Progress"
+	case "status":
+		return "Status"
+	case "down":
+		return "Download speed"
+	case "up":
+		return "Upload speed"
+	case "eta":
+		return "ETA"
+	case "added":
+		return "Added"
+	default:
+		return "Added"
+	}
+}
+
+func sortColumnKey(label string) string {
+	switch strings.TrimSpace(label) {
+	case "Name":
+		return "name"
+	case "Size":
+		return "size"
+	case "Progress":
+		return "progress"
+	case "Status":
+		return "status"
+	case "Download speed":
+		return "down"
+	case "Upload speed":
+		return "up"
+	case "ETA":
+		return "eta"
+	case "Added":
+		return "added"
+	default:
+		return config.Default().UI.SortColumn
+	}
 }
