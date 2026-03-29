@@ -85,6 +85,7 @@ func (c *Client) TestConnection(ctx context.Context) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+
 		return fmt.Errorf("app/version returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
@@ -218,6 +219,7 @@ func (c *Client) AddTorrent(ctx context.Context, req AddRequest) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
 		return fmt.Errorf("torrents/add returned %s: %s", resp.Status, strings.TrimSpace(string(bodyBytes)))
 	}
 
@@ -369,6 +371,7 @@ func pathBase(path string) string {
 	if idx < 0 {
 		return path
 	}
+
 	return path[idx+1:]
 }
 
@@ -400,6 +403,7 @@ func (c *Client) postHashes(ctx context.Context, endpoint string, hashes []strin
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
 		return fmt.Errorf("%s returned %s: %s", endpoint, resp.Status, strings.TrimSpace(string(body)))
 	}
 
@@ -461,6 +465,7 @@ func (c *Client) newRequest(ctx context.Context, method string, endpoint string,
 }
 
 func (c *Client) doJSON(req *http.Request, target any) error {
+	// #nosec G704 -- the qBittorrent base URL is user-configured application behavior.
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("request %s %s: %w", req.Method, req.URL.String(), err)
@@ -469,6 +474,7 @@ func (c *Client) doJSON(req *http.Request, target any) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
 		return fmt.Errorf("%s returned %s: %s", req.URL.Path, resp.Status, strings.TrimSpace(string(body)))
 	}
 

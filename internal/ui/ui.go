@@ -88,6 +88,12 @@ func Run() error {
 		return err
 	}
 
+	logManager.Logger("bootstrap").Info(
+		"starting qbtremotego",
+		"version", appcore.BuildVersion(),
+		"build_date", appcore.BuildDateYMD(),
+	)
+
 	controller, err := appcore.NewController(configPath, logManager.Logger("controller"))
 	if err != nil {
 		return err
@@ -791,6 +797,7 @@ func (a *application) toggleTorrentSelection(hash string) {
 			for _, torrent := range a.visibleTorrents {
 				if a.selection[torrent.Hash] {
 					a.selectionAnchor = torrent.Hash
+
 					break
 				}
 			}
@@ -856,6 +863,7 @@ func (a *application) pruneSelectionToVisible() {
 		for _, torrent := range a.visibleTorrents {
 			if a.selection[torrent.Hash] {
 				a.selectionAnchor = torrent.Hash
+
 				break
 			}
 		}

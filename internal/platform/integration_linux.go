@@ -31,10 +31,11 @@ func syncDesktopEntry(exePath string, enabled bool, logger *slog.Logger) error {
 
 	if !enabled {
 		_ = os.Remove(desktopPath)
+
 		return nil
 	}
 
-	if err := os.MkdirAll(applicationsDir, 0o755); err != nil {
+	if err := os.MkdirAll(applicationsDir, 0o750); err != nil {
 		return fmt.Errorf("create applications dir: %w", err)
 	}
 
@@ -49,7 +50,8 @@ func syncDesktopEntry(exePath string, enabled bool, logger *slog.Logger) error {
 		"",
 	}, "\n")
 
-	if err := os.WriteFile(desktopPath, []byte(content), 0o755); err != nil {
+	// #nosec G306 -- desktop entries are expected to be readable by desktop integration tools.
+	if err := os.WriteFile(desktopPath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write desktop entry: %w", err)
 	}
 
@@ -74,10 +76,11 @@ func syncAutostart(exePath string, enabled bool, _ *slog.Logger) error {
 	path := filepath.Join(configDir, "autostart", desktopFileName)
 	if !enabled {
 		_ = os.Remove(path)
+
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create autostart dir: %w", err)
 	}
 
@@ -91,7 +94,8 @@ func syncAutostart(exePath string, enabled bool, _ *slog.Logger) error {
 		"",
 	}, "\n")
 
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+	// #nosec G306 -- autostart desktop entries are expected to be readable by the desktop session.
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write autostart entry: %w", err)
 	}
 
@@ -103,11 +107,10 @@ func tryCommand(_ *slog.Logger, name string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G204 -- command name is resolved from a fixed allowlist in this package.
 	cmd := exec.Command(bin, args...)
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	return nil
+
+	return cmd.Run()
 }
 
 func userApplicationsDir() (string, error) {
@@ -119,6 +122,7 @@ func userApplicationsDir() (string, error) {
 		}
 		dataDir = filepath.Join(home, ".local", "share")
 	}
+
 	return filepath.Join(dataDir, "applications"), nil
 }
 

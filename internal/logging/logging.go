@@ -30,6 +30,7 @@ func (m *Manager) Logger(component string) *slog.Logger {
 	if m == nil || m.logger == nil {
 		return slog.Default().With("component", component)
 	}
+
 	return m.logger.With("component", component)
 }
 

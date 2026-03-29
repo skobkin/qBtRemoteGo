@@ -432,17 +432,17 @@ func (l *torrentHeaderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size
 		if spec.resizable {
 			labelRightPad += headerHandleWidth
 		}
-		labelWidth := maxFloat32(width-headerCellPadding-labelRightPad, 0)
+		labelWidth := clampMinZero(width - headerCellPadding - labelRightPad)
 		label.Move(fyne.NewPos(x+headerCellPadding, 0))
-		label.Resize(fyne.NewSize(labelWidth, maxFloat32(size.Height-1, 0)))
+		label.Resize(fyne.NewSize(labelWidth, clampMinZero(size.Height-1)))
 
 		handle.Move(fyne.NewPos(x+width-headerHandleWidth, 0))
-		handle.Resize(fyne.NewSize(headerHandleWidth, maxFloat32(size.Height-1, 0)))
+		handle.Resize(fyne.NewSize(headerHandleWidth, clampMinZero(size.Height-1)))
 		x += width
 	}
 
 	separator := objects[len(objects)-1]
-	separator.Move(fyne.NewPos(0, maxFloat32(size.Height-1, 0)))
+	separator.Move(fyne.NewPos(0, clampMinZero(size.Height-1)))
 	separator.Resize(fyne.NewSize(x, 1))
 }
 
@@ -461,12 +461,12 @@ func (l *torrentRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 			inset = rowEmphasisCellInset
 		}
 		obj.Move(fyne.NewPos(x+inset, 1))
-		obj.Resize(fyne.NewSize(maxFloat32(width-inset*2, 0), maxFloat32(size.Height-2, 0)))
+		obj.Resize(fyne.NewSize(clampMinZero(width-inset*2), clampMinZero(size.Height-2)))
 		x += width
 	}
 
 	separator := objects[len(objects)-1]
-	separator.Move(fyne.NewPos(0, maxFloat32(size.Height-1, 0)))
+	separator.Move(fyne.NewPos(0, clampMinZero(size.Height-1)))
 	separator.Resize(fyne.NewSize(x, 1))
 }
 
@@ -482,7 +482,7 @@ func (l *torrentTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size)
 	objects[0].Resize(fyne.NewSize(totalWidth, headerHeight))
 
 	objects[1].Move(fyne.NewPos(0, headerHeight))
-	objects[1].Resize(fyne.NewSize(totalWidth, maxFloat32(size.Height-headerHeight, 0)))
+	objects[1].Resize(fyne.NewSize(totalWidth, clampMinZero(size.Height-headerHeight)))
 
 	preview := objects[2]
 	if preview.Visible() {
@@ -599,7 +599,7 @@ type columnResizeHandleRenderer struct {
 
 func (r *columnResizeHandleRenderer) Layout(size fyne.Size) {
 	lineWidth := float32(2)
-	r.handle.indicator.Move(fyne.NewPos(maxFloat32(size.Width-lineWidth, 0), 0))
+	r.handle.indicator.Move(fyne.NewPos(clampMinZero(size.Width-lineWidth), 0))
 	r.handle.indicator.Resize(fyne.NewSize(lineWidth, size.Height))
 }
 
@@ -686,9 +686,10 @@ func (h *hoverLabel) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(h.label)
 }
 
-func maxFloat32(a float32, b float32) float32 {
-	if a > b {
-		return a
+func clampMinZero(value float32) float32 {
+	if value > 0 {
+		return value
 	}
-	return b
+
+	return 0
 }

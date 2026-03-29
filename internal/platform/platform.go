@@ -47,5 +47,6 @@ func JoinErrors(errs []error) string {
 			parts = append(parts, err.Error())
 		}
 	}
+
 	return strings.Join(parts, "\n")
 }

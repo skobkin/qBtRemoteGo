@@ -87,6 +87,7 @@ func (c *Controller) SaveLocalUI(cfg config.AppConfig) error {
 		return err
 	}
 	c.config = cfg
+
 	return nil
 }
 
@@ -95,6 +96,7 @@ func (c *Controller) TestConnection(ctx context.Context, cfg config.ConnectionCo
 	if err != nil {
 		return err
 	}
+
 	return client.TestConnection(ctx)
 }
 
@@ -103,6 +105,7 @@ func (c *Controller) FetchTorrents(ctx context.Context) ([]qbt.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return client.Torrents(ctx)
 }
 
@@ -111,6 +114,7 @@ func (c *Controller) FetchTransferInfo(ctx context.Context) (qbt.TransferInfo, e
 	if err != nil {
 		return qbt.TransferInfo{}, err
 	}
+
 	return client.TransferInfo(ctx)
 }
 
@@ -119,6 +123,7 @@ func (c *Controller) FetchServerState(ctx context.Context) (qbt.ServerState, err
 	if err != nil {
 		return qbt.ServerState{}, err
 	}
+
 	return client.ServerState(ctx)
 }
 
@@ -131,7 +136,7 @@ func (c *Controller) FetchCategoriesAndTags(ctx context.Context) ([]string, []st
 	categories, catErr := client.Categories(ctx)
 	tags, tagErr := client.Tags(ctx)
 	if catErr != nil && tagErr != nil {
-		return nil, nil, fmt.Errorf("load categories: %v; load tags: %v", catErr, tagErr)
+		return nil, nil, fmt.Errorf("load categories and tags: %w", errors.Join(catErr, tagErr))
 	}
 
 	return categories, tags, errors.Join(catErr, tagErr)
@@ -167,6 +172,7 @@ func (c *Controller) StartTorrents(ctx context.Context, hashes []string) error {
 	if err != nil {
 		return err
 	}
+
 	return client.Start(ctx, hashes)
 }
 
@@ -175,6 +181,7 @@ func (c *Controller) StopTorrents(ctx context.Context, hashes []string) error {
 	if err != nil {
 		return err
 	}
+
 	return client.Stop(ctx, hashes)
 }
 
@@ -183,6 +190,7 @@ func (c *Controller) DeleteTorrents(ctx context.Context, hashes []string, delete
 	if err != nil {
 		return err
 	}
+
 	return client.Delete(ctx, hashes, deleteFiles)
 }
 
@@ -194,6 +202,7 @@ func (c *Controller) SuggestDirectories(ctx context.Context, path string) ([]str
 	if err != nil {
 		return nil, err
 	}
+
 	return client.DirectorySuggestions(ctx, path)
 }
 
@@ -218,6 +227,7 @@ func (c *Controller) ParseInvocationArgs(args []string) *AddDialogPrefill {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -242,6 +252,7 @@ func FilterAndSortTorrents(torrents []qbt.Torrent, query string, filterBy string
 		if descending {
 			return -less
 		}
+
 		return less
 	})
 

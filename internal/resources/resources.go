@@ -67,5 +67,6 @@ func SlowModeIcon(enabled bool) fyne.Resource {
 	if enabled {
 		return statusSlowModeOn
 	}
+
 	return statusSlowModeOff
 }

@@ -108,13 +108,16 @@ func Normalize(cfg *AppConfig) {
 }
 
 func Load(path string) (AppConfig, error) {
+	// #nosec G304 -- path comes from app config resolution and tests control their own temp paths.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			cfg := Default()
 			Normalize(&cfg)
+
 			return cfg, nil
 		}
+
 		return Default(), fmt.Errorf("read config: %w", err)
 	}
 
@@ -130,7 +133,7 @@ func Load(path string) (AppConfig, error) {
 func Save(path string, cfg AppConfig) error {
 	Normalize(&cfg)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 
