@@ -69,6 +69,30 @@ func TestStatusLabel(t *testing.T) {
 	}
 }
 
+func TestHumanSpeedLimit(t *testing.T) {
+	if got := HumanSpeedLimit(0); got != "∞" {
+		t.Fatalf("unexpected unlimited label: %q", got)
+	}
+	if got := HumanSpeedLimit(1536); got != "1.5 KiB/s" {
+		t.Fatalf("unexpected limited label: %q", got)
+	}
+}
+
+func TestConnectionStatusLabel(t *testing.T) {
+	cases := map[string]string{
+		"connected":    "Connected",
+		"firewalled":   "Firewalled",
+		"disconnected": "Disconnected",
+		"":             "Unknown",
+	}
+
+	for raw, want := range cases {
+		if got := ConnectionStatusLabel(raw); got != want {
+			t.Fatalf("unexpected connection label for %q: got %q want %q", raw, got, want)
+		}
+	}
+}
+
 func TestHumanAdded(t *testing.T) {
 	now := time.Date(2026, time.March, 29, 12, 0, 0, 0, time.UTC)
 

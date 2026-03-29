@@ -17,8 +17,20 @@ type Torrent struct {
 }
 
 type TransferInfo struct {
-	DownloadSpeed int64 `json:"dl_info_speed"`
-	UploadSpeed   int64 `json:"up_info_speed"`
+	DownloadSpeed    int64  `json:"dl_info_speed"`
+	UploadSpeed      int64  `json:"up_info_speed"`
+	DownloadLimit    int64  `json:"dl_rate_limit"`
+	UploadLimit      int64  `json:"up_rate_limit"`
+	ConnectionStatus string `json:"connection_status"`
+}
+
+type MainData struct {
+	ServerState ServerState `json:"server_state"`
+}
+
+type ServerState struct {
+	FreeSpaceOnDisk   int64 `json:"free_space_on_disk"`
+	UseAltSpeedLimits bool  `json:"use_alt_speed_limits"`
 }
 
 type AddRequest struct {

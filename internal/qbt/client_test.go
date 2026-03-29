@@ -186,3 +186,37 @@ func TestAddTorrentUploadsFile(t *testing.T) {
 		t.Fatalf("unexpected filename: %q", sawFilename)
 	}
 }
+
+func TestServerStateLoadsFreeSpaceAndSlowMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/sync/maindata":
+			if got := r.URL.Query().Get("rid"); got != "0" {
+				t.Fatalf("unexpected rid: %q", got)
+			}
+			_, _ = io.WriteString(w, `{"server_state":{"free_space_on_disk":5368709120,"use_alt_speed_limits":true}}`)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(config.ConnectionConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	state, err := client.ServerState(context.Background())
+	if err != nil {
+		t.Fatalf("server state: %v", err)
+	}
+	if state.FreeSpaceOnDisk != 5368709120 || !state.UseAltSpeedLimits {
+		t.Fatalf("unexpected state: %#v", state)
+	}
+}

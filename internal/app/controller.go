@@ -114,6 +114,14 @@ func (c *Controller) FetchTransferInfo(ctx context.Context) (qbt.TransferInfo, e
 	return client.TransferInfo(ctx)
 }
 
+func (c *Controller) FetchServerState(ctx context.Context) (qbt.ServerState, error) {
+	client, err := c.client()
+	if err != nil {
+		return qbt.ServerState{}, err
+	}
+	return client.ServerState(ctx)
+}
+
 func (c *Controller) FetchCategoriesAndTags(ctx context.Context) ([]string, []string, error) {
 	client, err := c.client()
 	if err != nil {
@@ -368,6 +376,26 @@ func HumanBytes(value int64) string {
 
 func HumanSpeed(value int64) string {
 	return HumanBytes(value) + "/s"
+}
+
+func HumanSpeedLimit(value int64) string {
+	if value <= 0 {
+		return "∞"
+	}
+	return HumanSpeed(value)
+}
+
+func ConnectionStatusLabel(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "connected":
+		return "Connected"
+	case "firewalled":
+		return "Firewalled"
+	case "disconnected":
+		return "Disconnected"
+	default:
+		return "Unknown"
+	}
 }
 
 func HumanETA(seconds int64) string {

@@ -130,6 +130,27 @@ func (c *Client) TransferInfo(ctx context.Context) (TransferInfo, error) {
 	return transfer, nil
 }
 
+func (c *Client) ServerState(ctx context.Context) (ServerState, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return ServerState{}, err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, "sync/maindata", nil)
+	if err != nil {
+		return ServerState{}, err
+	}
+	query := req.URL.Query()
+	query.Set("rid", "0")
+	req.URL.RawQuery = query.Encode()
+
+	var data MainData
+	if err := c.doJSON(req, &data); err != nil {
+		return ServerState{}, err
+	}
+
+	return data.ServerState, nil
+}
+
 func (c *Client) Categories(ctx context.Context) ([]string, error) {
 	if err := c.ensureAuthenticated(ctx); err != nil {
 		return nil, err

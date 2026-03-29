@@ -636,7 +636,13 @@ func (h *hoverLabel) MouseIn(*desktop.MouseEvent) {
 	}
 	content := widget.NewLabel(h.fullText)
 	content.Wrapping = fyne.TextWrapWord
-	h.popup = widget.NewPopUp(container.NewPadded(content), h.canvas)
+	popupContent := container.NewPadded(content)
+	h.popup = widget.NewPopUp(popupContent, h.canvas)
+	size := popupContent.MinSize()
+	if size.Width < 160 {
+		size.Width = 160
+	}
+	h.popup.Resize(size)
 	h.popup.ShowAtRelativePosition(fyne.NewPos(0, h.Size().Height), h)
 }
 

@@ -36,25 +36,29 @@ type application struct {
 
 	controller *appcore.Controller
 
-	mu              sync.Mutex
-	allTorrents     []qbt.Torrent
-	visibleTorrents []qbt.Torrent
-	selection       map[string]bool
-	filterQuery     string
-	transfer        qbt.TransferInfo
-	lastError       string
-	windowVisible   bool
-	trayAvailable   bool
+	mu               sync.Mutex
+	allTorrents      []qbt.Torrent
+	visibleTorrents  []qbt.Torrent
+	selection        map[string]bool
+	filterQuery      string
+	transfer         qbt.TransferInfo
+	serverState      qbt.ServerState
+	serverStateKnown bool
+	lastError        string
+	windowVisible    bool
+	trayAvailable    bool
 
-	list         *widget.List
-	tableHeader  *torrentHeaderRow
-	tablePreview *canvas.Rectangle
-	tableScroll  *container.Scroll
-	statusLabel  *widget.Label
-	filterEntry  *widget.Entry
-	filterBy     *widget.Select
-	columnWidths map[string]float32
-	previewX     float32
+	list           *widget.List
+	tableHeader    *torrentHeaderRow
+	tablePreview   *canvas.Rectangle
+	tableScroll    *container.Scroll
+	statusLabel    *widget.Label
+	connectionIcon *hoverIcon
+	slowModeIcon   *hoverIcon
+	filterEntry    *widget.Entry
+	filterBy       *widget.Select
+	columnWidths   map[string]float32
+	previewX       float32
 
 	trayState trayState
 
@@ -195,10 +199,16 @@ func (a *application) buildMainWindow() {
 		filterInput,
 	)
 
+	a.statusLabel.Truncation = fyne.TextTruncateEllipsis
+	a.connectionIcon = newHoverIcon(a.window.Canvas(), resources.ConnectionStatusIcon(""), "Connection status unavailable")
+	a.slowModeIcon = newHoverIcon(a.window.Canvas(), resources.SlowModeIcon(false), "Slow mode: off")
+
 	toolbar := container.NewBorder(nil, nil, leftTools, rightTools)
 
 	center := a.buildTorrentTable()
-	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, a.statusLabel)
+	statusIcons := container.NewHBox(a.slowModeIcon, a.connectionIcon)
+	statusBar := container.NewBorder(nil, nil, nil, statusIcons, a.statusLabel)
+	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, container.NewPadded(statusBar))
 	a.window.SetContent(container.NewBorder(toolbar, bottom, nil, nil, center))
 
 	a.refreshVisibleTorrents()
@@ -574,19 +584,49 @@ func (a *application) refreshVisibleTorrents() {
 		a.list.Refresh()
 	}
 	a.statusLabel.SetText(a.statusText())
+	a.refreshStatusIcons()
 }
 
 func (a *application) statusText() string {
 	parts := []string{
-		fmt.Sprintf("Torrents: %d", len(a.allTorrents)),
-		fmt.Sprintf("Visible: %d", len(a.visibleTorrents)),
-		fmt.Sprintf("Down %s", appcore.HumanSpeed(a.transfer.DownloadSpeed)),
-		fmt.Sprintf("Up %s", appcore.HumanSpeed(a.transfer.UploadSpeed)),
+		fmt.Sprintf("T:%d", len(a.allTorrents)),
+		fmt.Sprintf("V:%d", len(a.visibleTorrents)),
+		fmt.Sprintf("D %s", appcore.HumanSpeed(a.transfer.DownloadSpeed)),
+		fmt.Sprintf("U %s", appcore.HumanSpeed(a.transfer.UploadSpeed)),
+		fmt.Sprintf("Lim D:%s U:%s", appcore.HumanSpeedLimit(a.transfer.DownloadLimit), appcore.HumanSpeedLimit(a.transfer.UploadLimit)),
+	}
+	if a.serverStateKnown {
+		parts = append(parts, "Free "+appcore.HumanBytes(a.serverState.FreeSpaceOnDisk))
 	}
 	if strings.TrimSpace(a.lastError) != "" {
 		parts = append(parts, "Last error: "+a.lastError)
 	}
 	return strings.Join(parts, " | ")
+}
+
+func (a *application) refreshStatusIcons() {
+	if a.connectionIcon != nil {
+		status := strings.ToLower(strings.TrimSpace(a.transfer.ConnectionStatus))
+		tooltip := "Connection status: " + appcore.ConnectionStatusLabel(status)
+		switch status {
+		case "connected":
+			tooltip += ". Incoming connections are available."
+		case "firewalled":
+			tooltip += ". Incoming connections appear blocked."
+		case "disconnected":
+			tooltip += ". qBittorrent reports no peer connectivity."
+		default:
+			tooltip = "Connection status unavailable"
+		}
+		a.connectionIcon.SetState(resources.ConnectionStatusIcon(status), tooltip)
+	}
+	if a.slowModeIcon != nil {
+		tooltip := "Slow mode: off. Alternative speed limits are disabled."
+		if a.serverState.UseAltSpeedLimits {
+			tooltip = "Slow mode: on. Alternative speed limits are enabled."
+		}
+		a.slowModeIcon.SetState(resources.SlowModeIcon(a.serverState.UseAltSpeedLimits), tooltip)
+	}
 }
 
 func (a *application) pollLoop() {
@@ -608,6 +648,7 @@ func (a *application) refreshNow() {
 
 	torrents, err := a.controller.FetchTorrents(ctx)
 	transfer, transferErr := a.controller.FetchTransferInfo(ctx)
+	serverState, serverStateErr := a.controller.FetchServerState(ctx)
 
 	fyne.Do(func() {
 		if err == nil {
@@ -620,6 +661,12 @@ func (a *application) refreshNow() {
 			a.transfer = transfer
 		} else if a.lastError == "" {
 			a.lastError = transferErr.Error()
+		}
+		if serverStateErr == nil {
+			a.serverState = serverState
+			a.serverStateKnown = true
+		} else if a.lastError == "" {
+			a.lastError = serverStateErr.Error()
 		}
 		a.refreshVisibleTorrents()
 		a.updateTray()
