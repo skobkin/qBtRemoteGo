@@ -40,6 +40,7 @@ type application struct {
 	allTorrents      []qbt.Torrent
 	visibleTorrents  []qbt.Torrent
 	selection        map[string]bool
+	selectionAnchor  string
 	filterQuery      string
 	transfer         qbt.TransferInfo
 	serverState      qbt.ServerState
@@ -142,14 +143,10 @@ func (a *application) buildMainWindow() {
 		a.confirmDelete()
 	})
 	startButton := widget.NewButtonWithIcon("Start", theme.MediaPlayIcon(), func() {
-		a.runBulkAction("start torrents", func(ctx context.Context, hashes []string) error {
-			return a.controller.StartTorrents(ctx, hashes)
-		})
+		a.startSelectedTorrents()
 	})
 	stopButton := widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), func() {
-		a.runBulkAction("stop torrents", func(ctx context.Context, hashes []string) error {
-			return a.controller.StopTorrents(ctx, hashes)
-		})
+		a.stopSelectedTorrents()
 	})
 	settingsButton := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), func() {
 		a.openSettingsWindow()
@@ -580,6 +577,7 @@ func (a *application) refreshVisibleTorrents() {
 		cfg.UI.SortColumn,
 		cfg.UI.SortDescending,
 	)
+	a.pruneSelectionToVisible()
 	if a.list != nil {
 		a.list.Refresh()
 	}
@@ -692,6 +690,18 @@ func (a *application) runBulkAction(label string, fn func(context.Context, []str
 	}()
 }
 
+func (a *application) startSelectedTorrents() {
+	a.runBulkAction("start torrents", func(ctx context.Context, hashes []string) error {
+		return a.controller.StartTorrents(ctx, hashes)
+	})
+}
+
+func (a *application) stopSelectedTorrents() {
+	a.runBulkAction("stop torrents", func(ctx context.Context, hashes []string) error {
+		return a.controller.StopTorrents(ctx, hashes)
+	})
+}
+
 func (a *application) confirmDelete() {
 	hashes := a.selectedHashes()
 	if len(hashes) == 0 {
@@ -726,6 +736,9 @@ func (a *application) confirmDelete() {
 				for _, hash := range hashes {
 					delete(a.selection, hash)
 				}
+				if len(a.selection) == 0 {
+					a.selectionAnchor = ""
+				}
 				a.refreshNow()
 			})
 		}()
@@ -733,12 +746,153 @@ func (a *application) confirmDelete() {
 	confirm.Show()
 }
 
-func (a *application) selectedHashes() []string {
-	hashes := make([]string, 0, len(a.selection))
-	for hash, selected := range a.selection {
-		if selected {
-			hashes = append(hashes, hash)
+func (a *application) applyTorrentSelection(hash string, modifier fyne.KeyModifier) {
+	if strings.TrimSpace(hash) == "" {
+		return
+	}
+
+	switch {
+	case modifier&fyne.KeyModifierShift != 0:
+		a.selectTorrentRange(hash)
+	case modifier&(fyne.KeyModifierControl|fyne.KeyModifierSuper) != 0:
+		a.toggleTorrentSelection(hash)
+	default:
+		a.selectOnlyTorrent(hash)
+	}
+	a.refreshTorrentSelection()
+}
+
+func (a *application) prepareTorrentContextSelection(hash string) {
+	if strings.TrimSpace(hash) == "" {
+		return
+	}
+	if a.selection[hash] {
+		return
+	}
+	a.selectOnlyTorrent(hash)
+	a.refreshTorrentSelection()
+}
+
+func (a *application) selectOnlyTorrent(hash string) {
+	a.selection = map[string]bool{hash: true}
+	a.selectionAnchor = hash
+}
+
+func (a *application) toggleTorrentSelection(hash string) {
+	if a.selection == nil {
+		a.selection = map[string]bool{}
+	}
+	if a.selection[hash] {
+		delete(a.selection, hash)
+		if len(a.selection) == 0 {
+			a.selectionAnchor = ""
+			return
 		}
+		if a.selectionAnchor == hash {
+			a.selectionAnchor = ""
+			for _, torrent := range a.visibleTorrents {
+				if a.selection[torrent.Hash] {
+					a.selectionAnchor = torrent.Hash
+					break
+				}
+			}
+		}
+		return
+	}
+	a.selection[hash] = true
+	a.selectionAnchor = hash
+}
+
+func (a *application) selectTorrentRange(hash string) {
+	anchorIndex := a.visibleTorrentIndex(a.selectionAnchor)
+	targetIndex := a.visibleTorrentIndex(hash)
+	if anchorIndex < 0 || targetIndex < 0 {
+		a.selectOnlyTorrent(hash)
+		return
+	}
+	if a.selection == nil {
+		a.selection = map[string]bool{}
+	}
+	clear(a.selection)
+	if anchorIndex > targetIndex {
+		anchorIndex, targetIndex = targetIndex, anchorIndex
+	}
+	for index := anchorIndex; index <= targetIndex; index++ {
+		a.selection[a.visibleTorrents[index].Hash] = true
+	}
+}
+
+func (a *application) visibleTorrentIndex(hash string) int {
+	if strings.TrimSpace(hash) == "" {
+		return -1
+	}
+	for index, torrent := range a.visibleTorrents {
+		if torrent.Hash == hash {
+			return index
+		}
+	}
+	return -1
+}
+
+func (a *application) pruneSelectionToVisible() {
+	if len(a.selection) == 0 {
+		a.selectionAnchor = ""
+		return
+	}
+	visible := make(map[string]struct{}, len(a.visibleTorrents))
+	for _, torrent := range a.visibleTorrents {
+		visible[torrent.Hash] = struct{}{}
+	}
+	for hash := range a.selection {
+		if _, ok := visible[hash]; ok {
+			continue
+		}
+		delete(a.selection, hash)
+	}
+	if len(a.selection) == 0 {
+		a.selectionAnchor = ""
+		return
+	}
+	if _, ok := visible[a.selectionAnchor]; !ok {
+		a.selectionAnchor = ""
+		for _, torrent := range a.visibleTorrents {
+			if a.selection[torrent.Hash] {
+				a.selectionAnchor = torrent.Hash
+				break
+			}
+		}
+	}
+}
+
+func (a *application) refreshTorrentSelection() {
+	if a.list != nil {
+		a.list.Refresh()
+	}
+}
+
+func (a *application) selectedHashes() []string {
+	if len(a.selection) == 0 {
+		return nil
+	}
+
+	hashes := make([]string, 0, len(a.selection))
+	seen := make(map[string]struct{}, len(a.selection))
+	for _, torrent := range a.visibleTorrents {
+		if !a.selection[torrent.Hash] {
+			continue
+		}
+		hashes = append(hashes, torrent.Hash)
+		seen[torrent.Hash] = struct{}{}
+	}
+	for _, torrent := range a.allTorrents {
+		if !a.selection[torrent.Hash] {
+			continue
+		}
+		if _, ok := seen[torrent.Hash]; ok {
+			continue
+		}
+		hashes = append(hashes, torrent.Hash)
+		seen[torrent.Hash] = struct{}{}
 	}
 	return hashes
 }

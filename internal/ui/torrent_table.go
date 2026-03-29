@@ -33,7 +33,6 @@ type torrentColumnSpec struct {
 }
 
 var torrentColumnSpecs = []torrentColumnSpec{
-	{key: "select", label: "", defaultWidth: 36, minWidth: 36, resizable: false},
 	{key: "name", label: "Name", defaultWidth: 420, minWidth: 220, resizable: true},
 	{key: "size", label: "Size", defaultWidth: 110, minWidth: 90, resizable: true},
 	{key: "progress", label: "Progress", defaultWidth: 180, minWidth: 140, resizable: true},
@@ -55,21 +54,23 @@ type torrentHeaderRow struct {
 
 type torrentListRow struct {
 	widget.BaseWidget
-	app       *application
-	root      *fyne.Container
-	checkWrap *fyne.Container
-	check     *widget.Check
-	name      *hoverLabel
-	size      *hoverLabel
-	progress  *widget.ProgressBar
-	statusBG  *canvas.Rectangle
-	statusTx  *widget.Label
-	statusCt  *fyne.Container
-	down      *hoverLabel
-	up        *hoverLabel
-	eta       *hoverLabel
-	added     *hoverLabel
-	separator *widget.Separator
+	app        *application
+	background *canvas.Rectangle
+	root       *fyne.Container
+	content    *fyne.Container
+	name       *hoverLabel
+	size       *hoverLabel
+	progress   *widget.ProgressBar
+	statusBG   *canvas.Rectangle
+	statusTx   *widget.Label
+	statusCt   *fyne.Container
+	down       *hoverLabel
+	up         *hoverLabel
+	eta        *hoverLabel
+	added      *hoverLabel
+	separator  *widget.Separator
+	hash       string
+	modifier   fyne.KeyModifier
 }
 
 type columnResizeHandle struct {
@@ -303,19 +304,20 @@ func (r *torrentHeaderRow) CreateRenderer() fyne.WidgetRenderer {
 
 func newTorrentListRow(app *application) *torrentListRow {
 	row := &torrentListRow{
-		app:       app,
-		check:     widget.NewCheck("", nil),
-		name:      newHoverLabel(app.window.Canvas()),
-		size:      newHoverLabel(app.window.Canvas()),
-		progress:  widget.NewProgressBar(),
-		statusBG:  canvas.NewRectangle(color.Transparent),
-		statusTx:  widget.NewLabel(""),
-		down:      newHoverLabel(app.window.Canvas()),
-		up:        newHoverLabel(app.window.Canvas()),
-		eta:       newHoverLabel(app.window.Canvas()),
-		added:     newHoverLabel(app.window.Canvas()),
-		separator: widget.NewSeparator(),
+		app:        app,
+		background: canvas.NewRectangle(theme.Color(theme.ColorNameSelection)),
+		name:       newHoverLabel(app.window.Canvas()),
+		size:       newHoverLabel(app.window.Canvas()),
+		progress:   widget.NewProgressBar(),
+		statusBG:   canvas.NewRectangle(color.Transparent),
+		statusTx:   widget.NewLabel(""),
+		down:       newHoverLabel(app.window.Canvas()),
+		up:         newHoverLabel(app.window.Canvas()),
+		eta:        newHoverLabel(app.window.Canvas()),
+		added:      newHoverLabel(app.window.Canvas()),
+		separator:  widget.NewSeparator(),
 	}
+	row.background.Hide()
 	row.name.label.Truncation = fyne.TextTruncateEllipsis
 	row.size.label.Truncation = fyne.TextTruncateEllipsis
 	row.down.label.Truncation = fyne.TextTruncateEllipsis
@@ -324,9 +326,7 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row.added.label.Truncation = fyne.TextTruncateEllipsis
 	row.statusTx.Alignment = fyne.TextAlignCenter
 	row.statusCt = container.NewMax(row.statusBG, container.NewCenter(row.statusTx))
-	row.checkWrap = container.NewCenter(row.check)
-	row.root = container.New(&torrentRowLayout{app: app},
-		row.checkWrap,
+	row.content = container.New(&torrentRowLayout{app: app},
 		row.name,
 		row.size,
 		row.progress,
@@ -337,20 +337,20 @@ func newTorrentListRow(app *application) *torrentListRow {
 		row.added,
 		row.separator,
 	)
+	row.root = container.NewMax(row.background, row.content)
 	row.ExtendBaseWidget(row)
 	return row
 }
 
 func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
-	r.check.OnChanged = nil
-	r.check.SetChecked(r.app.selection[torrent.Hash])
-	r.check.OnChanged = func(selected bool) {
-		if selected {
-			r.app.selection[torrent.Hash] = true
-			return
-		}
-		delete(r.app.selection, torrent.Hash)
+	r.hash = torrent.Hash
+	r.background.FillColor = theme.Color(theme.ColorNameSelection)
+	if r.app.selection[torrent.Hash] {
+		r.background.Show()
+	} else {
+		r.background.Hide()
 	}
+	r.background.Refresh()
 
 	r.name.SetAlignment(fyne.TextAlignLeading)
 	r.name.SetText(torrent.Name, torrent.Name)
@@ -394,6 +394,33 @@ func (r *torrentListRow) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(r.root)
 }
 
+func (r *torrentListRow) Tapped(*fyne.PointEvent) {
+	r.app.applyTorrentSelection(r.hash, r.modifier)
+}
+
+func (r *torrentListRow) TappedSecondary(event *fyne.PointEvent) {
+	r.app.prepareTorrentContextSelection(r.hash)
+	menu := fyne.NewMenu("",
+		fyne.NewMenuItem("Start", func() {
+			r.app.startSelectedTorrents()
+		}),
+		fyne.NewMenuItem("Stop", func() {
+			r.app.stopSelectedTorrents()
+		}),
+		fyne.NewMenuItem("Remove", func() {
+			r.app.confirmDelete()
+		}),
+	)
+	widget.ShowPopUpMenuAtPosition(menu, r.app.window.Canvas(), event.AbsolutePosition)
+}
+
+func (r *torrentListRow) MouseDown(event *desktop.MouseEvent) {
+	r.modifier = event.Modifier
+}
+
+func (r *torrentListRow) MouseUp(*desktop.MouseEvent) {
+}
+
 func (l *torrentHeaderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	x := float32(0)
 	for index, spec := range torrentColumnSpecs {
@@ -428,12 +455,6 @@ func (l *torrentRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	for index, spec := range torrentColumnSpecs {
 		width := l.app.columnWidth(spec)
 		obj := objects[index]
-		if spec.key == "select" {
-			obj.Move(fyne.NewPos(x, 0))
-			obj.Resize(fyne.NewSize(width, maxFloat32(size.Height-1, 0)))
-			x += width
-			continue
-		}
 
 		inset := rowCellPadding
 		if spec.key == "progress" || spec.key == "status" {
