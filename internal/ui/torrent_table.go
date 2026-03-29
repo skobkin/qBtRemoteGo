@@ -325,7 +325,7 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row.eta.label.Truncation = fyne.TextTruncateEllipsis
 	row.added.label.Truncation = fyne.TextTruncateEllipsis
 	row.statusTx.Alignment = fyne.TextAlignCenter
-	row.statusCt = container.NewMax(row.statusBG, container.NewCenter(row.statusTx))
+	row.statusCt = container.NewStack(row.statusBG, container.NewCenter(row.statusTx))
 	row.content = container.New(&torrentRowLayout{app: app},
 		row.name,
 		row.size,
@@ -337,7 +337,7 @@ func newTorrentListRow(app *application) *torrentListRow {
 		row.added,
 		row.separator,
 	)
-	row.root = container.NewMax(row.background, row.content)
+	row.root = container.NewStack(row.background, row.content)
 	row.ExtendBaseWidget(row)
 	return row
 }
@@ -446,7 +446,7 @@ func (l *torrentHeaderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size
 	separator.Resize(fyne.NewSize(x, 1))
 }
 
-func (l *torrentHeaderLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+func (l *torrentHeaderLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
 	return fyne.NewSize(l.app.totalColumnWidth(), torrentHeaderHeight)
 }
 
@@ -470,7 +470,7 @@ func (l *torrentRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	separator.Resize(fyne.NewSize(x, 1))
 }
 
-func (l *torrentRowLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+func (l *torrentRowLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
 	return fyne.NewSize(l.app.totalColumnWidth(), torrentRowHeight)
 }
 

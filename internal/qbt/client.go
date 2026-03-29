@@ -81,7 +81,7 @@ func (c *Client) TestConnection(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("request app/version: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeAndLog(c.logger, resp.Body, "close app/version response body")
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
@@ -199,30 +199,62 @@ func (c *Client) AddTorrent(ctx context.Context, req AddRequest) error {
 		return err
 	}
 
+	body, contentType, err := c.buildAddTorrentBody(req)
+	if err != nil {
+		return err
+	}
+
+	httpReq, err := c.newRequest(ctx, http.MethodPost, "torrents/add", body)
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", contentType)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("request torrents/add: %w", err)
+	}
+	defer closeAndLog(c.logger, resp.Body, "close torrents/add response body")
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("torrents/add returned %s: %s", resp.Status, strings.TrimSpace(string(bodyBytes)))
+	}
+
+	return nil
+}
+
+func (c *Client) buildAddTorrentBody(req AddRequest) (_ *bytes.Buffer, contentType string, err error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
+	defer func() {
+		closeErr := writer.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("close multipart writer: %w", closeErr)
+		}
+	}()
 
 	switch req.SourceType {
 	case SourceMagnet:
 		if err := writer.WriteField("urls", strings.Join(req.MagnetLinks, "\n")); err != nil {
-			return fmt.Errorf("write urls field: %w", err)
+			return nil, "", fmt.Errorf("write urls field: %w", err)
 		}
 	case SourceTorrentFile:
 		file, err := os.Open(filepath.Clean(req.TorrentFilePath))
 		if err != nil {
-			return fmt.Errorf("open torrent file: %w", err)
+			return nil, "", fmt.Errorf("open torrent file: %w", err)
 		}
-		defer file.Close()
+		defer closeAndLog(c.logger, file, "close torrent file")
 
 		part, err := writer.CreateFormFile("torrents", filepath.Base(req.TorrentFilePath))
 		if err != nil {
-			return fmt.Errorf("create form file: %w", err)
+			return nil, "", fmt.Errorf("create form file: %w", err)
 		}
 		if _, err := io.Copy(part, file); err != nil {
-			return fmt.Errorf("copy torrent file: %w", err)
+			return nil, "", fmt.Errorf("copy torrent file: %w", err)
 		}
 	default:
-		return fmt.Errorf("unsupported source type %q", req.SourceType)
+		return nil, "", fmt.Errorf("unsupported source type %q", req.SourceType)
 	}
 
 	fields := map[string]string{
@@ -245,42 +277,21 @@ func (c *Client) AddTorrent(ctx context.Context, req AddRequest) error {
 			continue
 		}
 		if err := writer.WriteField(key, value); err != nil {
-			return fmt.Errorf("write field %s: %w", key, err)
+			return nil, "", fmt.Errorf("write field %s: %w", key, err)
 		}
 	}
 	if req.DownloadLimitKiB != nil {
 		if err := writer.WriteField("dlLimit", strconv.Itoa(*req.DownloadLimitKiB*1024)); err != nil {
-			return fmt.Errorf("write dlLimit: %w", err)
+			return nil, "", fmt.Errorf("write dlLimit: %w", err)
 		}
 	}
 	if req.UploadLimitKiB != nil {
 		if err := writer.WriteField("upLimit", strconv.Itoa(*req.UploadLimitKiB*1024)); err != nil {
-			return fmt.Errorf("write upLimit: %w", err)
+			return nil, "", fmt.Errorf("write upLimit: %w", err)
 		}
 	}
 
-	if err := writer.Close(); err != nil {
-		return fmt.Errorf("close multipart writer: %w", err)
-	}
-
-	httpReq, err := c.newRequest(ctx, http.MethodPost, "torrents/add", body)
-	if err != nil {
-		return err
-	}
-	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("request torrents/add: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("torrents/add returned %s: %s", resp.Status, strings.TrimSpace(string(bodyBytes)))
-	}
-
-	return nil
+	return body, writer.FormDataContentType(), nil
 }
 
 func (c *Client) Start(ctx context.Context, hashes []string) error {
@@ -385,7 +396,7 @@ func (c *Client) postHashes(ctx context.Context, endpoint string, hashes []strin
 	if err != nil {
 		return fmt.Errorf("request %s: %w", endpoint, err)
 	}
-	defer resp.Body.Close()
+	defer closeAndLog(c.logger, resp.Body, "close "+endpoint+" response body")
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -417,7 +428,7 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("request auth/login: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeAndLog(c.logger, resp.Body, "close auth/login response body")
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	text := strings.TrimSpace(string(body))
@@ -454,7 +465,7 @@ func (c *Client) doJSON(req *http.Request, target any) error {
 	if err != nil {
 		return fmt.Errorf("request %s %s: %w", req.Method, req.URL.String(), err)
 	}
-	defer resp.Body.Close()
+	defer closeAndLog(c.logger, resp.Body, "close "+req.URL.Path+" response body")
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -466,4 +477,10 @@ func (c *Client) doJSON(req *http.Request, target any) error {
 	}
 
 	return nil
+}
+
+func closeAndLog(logger *slog.Logger, closer io.Closer, action string) {
+	if err := closer.Close(); err != nil && logger != nil {
+		logger.Warn(action, "error", err)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	_ "embed"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
 )
 
 var (
@@ -35,10 +36,19 @@ var (
 )
 
 func AppIcon() fyne.Resource {
-	return appDark
+	return themedAppIcon()
 }
 
 func TrayIcon() fyne.Resource {
+	return themedAppIcon()
+}
+
+func themedAppIcon() fyne.Resource {
+	app := fyne.CurrentApp()
+	if app != nil && app.Settings().ThemeVariant() == theme.VariantLight {
+		return appLight
+	}
+
 	return appDark
 }
 

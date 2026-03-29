@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -36,7 +35,6 @@ type application struct {
 
 	controller *appcore.Controller
 
-	mu               sync.Mutex
 	allTorrents      []qbt.Torrent
 	visibleTorrents  []qbt.Torrent
 	selection        map[string]bool
