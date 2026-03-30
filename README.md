@@ -4,13 +4,22 @@ qBtRemoteGo is a native desktop client for remotely controlling qBittorrent thro
 
 It focuses on a fast add-and-monitor workflow for magnets and `.torrent` files, with a compact GUI and desktop integration.
 
+## Screenshots
+
+![main window](docs/screenshot_main_window.webp)
+
+<details>
+<summary>Add torrent</summary>
+
+![adding torrents](docs/screenshot_add_window.webp)
+
+</details>
+
+## Installation
+
 [![Download latest release](docs/button_download.svg)](https://git.skobk.in/skobkin/qBtRemoteGo/releases)
 
 Check the [Releases](https://git.skobk.in/skobkin/qBtRemoteGo/releases) section for the latest downloads.
 
 > [!NOTE]
 > Releases are hosted on my private [Forgejo](https://en.wikipedia.org/wiki/Forgejo) instance.
-
-## Screenshots
-
-[TBW]
