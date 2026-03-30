@@ -75,7 +75,7 @@ steps:
       - go build -trimpath -o dist/qbtremotego ./cmd/qbtremotego
 
   release:
-    image: goreleaser/goreleaser-cross:v1.26-v2.12.7
+    image: goreleaser/goreleaser-cross:v1.26
     environment:
       GITEA_TOKEN:
         from_secret: GITEA_TOKEN
