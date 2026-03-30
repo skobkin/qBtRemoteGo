@@ -10,26 +10,29 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/skobkin/qbtremotego/internal/config"
 )
 
 const desktopFileName = "qbtremotego.desktop"
 
-func syncMagnetHandler(exePath string, enabled bool, logger *slog.Logger) error {
-	return syncDesktopEntry(exePath, enabled, logger)
+func syncHandlers(exePath string, cfg config.IntegrationConfig, logger *slog.Logger) []error {
+	if err := syncDesktopEntry(exePath, cfg, logger); err != nil {
+		return []error{err}
+	}
+
+	return nil
 }
 
-func syncTorrentHandler(exePath string, enabled bool, logger *slog.Logger) error {
-	return syncDesktopEntry(exePath, enabled, logger)
-}
-
-func syncDesktopEntry(exePath string, enabled bool, logger *slog.Logger) error {
+func syncDesktopEntry(exePath string, cfg config.IntegrationConfig, logger *slog.Logger) error {
 	applicationsDir, err := userApplicationsDir()
 	if err != nil {
 		return err
 	}
 	desktopPath := filepath.Join(applicationsDir, desktopFileName)
 
-	if !enabled {
+	mimeTypes := enabledMimeTypes(cfg)
+	if len(mimeTypes) == 0 {
 		_ = os.Remove(desktopPath)
 
 		return nil
@@ -46,7 +49,7 @@ func syncDesktopEntry(exePath string, enabled bool, logger *slog.Logger) error {
 		"Exec=" + shellQuote(exePath) + " %U",
 		"Terminal=false",
 		"NoDisplay=true",
-		"MimeType=x-scheme-handler/magnet;application/x-bittorrent;",
+		"MimeType=" + strings.Join(mimeTypes, ";") + ";",
 		"",
 	}, "\n")
 
@@ -58,14 +61,25 @@ func syncDesktopEntry(exePath string, enabled bool, logger *slog.Logger) error {
 	if err := tryCommand(logger, "update-desktop-database", applicationsDir); err != nil {
 		logger.Debug("update-desktop-database failed", "error", err)
 	}
-	if err := tryCommand(logger, "xdg-mime", "default", desktopFileName, "x-scheme-handler/magnet"); err != nil {
-		logger.Debug("xdg-mime default magnet failed", "error", err)
-	}
-	if err := tryCommand(logger, "xdg-mime", "default", desktopFileName, "application/x-bittorrent"); err != nil {
-		logger.Debug("xdg-mime default bittorrent failed", "error", err)
+	for _, mimeType := range mimeTypes {
+		if err := tryCommand(logger, "xdg-mime", "default", desktopFileName, mimeType); err != nil {
+			logger.Debug("xdg-mime default failed", "mime_type", mimeType, "error", err)
+		}
 	}
 
 	return nil
+}
+
+func enabledMimeTypes(cfg config.IntegrationConfig) []string {
+	mimeTypes := make([]string, 0, 2)
+	if cfg.RegisterMagnetHandler {
+		mimeTypes = append(mimeTypes, "x-scheme-handler/magnet")
+	}
+	if cfg.RegisterTorrentHandler {
+		mimeTypes = append(mimeTypes, "application/x-bittorrent")
+	}
+
+	return mimeTypes
 }
 
 func syncAutostart(exePath string, enabled bool, _ *slog.Logger) error {

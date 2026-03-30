@@ -23,13 +23,7 @@ func (m *Manager) Sync(cfg config.IntegrationConfig) []error {
 		return []error{fmt.Errorf("resolve executable path: %w", err)}
 	}
 
-	var errs []error
-	if err := syncMagnetHandler(exePath, cfg.RegisterMagnetHandler, m.logger); err != nil {
-		errs = append(errs, fmt.Errorf("magnet handler: %w", err))
-	}
-	if err := syncTorrentHandler(exePath, cfg.RegisterTorrentHandler, m.logger); err != nil {
-		errs = append(errs, fmt.Errorf(".torrent handler: %w", err))
-	}
+	errs := syncHandlers(exePath, cfg, m.logger)
 	if err := syncAutostart(exePath, cfg.StartWithSystem, m.logger); err != nil {
 		errs = append(errs, fmt.Errorf("autostart: %w", err))
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -41,12 +40,6 @@ type AddDialogData struct {
 	FirstLastPieces    bool
 	DownloadLimitText  string
 	UploadLimitText    string
-}
-
-type AddDialogPrefill struct {
-	SourceType      qbt.SourceType
-	TorrentFilePath string
-	MagnetLinks     []string
 }
 
 func NewController(configPath string, logger *slog.Logger) (*Controller, error) {
@@ -89,6 +82,10 @@ func (c *Controller) SaveLocalUI(cfg config.AppConfig) error {
 	c.config = cfg
 
 	return nil
+}
+
+func (c *Controller) SyncIntegrations() []error {
+	return c.platform.Sync(c.config.Integration)
 }
 
 func (c *Controller) TestConnection(ctx context.Context, cfg config.ConnectionConfig) error {
@@ -213,31 +210,6 @@ func (c *Controller) SuggestDirectories(ctx context.Context, path string) ([]str
 	}
 
 	return client.DirectorySuggestions(ctx, path)
-}
-
-func (c *Controller) ParseInvocationArgs(args []string) *AddDialogPrefill {
-	for _, arg := range args {
-		value := strings.TrimSpace(arg)
-		if value == "" {
-			continue
-		}
-		if strings.HasPrefix(strings.ToLower(value), "magnet:") {
-			return &AddDialogPrefill{
-				SourceType:  qbt.SourceMagnet,
-				MagnetLinks: []string{value},
-			}
-		}
-		if strings.HasSuffix(strings.ToLower(value), ".torrent") {
-			if _, err := os.Stat(value); err == nil {
-				return &AddDialogPrefill{
-					SourceType:      qbt.SourceTorrentFile,
-					TorrentFilePath: value,
-				}
-			}
-		}
-	}
-
-	return nil
 }
 
 func FilterAndSortTorrents(torrents []qbt.Torrent, query string, filterBy string, sortColumn string, descending bool) []qbt.Torrent {

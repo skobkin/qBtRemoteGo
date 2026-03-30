@@ -20,6 +20,7 @@ func AcquireInstanceLock(appID string) (InstanceLock, error) {
 	return acquireInstanceLock(normalizeInstanceLockComponent(appID, "app"))
 }
 
+//nolint:unparam // Windows uses a different fallback for SID normalization.
 func normalizeInstanceLockComponent(raw, fallback string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

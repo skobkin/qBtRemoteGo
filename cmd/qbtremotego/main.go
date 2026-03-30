@@ -26,11 +26,22 @@ func main() {
 }
 
 func run() error {
+	initialInvocation := appcore.ParseInvocationArgs(os.Args[1:])
+
 	slog.Info("acquiring single-instance lock", "app_id", appcore.ID)
 	instanceLock, err := platform.AcquireInstanceLock(appcore.ID)
 	if err != nil {
 		if errors.Is(err, platform.ErrInstanceAlreadyRunning) {
 			slog.Warn("single-instance lock contention: another app instance is already running", "app_id", appcore.ID)
+			if !initialInvocation.Empty() {
+				if err := platform.ForwardActivation(appcore.ID, os.Args[1:]); err != nil {
+					showActivationFailureDialog(err)
+
+					return fmt.Errorf("forward activation: %w", err)
+				}
+
+				return nil
+			}
 			showAlreadyRunningDialog(alreadyRunningMessage)
 
 			return fmt.Errorf("acquire instance lock: %w", err)
@@ -49,11 +60,57 @@ func run() error {
 		}()
 	}
 
-	if err := ui.Run(); err != nil {
+	activations := make(chan appcore.InvocationBatch, 8)
+	activationServer, err := platform.StartActivationServer(appcore.ID, slog.Default(), func(args []string) {
+		batch := appcore.ParseInvocationArgs(args)
+		if batch.Empty() {
+			return
+		}
+		activations <- batch
+	})
+	if err != nil {
+		return fmt.Errorf("start activation server: %w", err)
+	}
+	defer func() {
+		if err := activationServer.Close(); err != nil {
+			slog.Warn("close activation server", "error", err)
+		}
+	}()
+
+	if err := ui.Run(initialInvocation, activations); err != nil {
 		return fmt.Errorf("run ui: %w", err)
 	}
 
 	return nil
+}
+
+func showActivationFailureDialog(err error) {
+	message := fmt.Sprintf("qBtRemoteGo is already running, but the handler request could not be delivered.\n\n%v", err)
+	_, _ = fmt.Fprintln(os.Stderr, message)
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.Warn("show activation failure dialog", "error", recovered)
+		}
+	}()
+
+	fyApp := fyneapp.New()
+	window := fyApp.NewWindow(appcore.Name)
+	window.Resize(fyne.NewSize(520, 200))
+
+	var quitOnce sync.Once
+	quit := func() {
+		quitOnce.Do(func() {
+			fyApp.Quit()
+		})
+	}
+
+	info := dialog.NewError(err, window)
+	info.SetOnClosed(quit)
+	window.SetCloseIntercept(quit)
+	window.Show()
+	info.Show()
+	fyApp.Run()
 }
 
 func showAlreadyRunningDialog(message string) {

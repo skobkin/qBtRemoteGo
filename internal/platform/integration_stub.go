@@ -2,10 +2,12 @@
 
 package platform
 
-import "log/slog"
+import (
+	"log/slog"
 
-func syncMagnetHandler(_ string, _ bool, _ *slog.Logger) error { return nil }
+	"github.com/skobkin/qbtremotego/internal/config"
+)
 
-func syncTorrentHandler(_ string, _ bool, _ *slog.Logger) error { return nil }
+func syncHandlers(_ string, _ config.IntegrationConfig, _ *slog.Logger) []error { return nil }
 
 func syncAutostart(_ string, _ bool, _ *slog.Logger) error { return nil }

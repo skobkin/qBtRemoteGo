@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +24,7 @@ import (
 	appcore "github.com/skobkin/qbtremotego/internal/app"
 	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/logging"
+	"github.com/skobkin/qbtremotego/internal/platform"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 	"github.com/skobkin/qbtremotego/internal/resources"
 )
@@ -74,7 +74,7 @@ type trayState struct {
 	quitItem   *fyne.MenuItem
 }
 
-func Run() error {
+func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.InvocationBatch) error {
 	configPath, err := config.DefaultConfigPath()
 	if err != nil {
 		return err
@@ -122,18 +122,36 @@ func Run() error {
 	ui.configureTray()
 	ui.bindCloseBehavior()
 
-	if prefill := controller.ParseInvocationArgs(os.Args[1:]); prefill != nil {
-		fyne.Do(func() {
-			ui.openAddWindow(prefill)
-		})
-	}
+	startupSyncWarnings := platform.JoinErrors(controller.SyncIntegrations())
 
-	startHidden := controller.Config().UI.StartMinimizedToTray && ui.trayAvailable
+	startHidden := controller.Config().UI.StartMinimizedToTray && ui.trayAvailable && initialInvocation.Empty() && startupSyncWarnings == ""
 	if startHidden {
 		ui.windowVisible = false
 	} else {
 		window.Show()
 	}
+
+	if startupSyncWarnings != "" {
+		dialog.ShowError(fmt.Errorf("integration warnings:\n%s", startupSyncWarnings), window)
+	}
+
+	if !initialInvocation.Empty() {
+		fyne.Do(func() {
+			ui.handleInvocation(initialInvocation)
+		})
+	}
+
+	go func() {
+		for batch := range activations {
+			if batch.Empty() {
+				continue
+			}
+			batch := batch
+			fyne.Do(func() {
+				ui.handleInvocation(batch)
+			})
+		}
+	}()
 
 	go ui.pollLoop()
 	fyApp.Run()
@@ -409,6 +427,28 @@ func (a *application) openSettingsWindow() {
 
 	win.SetContent(content)
 	win.Show()
+}
+
+func (a *application) handleInvocation(batch appcore.InvocationBatch) {
+	a.windowVisible = true
+	a.window.Show()
+	a.window.RequestFocus()
+
+	if len(batch.MagnetLinks) > 0 {
+		a.openAddWindow(&appcore.AddDialogPrefill{
+			SourceType:  qbt.SourceMagnet,
+			MagnetLinks: batch.MagnetLinks,
+		})
+	}
+	if len(batch.TorrentFiles) > 0 {
+		if len(batch.TorrentFiles) > 1 {
+			a.logger.Warn("ignoring additional torrent files in invocation", "count", len(batch.TorrentFiles)-1)
+		}
+		a.openAddWindow(&appcore.AddDialogPrefill{
+			SourceType:      qbt.SourceTorrentFile,
+			TorrentFilePath: batch.TorrentFiles[0],
+		})
+	}
 }
 
 func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {

@@ -6,10 +6,23 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/skobkin/qbtremotego/internal/config"
 	"golang.org/x/sys/windows/registry"
 )
 
-func syncMagnetHandler(exePath string, enabled bool, _ *slog.Logger) error {
+func syncHandlers(exePath string, cfg config.IntegrationConfig, _ *slog.Logger) []error {
+	var errs []error
+	if err := syncMagnetHandler(exePath, cfg.RegisterMagnetHandler); err != nil {
+		errs = append(errs, fmt.Errorf("magnet handler: %w", err))
+	}
+	if err := syncTorrentHandler(exePath, cfg.RegisterTorrentHandler); err != nil {
+		errs = append(errs, fmt.Errorf(".torrent handler: %w", err))
+	}
+
+	return errs
+}
+
+func syncMagnetHandler(exePath string, enabled bool) error {
 	if !enabled {
 		return deleteKey(registry.CURRENT_USER, `Software\Classes\magnet`)
 	}
@@ -23,7 +36,7 @@ func syncMagnetHandler(exePath string, enabled bool, _ *slog.Logger) error {
 	return writeString(registry.CURRENT_USER, `Software\Classes\magnet\shell\open\command`, "", fmt.Sprintf(`"%s" "%%1"`, exePath))
 }
 
-func syncTorrentHandler(exePath string, enabled bool, _ *slog.Logger) error {
+func syncTorrentHandler(exePath string, enabled bool) error {
 	if !enabled {
 		_ = deleteKey(registry.CURRENT_USER, `Software\Classes\.torrent`)
 		return deleteKey(registry.CURRENT_USER, `Software\Classes\qbtremotego.torrent`)
