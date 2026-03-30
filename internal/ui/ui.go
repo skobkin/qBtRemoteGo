@@ -591,11 +591,11 @@ func (a *application) refreshVisibleTorrents() {
 
 func (a *application) statusText() string {
 	parts := []string{
-		fmt.Sprintf("T:%d", len(a.allTorrents)),
-		fmt.Sprintf("V:%d", len(a.visibleTorrents)),
-		fmt.Sprintf("D %s", appcore.HumanSpeed(a.transfer.DownloadSpeed)),
-		fmt.Sprintf("U %s", appcore.HumanSpeed(a.transfer.UploadSpeed)),
-		fmt.Sprintf("Lim D:%s U:%s", appcore.HumanSpeedLimit(a.transfer.DownloadLimit), appcore.HumanSpeedLimit(a.transfer.UploadLimit)),
+		fmt.Sprintf("📦 %d", len(a.allTorrents)),
+		fmt.Sprintf("🔎 %d", len(a.visibleTorrents)),
+		fmt.Sprintf("⬇️ %s", appcore.HumanSpeed(a.transfer.DownloadSpeed)),
+		fmt.Sprintf("⬆️ %s", appcore.HumanSpeed(a.transfer.UploadSpeed)),
+		fmt.Sprintf("Lim ⬇️:%s ⬆️:%s", appcore.HumanSpeedLimit(a.transfer.DownloadLimit), appcore.HumanSpeedLimit(a.transfer.UploadLimit)),
 	}
 	if a.serverStateKnown {
 		parts = append(parts, "Free "+appcore.HumanBytes(a.serverState.FreeSpaceOnDisk))
