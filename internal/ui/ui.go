@@ -140,19 +140,19 @@ func Run() error {
 }
 
 func (a *application) buildMainWindow() {
-	addButton := widget.NewButtonWithIcon("Add", theme.ContentAddIcon(), func() {
+	addButton := newButtonWithTooltip(a.window.Canvas(), theme.ContentAddIcon(), "Add torrent", func() {
 		a.openAddWindow(nil)
 	})
-	removeButton := widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), func() {
+	removeButton := newButtonWithTooltip(a.window.Canvas(), theme.DeleteIcon(), "Remove selected torrents", func() {
 		a.confirmDelete()
 	})
-	startButton := widget.NewButtonWithIcon("Start", theme.MediaPlayIcon(), func() {
+	startButton := newButtonWithTooltip(a.window.Canvas(), theme.MediaPlayIcon(), "Start selected torrents", func() {
 		a.startSelectedTorrents()
 	})
-	stopButton := widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), func() {
+	stopButton := newButtonWithTooltip(a.window.Canvas(), theme.MediaStopIcon(), "Stop selected torrents", func() {
 		a.stopSelectedTorrents()
 	})
-	settingsButton := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), func() {
+	settingsButton := newButtonWithTooltip(a.window.Canvas(), theme.SettingsIcon(), "Settings", func() {
 		a.openSettingsWindow()
 	})
 
