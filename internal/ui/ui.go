@@ -99,10 +99,10 @@ func Run() error {
 		return err
 	}
 
-	fyApp := app.NewWithID("github.com.skobkin.qbtremotego")
+	fyApp := app.NewWithID(appcore.ID)
 	fyApp.SetIcon(resources.AppIcon())
 
-	window := fyApp.NewWindow("qBtRemoteGo")
+	window := fyApp.NewWindow(appcore.Name)
 	window.Resize(fyne.NewSize(1120, 680))
 	window.SetIcon(resources.AppIcon())
 
@@ -248,7 +248,7 @@ func (a *application) configureTray() {
 	a.trayState.speedItem.Disabled = true
 	desk.SetSystemTrayIcon(resources.TrayIcon())
 	desk.SetSystemTrayWindow(a.window)
-	desk.SetSystemTrayMenu(fyne.NewMenu("qBtRemoteGo", a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
+	desk.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
 	systray.SetTooltip("Down 0 B/s | Up 0 B/s")
 }
 
@@ -918,7 +918,7 @@ func (a *application) updateTray() {
 	}
 	label := fmt.Sprintf("Down %s | Up %s", appcore.HumanSpeed(a.transfer.DownloadSpeed), appcore.HumanSpeed(a.transfer.UploadSpeed))
 	a.trayState.speedItem.Label = label
-	a.trayState.desktopApp.SetSystemTrayMenu(fyne.NewMenu("qBtRemoteGo", a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
+	a.trayState.desktopApp.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
 	systray.SetTooltip(label)
 }
 
