@@ -24,18 +24,17 @@ steps:
         fi
 
   lint:
-    image: golang:1.26-alpine
+    image: golangci/golangci-lint:latest-alpine
     commands:
-      - export PATH=/usr/local/go/bin:/go/bin:$PATH
       - export CACHE_ROOT="$PWD/.ci-cache"
       - export GOMODCACHE="$CACHE_ROOT/gomod"
       - export GOCACHE="$CACHE_ROOT/gobuild"
       - export GOPATH="$CACHE_ROOT/gopath"
+      - export GOLANGCI_LINT_CACHE="$CACHE_ROOT/golangci-lint"
       - export XDG_CACHE_HOME="$CACHE_ROOT/xdg"
-      - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin" "$XDG_CACHE_HOME"
+      - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin" "$GOLANGCI_LINT_CACHE" "$XDG_CACHE_HOME"
       - apk add --no-cache git build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
-      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.1
-      - $GOPATH/bin/golangci-lint run
+      - golangci-lint run ./...
 
   vet:
     image: golang:1.26-alpine
