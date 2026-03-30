@@ -66,7 +66,6 @@ type application struct {
 
 type trayState struct {
 	desktopApp desktop.App
-	window     fyne.Window
 	showItem   *fyne.MenuItem
 	speedItem  *fyne.MenuItem
 	quitItem   *fyne.MenuItem
@@ -234,12 +233,13 @@ func (a *application) configureTray() {
 	a.trayAvailable = true
 	a.trayState = trayState{
 		desktopApp: desk,
-		window:     a.window,
 		speedItem:  fyne.NewMenuItem("Down 0 B/s | Up 0 B/s", nil),
 		showItem: fyne.NewMenuItem("Open main window", func() {
-			a.windowVisible = true
-			a.window.Show()
-			a.window.RequestFocus()
+			fyne.Do(func() {
+				a.windowVisible = true
+				a.window.Show()
+				a.window.RequestFocus()
+			})
 		}),
 		quitItem: fyne.NewMenuItem("Quit application", func() {
 			a.fyApp.Quit()
@@ -247,8 +247,14 @@ func (a *application) configureTray() {
 	}
 	a.trayState.speedItem.Disabled = true
 	desk.SetSystemTrayIcon(resources.TrayIcon())
-	desk.SetSystemTrayWindow(a.window)
 	desk.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
+	systray.SetOnTapped(func() {
+		fyne.Do(func() {
+			a.windowVisible = true
+			a.window.Show()
+			a.window.RequestFocus()
+		})
+	})
 	systray.SetTooltip("Down 0 B/s | Up 0 B/s")
 }
 
@@ -917,9 +923,11 @@ func (a *application) updateTray() {
 		return
 	}
 	label := fmt.Sprintf("Down %s | Up %s", appcore.HumanSpeed(a.transfer.DownloadSpeed), appcore.HumanSpeed(a.transfer.UploadSpeed))
-	a.trayState.speedItem.Label = label
-	a.trayState.desktopApp.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
-	systray.SetTooltip(label)
+	fyne.Do(func() {
+		a.trayState.speedItem.Label = label
+		a.trayState.desktopApp.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
+		systray.SetTooltip(label)
+	})
 }
 
 func statusColor(state string) color.Color {
