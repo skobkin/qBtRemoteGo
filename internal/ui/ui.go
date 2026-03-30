@@ -412,9 +412,9 @@ func (a *application) openSettingsWindow() {
 
 func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	win := a.fyApp.NewWindow("Add Torrent")
-	win.Resize(fyne.NewSize(720, 720))
 
 	cfg := a.controller.Config()
+	win.Resize(addTorrentWindowSize(cfg.UI.AddTorrentAdvancedExpanded))
 	data := appcore.AddDialogData{
 		SourceType:     qbt.SourceMagnet,
 		ManagementMode: "Manual",
@@ -423,13 +423,14 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		ContentLayout:  "Original",
 		SavePath:       "",
 	}
-	if prefill != nil {
+	switch {
+	case prefill != nil:
 		data.SourceType = prefill.SourceType
 		data.TorrentFilePath = prefill.TorrentFilePath
 		data.MagnetText = strings.Join(prefill.MagnetLinks, "\n")
-	} else if len(cfg.UI.RecentSavePaths) > 0 {
+	case len(cfg.UI.RecentSavePaths) > 0:
 		data.SavePath = cfg.UI.RecentSavePaths[0]
-	} else {
+	default:
 		defaultSavePath, err := a.controller.FetchDefaultSavePath(context.Background())
 		if err != nil {
 			a.logger.Info("preload default save path", "error", err)
@@ -444,6 +445,15 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	}
 
 	status := widget.NewLabel("")
+	status.Hide()
+	setStatus := func(message string) {
+		status.SetText(message)
+		if strings.TrimSpace(message) == "" {
+			status.Hide()
+			return
+		}
+		status.Show()
+	}
 
 	sourceSelect := widget.NewRadioGroup([]string{"Torrent file", "Magnet links"}, nil)
 	if data.SourceType == qbt.SourceTorrentFile {
@@ -462,7 +472,7 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	savePathEntry := newPathAutocompleteEntry(
 		cfg.UI.RecentSavePaths,
 		a.controller.SuggestDirectories,
-		status.SetText,
+		setStatus,
 	)
 	savePathEntry.SetText(data.SavePath)
 	categoryEntry := widget.NewSelectEntry(categories)
@@ -493,7 +503,7 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	browseButton := widget.NewButtonWithIcon("Browse", theme.FolderOpenIcon(), func() {
 		dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
 			if err != nil {
-				status.SetText(err.Error())
+				setStatus(err.Error())
 				return
 			}
 			if reader == nil {
@@ -519,23 +529,30 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	sourceSelect.OnChanged = updateSource
 	updateSource(sourceSelect.Selected)
 
-	form := widget.NewForm(
-		widget.NewFormItem("Source type", sourceSelect),
-		widget.NewFormItem("Source", sourceContainer),
-		widget.NewFormItem("Torrent management mode", managementSelect),
-		widget.NewFormItem("Save location", savePathEntry),
-		widget.NewFormItem("Name override", renameEntry),
-		widget.NewFormItem("Category", categoryEntry),
-		widget.NewFormItem("Tags", tagsEntry),
-		widget.NewFormItem("Start torrent", startCheck),
-		widget.NewFormItem("Top of queue", topOfQueue),
-		widget.NewFormItem("Stop condition", stopSelect),
-		widget.NewFormItem("Skip hash check", skipHashCheck),
-		widget.NewFormItem("Content layout", contentLayoutSelect),
-		widget.NewFormItem("Download sequentially", sequential),
-		widget.NewFormItem("Download first and last pieces first", firstLastPieces),
-		widget.NewFormItem("Limit download rate (KiB/s)", downloadLimitEntry),
-		widget.NewFormItem("Limit upload rate (KiB/s)", uploadLimitEntry),
+	basicItems, advancedItems := buildAddTorrentFormSections(addTorrentFormControls{
+		sourceSelect:       sourceSelect,
+		sourceContainer:    sourceContainer,
+		savePathEntry:      savePathEntry,
+		categoryEntry:      categoryEntry,
+		startCheck:         startCheck,
+		managementSelect:   managementSelect,
+		renameEntry:        renameEntry,
+		tagsEntry:          tagsEntry,
+		topOfQueue:         topOfQueue,
+		stopSelect:         stopSelect,
+		skipHashCheck:      skipHashCheck,
+		contentLayout:      contentLayoutSelect,
+		sequential:         sequential,
+		firstLastPieces:    firstLastPieces,
+		downloadLimitEntry: downloadLimitEntry,
+		uploadLimitEntry:   uploadLimitEntry,
+	})
+	basicForm := widget.NewForm(basicItems...)
+	advancedForm := widget.NewForm(advancedItems...)
+	advancedAccordion, advancedItem := newAddTorrentAdvancedAccordion(advancedForm, cfg.UI.AddTorrentAdvancedExpanded)
+	formContent := container.NewVBox(
+		basicForm,
+		advancedAccordion,
 	)
 
 	var submit *widget.Button
@@ -557,17 +574,17 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		data.DownloadLimitText = downloadLimitEntry.Text
 		data.UploadLimitText = uploadLimitEntry.Text
 
-		status.SetText("Submitting torrent...")
+		setStatus("Submitting torrent...")
 		submit.Disable()
 		go func() {
 			err := a.controller.AddTorrent(context.Background(), data)
 			fyne.Do(func() {
 				submit.Enable()
 				if err != nil {
-					status.SetText("Add torrent failed: " + err.Error())
+					setStatus("Add torrent failed: " + err.Error())
 					return
 				}
-				status.SetText("Torrent submitted.")
+				setStatus("Torrent submitted.")
 				win.Close()
 				a.refreshNow()
 			})
@@ -580,15 +597,83 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 
 	content := container.NewBorder(
 		nil,
-		container.NewVBox(status, container.NewHBox(layout.NewSpacer(), cancel, submit)),
+		container.NewVBox(status, container.NewHBox(layout.NewSpacer(), submit, cancel)),
 		nil,
 		nil,
-		container.NewVScroll(form),
+		container.NewVScroll(formContent),
 	)
 
 	win.SetContent(content)
-	win.SetOnClosed(savePathEntry.Close)
+	win.SetOnClosed(func() {
+		savePathEntry.Close()
+
+		current := a.controller.Config()
+		if current.UI.AddTorrentAdvancedExpanded == advancedItem.Open {
+			return
+		}
+		current.UI.AddTorrentAdvancedExpanded = advancedItem.Open
+		if err := a.controller.SaveLocalUI(current); err != nil {
+			a.logger.Warn("save add torrent advanced state", "error", err)
+		}
+	})
 	win.Show()
+}
+
+type addTorrentFormControls struct {
+	sourceSelect       fyne.CanvasObject
+	sourceContainer    fyne.CanvasObject
+	savePathEntry      fyne.CanvasObject
+	categoryEntry      fyne.CanvasObject
+	startCheck         fyne.CanvasObject
+	managementSelect   fyne.CanvasObject
+	renameEntry        fyne.CanvasObject
+	tagsEntry          fyne.CanvasObject
+	topOfQueue         fyne.CanvasObject
+	stopSelect         fyne.CanvasObject
+	skipHashCheck      fyne.CanvasObject
+	contentLayout      fyne.CanvasObject
+	sequential         fyne.CanvasObject
+	firstLastPieces    fyne.CanvasObject
+	downloadLimitEntry fyne.CanvasObject
+	uploadLimitEntry   fyne.CanvasObject
+}
+
+func buildAddTorrentFormSections(controls addTorrentFormControls) (basic []*widget.FormItem, advanced []*widget.FormItem) {
+	basic = []*widget.FormItem{
+		widget.NewFormItem("Source type", controls.sourceSelect),
+		widget.NewFormItem("Source", controls.sourceContainer),
+		widget.NewFormItem("Save location", controls.savePathEntry),
+		widget.NewFormItem("Category", controls.categoryEntry),
+		widget.NewFormItem("Start torrent", controls.startCheck),
+	}
+	advanced = []*widget.FormItem{
+		widget.NewFormItem("Torrent management mode", controls.managementSelect),
+		widget.NewFormItem("Name override", controls.renameEntry),
+		widget.NewFormItem("Tags", controls.tagsEntry),
+		widget.NewFormItem("Top of queue", controls.topOfQueue),
+		widget.NewFormItem("Stop condition", controls.stopSelect),
+		widget.NewFormItem("Skip hash check", controls.skipHashCheck),
+		widget.NewFormItem("Content layout", controls.contentLayout),
+		widget.NewFormItem("Download sequentially", controls.sequential),
+		widget.NewFormItem("Download first and last pieces first", controls.firstLastPieces),
+		widget.NewFormItem("Limit download rate (KiB/s)", controls.downloadLimitEntry),
+		widget.NewFormItem("Limit upload rate (KiB/s)", controls.uploadLimitEntry),
+	}
+
+	return basic, advanced
+}
+
+func newAddTorrentAdvancedAccordion(detail fyne.CanvasObject, open bool) (*widget.Accordion, *widget.AccordionItem) {
+	item := widget.NewAccordionItem("Advanced", detail)
+	item.Open = open
+	return widget.NewAccordion(item), item
+}
+
+func addTorrentWindowSize(advancedExpanded bool) fyne.Size {
+	if advancedExpanded {
+		return fyne.NewSize(720, 680)
+	}
+	return fyne.NewSize(720, 480)
 }
 
 func (a *application) refreshVisibleTorrents() {

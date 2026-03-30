@@ -3,6 +3,9 @@ package ui
 import (
 	"testing"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/widget"
+
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
@@ -27,4 +30,94 @@ func TestStatusTextUsesEmojiMarkers(t *testing.T) {
 	if got := app.statusText(); got != want {
 		t.Fatalf("unexpected status text:\n got: %q\nwant: %q", got, want)
 	}
+}
+
+func TestBuildAddTorrentFormSections(t *testing.T) {
+	basic, advanced := buildAddTorrentFormSections(addTorrentFormControls{
+		sourceSelect:       widget.NewLabel("source-select"),
+		sourceContainer:    widget.NewLabel("source-container"),
+		savePathEntry:      widget.NewLabel("save-path"),
+		categoryEntry:      widget.NewLabel("category"),
+		startCheck:         widget.NewLabel("start"),
+		managementSelect:   widget.NewLabel("management"),
+		renameEntry:        widget.NewLabel("rename"),
+		tagsEntry:          widget.NewLabel("tags"),
+		topOfQueue:         widget.NewLabel("top"),
+		stopSelect:         widget.NewLabel("stop"),
+		skipHashCheck:      widget.NewLabel("skip"),
+		contentLayout:      widget.NewLabel("layout"),
+		sequential:         widget.NewLabel("sequential"),
+		firstLastPieces:    widget.NewLabel("pieces"),
+		downloadLimitEntry: widget.NewLabel("download"),
+		uploadLimitEntry:   widget.NewLabel("upload"),
+	})
+
+	if got, want := formItemTexts(basic), []string{
+		"Source type",
+		"Source",
+		"Save location",
+		"Category",
+		"Start torrent",
+	}; !equalStrings(got, want) {
+		t.Fatalf("unexpected basic fields:\n got: %#v\nwant: %#v", got, want)
+	}
+
+	if got, want := formItemTexts(advanced), []string{
+		"Torrent management mode",
+		"Name override",
+		"Tags",
+		"Top of queue",
+		"Stop condition",
+		"Skip hash check",
+		"Content layout",
+		"Download sequentially",
+		"Download first and last pieces first",
+		"Limit download rate (KiB/s)",
+		"Limit upload rate (KiB/s)",
+	}; !equalStrings(got, want) {
+		t.Fatalf("unexpected advanced fields:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestNewAddTorrentAdvancedAccordion(t *testing.T) {
+	accordion, item := newAddTorrentAdvancedAccordion(widget.NewLabel("advanced"), true)
+
+	if item.Title != "Advanced" {
+		t.Fatalf("unexpected title: %q", item.Title)
+	}
+	if !item.Open {
+		t.Fatal("expected advanced section to start opened")
+	}
+	if len(accordion.Items) != 1 || accordion.Items[0] != item {
+		t.Fatalf("unexpected accordion items: %#v", accordion.Items)
+	}
+}
+
+func TestAddTorrentWindowSize(t *testing.T) {
+	if got := addTorrentWindowSize(false); got != fyne.NewSize(720, 480) {
+		t.Fatalf("unexpected collapsed size: %#v", got)
+	}
+	if got := addTorrentWindowSize(true); got != fyne.NewSize(720, 680) {
+		t.Fatalf("unexpected expanded size: %#v", got)
+	}
+}
+
+func formItemTexts(items []*widget.FormItem) []string {
+	texts := make([]string, 0, len(items))
+	for _, item := range items {
+		texts = append(texts, item.Text)
+	}
+	return texts
+}
+
+func equalStrings(got []string, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

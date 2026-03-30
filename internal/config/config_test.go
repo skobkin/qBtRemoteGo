@@ -8,11 +8,12 @@ import (
 func TestNormalize(t *testing.T) {
 	cfg := AppConfig{
 		UI: UIConfig{
-			RememberPathCount:     0,
-			ActivePollSeconds:     0,
-			BackgroundPollSeconds: -1,
-			FilterBy:              "bad",
-			SortColumn:            "bad",
+			RememberPathCount:          0,
+			ActivePollSeconds:          0,
+			BackgroundPollSeconds:      -1,
+			AddTorrentAdvancedExpanded: true,
+			FilterBy:                   "bad",
+			SortColumn:                 "bad",
 			ColumnWidths: map[string]float32{
 				"name": 320,
 				"bad":  50,
@@ -39,6 +40,9 @@ func TestNormalize(t *testing.T) {
 	if len(cfg.UI.RecentSavePaths) != 2 {
 		t.Fatalf("unexpected recent paths: %#v", cfg.UI.RecentSavePaths)
 	}
+	if !cfg.UI.AddTorrentAdvancedExpanded {
+		t.Fatal("expected advanced add-torrent state to be preserved")
+	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
@@ -46,6 +50,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	cfg := Default()
 	cfg.Connection.URL = "https://example.invalid/qbt"
+	cfg.UI.AddTorrentAdvancedExpanded = true
 	cfg.UI.ColumnWidths = map[string]float32{"name": 480, "progress": 160}
 	cfg.UI.RecentSavePaths = []string{"/data/one", "/data/two"}
 
@@ -60,6 +65,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 	if loaded.Connection.URL != cfg.Connection.URL {
 		t.Fatalf("unexpected URL: %q", loaded.Connection.URL)
+	}
+	if !loaded.UI.AddTorrentAdvancedExpanded {
+		t.Fatal("expected advanced add-torrent state to round-trip")
 	}
 	if loaded.UI.ColumnWidths["name"] != 480 {
 		t.Fatalf("unexpected column widths: %#v", loaded.UI.ColumnWidths)
@@ -82,5 +90,11 @@ func TestAddRecentPath(t *testing.T) {
 		if cfg.UI.RecentSavePaths[i] != item {
 			t.Fatalf("unexpected path at %d: %#v", i, cfg.UI.RecentSavePaths)
 		}
+	}
+}
+
+func TestDefaultAddTorrentAdvancedExpanded(t *testing.T) {
+	if Default().UI.AddTorrentAdvancedExpanded {
+		t.Fatal("expected advanced add-torrent section to default to collapsed")
 	}
 }

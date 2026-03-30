@@ -30,16 +30,17 @@ type ConnectionConfig struct {
 }
 
 type UIConfig struct {
-	RememberPathCount     int                `json:"remember_path_count"`
-	PathAutocomplete      bool               `json:"path_autocomplete"`
-	ActivePollSeconds     int                `json:"active_poll_seconds"`
-	BackgroundPollSeconds int                `json:"background_poll_seconds"`
-	StartMinimizedToTray  bool               `json:"start_minimized_to_tray"`
-	FilterBy              string             `json:"filter_by"`
-	SortColumn            string             `json:"sort_column"`
-	SortDescending        bool               `json:"sort_descending"`
-	ColumnWidths          map[string]float32 `json:"column_widths"`
-	RecentSavePaths       []string           `json:"recent_save_paths"`
+	RememberPathCount          int                `json:"remember_path_count"`
+	PathAutocomplete           bool               `json:"path_autocomplete"`
+	ActivePollSeconds          int                `json:"active_poll_seconds"`
+	BackgroundPollSeconds      int                `json:"background_poll_seconds"`
+	StartMinimizedToTray       bool               `json:"start_minimized_to_tray"`
+	AddTorrentAdvancedExpanded bool               `json:"add_torrent_advanced_expanded"`
+	FilterBy                   string             `json:"filter_by"`
+	SortColumn                 string             `json:"sort_column"`
+	SortDescending             bool               `json:"sort_descending"`
+	ColumnWidths               map[string]float32 `json:"column_widths"`
+	RecentSavePaths            []string           `json:"recent_save_paths"`
 }
 
 type IntegrationConfig struct {
@@ -56,16 +57,17 @@ func Default() AppConfig {
 	return AppConfig{
 		Connection: ConnectionConfig{},
 		UI: UIConfig{
-			RememberPathCount:     6,
-			PathAutocomplete:      true,
-			ActivePollSeconds:     5,
-			BackgroundPollSeconds: 30,
-			StartMinimizedToTray:  false,
-			FilterBy:              "name",
-			SortColumn:            "added",
-			SortDescending:        true,
-			ColumnWidths:          nil,
-			RecentSavePaths:       nil,
+			RememberPathCount:          6,
+			PathAutocomplete:           true,
+			ActivePollSeconds:          5,
+			BackgroundPollSeconds:      30,
+			StartMinimizedToTray:       false,
+			AddTorrentAdvancedExpanded: false,
+			FilterBy:                   "name",
+			SortColumn:                 "added",
+			SortDescending:             true,
+			ColumnWidths:               nil,
+			RecentSavePaths:            nil,
 		},
 		Integration: IntegrationConfig{},
 		Logging: LoggingConfig{
