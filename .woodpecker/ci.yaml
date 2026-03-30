@@ -1,7 +1,6 @@
 when:
   - event: push
-    branch:
-      exclude: [master]
+  - event: pull_request
   - event: tag
 
 clone:
@@ -64,6 +63,7 @@ steps:
     image: golang:1.26-alpine
     when:
       - event: push
+      - event: pull_request
     commands:
       - export PATH=/usr/local/go/bin:/go/bin:$PATH
       - export CACHE_ROOT="$PWD/.ci-cache"
