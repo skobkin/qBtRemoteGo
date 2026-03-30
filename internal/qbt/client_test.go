@@ -135,6 +135,37 @@ func TestDirectorySuggestionsFiltersPrefix(t *testing.T) {
 	}
 }
 
+func TestDefaultSavePathLoadsServerValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/app/defaultSavePath":
+			_, _ = io.WriteString(w, "/srv/downloads")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(config.ConnectionConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	path, err := client.DefaultSavePath(context.Background())
+	if err != nil {
+		t.Fatalf("default save path: %v", err)
+	}
+	if path != "/srv/downloads" {
+		t.Fatalf("unexpected path: %q", path)
+	}
+}
+
 func TestAddTorrentEncodesMagnetFields(t *testing.T) {
 	var (
 		contentType string

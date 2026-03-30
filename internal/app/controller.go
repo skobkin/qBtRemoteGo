@@ -142,6 +142,15 @@ func (c *Controller) FetchCategoriesAndTags(ctx context.Context) ([]string, []st
 	return categories, tags, errors.Join(catErr, tagErr)
 }
 
+func (c *Controller) FetchDefaultSavePath(ctx context.Context) (string, error) {
+	client, err := c.client()
+	if err != nil {
+		return "", err
+	}
+
+	return client.DefaultSavePath(ctx)
+}
+
 func (c *Controller) AddTorrent(ctx context.Context, data AddDialogData) error {
 	req, err := ValidateAddDialogData(data)
 	if err != nil {

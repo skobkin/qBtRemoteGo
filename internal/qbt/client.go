@@ -203,6 +203,36 @@ func (c *Client) Tags(ctx context.Context) ([]string, error) {
 	return tags, nil
 }
 
+func (c *Client) DefaultSavePath(ctx context.Context) (string, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return "", err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, "app/defaultSavePath", nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := c.execute(req)
+	if err != nil {
+		return "", fmt.Errorf("request app/defaultSavePath: %w", err)
+	}
+	defer closeAndLog(c.logger, resp.Body, "close app/defaultSavePath response body")
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+
+		return "", fmt.Errorf("app/defaultSavePath returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return "", fmt.Errorf("read app/defaultSavePath response: %w", err)
+	}
+
+	return strings.TrimSpace(string(body)), nil
+}
+
 func (c *Client) AddTorrent(ctx context.Context, req AddRequest) error {
 	if err := c.ensureAuthenticated(ctx); err != nil {
 		return err

@@ -429,6 +429,13 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		data.MagnetText = strings.Join(prefill.MagnetLinks, "\n")
 	} else if len(cfg.UI.RecentSavePaths) > 0 {
 		data.SavePath = cfg.UI.RecentSavePaths[0]
+	} else {
+		defaultSavePath, err := a.controller.FetchDefaultSavePath(context.Background())
+		if err != nil {
+			a.logger.Info("preload default save path", "error", err)
+		} else {
+			data.SavePath = defaultSavePath
+		}
 	}
 
 	categories, tags, preloadErr := a.controller.FetchCategoriesAndTags(context.Background())
