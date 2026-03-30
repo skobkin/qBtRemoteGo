@@ -56,6 +56,8 @@ type application struct {
 	slowModeIcon   *hoverIcon
 	filterEntry    *widget.Entry
 	filterBy       *widget.Select
+	tooltipLayer   *tooltipOverlay
+	tooltipManager *hoverTooltipManager
 	columnWidths   map[string]float32
 	previewX       float32
 
@@ -139,19 +141,22 @@ func Run() error {
 }
 
 func (a *application) buildMainWindow() {
-	addButton := newButtonWithTooltip(a.window.Canvas(), theme.ContentAddIcon(), "Add torrent", func() {
+	a.tooltipLayer = newTooltipOverlay()
+	a.tooltipManager = newHoverTooltipManager(a.tooltipLayer)
+
+	addButton := newButtonWithTooltip(a.tooltipManager, theme.ContentAddIcon(), "Add torrent", func() {
 		a.openAddWindow(nil)
 	})
-	removeButton := newButtonWithTooltip(a.window.Canvas(), theme.DeleteIcon(), "Remove selected torrents", func() {
+	removeButton := newButtonWithTooltip(a.tooltipManager, theme.DeleteIcon(), "Remove selected torrents", func() {
 		a.confirmDelete()
 	})
-	startButton := newButtonWithTooltip(a.window.Canvas(), theme.MediaPlayIcon(), "Start selected torrents", func() {
+	startButton := newButtonWithTooltip(a.tooltipManager, theme.MediaPlayIcon(), "Start selected torrents", func() {
 		a.startSelectedTorrents()
 	})
-	stopButton := newButtonWithTooltip(a.window.Canvas(), theme.MediaStopIcon(), "Stop selected torrents", func() {
+	stopButton := newButtonWithTooltip(a.tooltipManager, theme.MediaStopIcon(), "Stop selected torrents", func() {
 		a.stopSelectedTorrents()
 	})
-	settingsButton := newButtonWithTooltip(a.window.Canvas(), theme.SettingsIcon(), "Settings", func() {
+	settingsButton := newButtonWithTooltip(a.tooltipManager, theme.SettingsIcon(), "Settings", func() {
 		a.openSettingsWindow()
 	})
 
@@ -200,8 +205,8 @@ func (a *application) buildMainWindow() {
 	)
 
 	a.statusLabel.Truncation = fyne.TextTruncateEllipsis
-	a.connectionIcon = newHoverIcon(a.window.Canvas(), resources.ConnectionStatusIcon(""), "Connection status unavailable")
-	a.slowModeIcon = newHoverIcon(a.window.Canvas(), resources.SlowModeIcon(false), "Slow mode: off")
+	a.connectionIcon = newHoverIcon(a.tooltipManager, resources.ConnectionStatusIcon(""), "Connection status unavailable")
+	a.slowModeIcon = newHoverIcon(a.tooltipManager, resources.SlowModeIcon(false), "Slow mode: off")
 
 	toolbar := container.NewBorder(nil, nil, leftTools, rightTools)
 
@@ -209,7 +214,8 @@ func (a *application) buildMainWindow() {
 	statusIcons := container.NewHBox(a.slowModeIcon, a.connectionIcon)
 	statusBar := container.NewBorder(nil, nil, nil, statusIcons, a.statusLabel)
 	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, container.NewPadded(statusBar))
-	a.window.SetContent(container.NewBorder(toolbar, bottom, nil, nil, center))
+	content := container.NewBorder(toolbar, bottom, nil, nil, center)
+	a.window.SetContent(container.NewStack(content, a.tooltipLayer))
 
 	a.refreshVisibleTorrents()
 }

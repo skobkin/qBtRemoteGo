@@ -85,10 +85,9 @@ type columnResizeHandle struct {
 
 type hoverLabel struct {
 	widget.BaseWidget
-	canvas   fyne.Canvas
+	hoverTooltipOwner
 	label    *widget.Label
 	fullText string
-	popup    *widget.PopUp
 }
 
 type torrentHeaderLayout struct {
@@ -306,15 +305,15 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row := &torrentListRow{
 		app:        app,
 		background: canvas.NewRectangle(theme.Color(theme.ColorNameSelection)),
-		name:       newHoverLabel(app.window.Canvas()),
-		size:       newHoverLabel(app.window.Canvas()),
+		name:       newHoverLabel(app.tooltipManager),
+		size:       newHoverLabel(app.tooltipManager),
 		progress:   widget.NewProgressBar(),
 		statusBG:   canvas.NewRectangle(color.Transparent),
 		statusTx:   widget.NewLabel(""),
-		down:       newHoverLabel(app.window.Canvas()),
-		up:         newHoverLabel(app.window.Canvas()),
-		eta:        newHoverLabel(app.window.Canvas()),
-		added:      newHoverLabel(app.window.Canvas()),
+		down:       newHoverLabel(app.tooltipManager),
+		up:         newHoverLabel(app.tooltipManager),
+		eta:        newHoverLabel(app.tooltipManager),
+		added:      newHoverLabel(app.tooltipManager),
 		separator:  widget.NewSeparator(),
 	}
 	row.background.Hide()
@@ -622,12 +621,12 @@ func (r *columnResizeHandleRenderer) BackgroundColor() color.Color {
 	return color.Transparent
 }
 
-func newHoverLabel(canvas fyne.Canvas) *hoverLabel {
+func newHoverLabel(manager *hoverTooltipManager) *hoverLabel {
 	label := widget.NewLabel("")
 	label.Truncation = fyne.TextTruncateEllipsis
 	h := &hoverLabel{
-		canvas: canvas,
-		label:  label,
+		hoverTooltipOwner: hoverTooltipOwner{manager: manager},
+		label:             label,
 	}
 	h.ExtendBaseWidget(h)
 	return h
@@ -639,7 +638,7 @@ func (h *hoverLabel) SetAlignment(alignment fyne.TextAlign) {
 }
 
 func (h *hoverLabel) SetText(display string, hover string) {
-	h.hidePopup()
+	h.hideTooltip(h)
 	h.label.SetText(display)
 	if strings.TrimSpace(hover) == "" {
 		h.fullText = display
@@ -655,31 +654,18 @@ func (h *hoverLabel) MouseIn(*desktop.MouseEvent) {
 	if h.fullText == h.label.Text && h.label.MinSize().Width <= h.Size().Width {
 		return
 	}
-	content := widget.NewLabel(h.fullText)
-	content.Wrapping = fyne.TextWrapWord
-	popupContent := container.NewPadded(content)
-	h.popup = widget.NewPopUp(popupContent, h.canvas)
-	size := popupContent.MinSize()
-	if size.Width < 160 {
-		size.Width = 160
+	content := newTextTooltip(h.fullText, 160)
+	if content == nil {
+		return
 	}
-	h.popup.Resize(size)
-	h.popup.ShowAtRelativePosition(fyne.NewPos(0, h.Size().Height), h)
+	h.showTooltip(h, content)
 }
 
 func (h *hoverLabel) MouseMoved(*desktop.MouseEvent) {
 }
 
 func (h *hoverLabel) MouseOut() {
-	h.hidePopup()
-}
-
-func (h *hoverLabel) hidePopup() {
-	if h.popup == nil {
-		return
-	}
-	h.popup.Hide()
-	h.popup = nil
+	h.scheduleHide(h)
 }
 
 func (h *hoverLabel) CreateRenderer() fyne.WidgetRenderer {
