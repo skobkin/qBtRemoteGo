@@ -43,6 +43,14 @@ func NewClient(cfg config.ConnectionConfig, logger *slog.Logger) (*Client, error
 	if base.Scheme == "" || base.Host == "" {
 		return nil, errors.New("connection URL must include scheme and host")
 	}
+	if base.Scheme != "http" && base.Scheme != "https" {
+		return nil, errors.New("connection URL must use http or https")
+	}
+	if base.User != nil {
+		return nil, errors.New("connection URL must not include embedded credentials")
+	}
+	base.RawQuery = ""
+	base.Fragment = ""
 
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -77,7 +85,7 @@ func (c *Client) TestConnection(ctx context.Context) error {
 		return err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.execute(req)
 	if err != nil {
 		return fmt.Errorf("request app/version: %w", err)
 	}
@@ -211,7 +219,7 @@ func (c *Client) AddTorrent(ctx context.Context, req AddRequest) error {
 	}
 	httpReq.Header.Set("Content-Type", contentType)
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.execute(httpReq)
 	if err != nil {
 		return fmt.Errorf("request torrents/add: %w", err)
 	}
@@ -395,7 +403,7 @@ func (c *Client) postHashes(ctx context.Context, endpoint string, hashes []strin
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.execute(req)
 	if err != nil {
 		return fmt.Errorf("request %s: %w", endpoint, err)
 	}
@@ -428,7 +436,7 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.execute(req)
 	if err != nil {
 		return fmt.Errorf("request auth/login: %w", err)
 	}
@@ -455,6 +463,8 @@ func (c *Client) newRequest(ctx context.Context, method string, endpoint string,
 	target := *c.baseURL
 	target.Path = path
 	target.RawPath = ""
+	target.RawQuery = ""
+	target.Fragment = ""
 
 	req, err := http.NewRequestWithContext(ctx, method, target.String(), body)
 	if err != nil {
@@ -465,8 +475,7 @@ func (c *Client) newRequest(ctx context.Context, method string, endpoint string,
 }
 
 func (c *Client) doJSON(req *http.Request, target any) error {
-	// #nosec G704 -- the qBittorrent base URL is user-configured application behavior.
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.execute(req)
 	if err != nil {
 		return fmt.Errorf("request %s %s: %w", req.Method, req.URL.String(), err)
 	}
@@ -483,6 +492,30 @@ func (c *Client) doJSON(req *http.Request, target any) error {
 	}
 
 	return nil
+}
+
+func (c *Client) execute(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, errors.New("request URL is empty")
+	}
+
+	expectedPathPrefix := strings.TrimRight(c.baseURL.Path, "/") + "/api/v2/"
+	if req.URL.Scheme != c.baseURL.Scheme || req.URL.Host != c.baseURL.Host {
+		return nil, fmt.Errorf("refusing request to unexpected host %s", req.URL.Redacted())
+	}
+	if !strings.HasPrefix(req.URL.Path, expectedPathPrefix) {
+		return nil, fmt.Errorf("refusing request outside qBittorrent API: %s", req.URL.Path)
+	}
+
+	// #nosec G704 -- qbtremotego is a desktop client that intentionally talks to a
+	// user-configured qBittorrent server over http(s); requests are built from the
+	// validated base URL in newRequest and enforced again here before dispatch.
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
 }
 
 func closeAndLog(logger *slog.Logger, closer io.Closer, action string) {

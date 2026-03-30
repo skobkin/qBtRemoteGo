@@ -3,11 +3,13 @@ package qbt
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +27,80 @@ func TestSplitRemotePath(t *testing.T) {
 	parent, prefix = splitRemotePath("C:\\data\\")
 	if parent != "C:\\data\\" || prefix != "" {
 		t.Fatalf("unexpected trailing split: %q %q", parent, prefix)
+	}
+}
+
+func TestNewClientRejectsUnsupportedURLs(t *testing.T) {
+	t.Parallel()
+
+	credentialedURL := (&url.URL{
+		Scheme: "https",
+		User:   url.UserPassword("user", "pass"),
+		Host:   "example.com",
+	}).String()
+
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{
+			name: "unsupported scheme",
+			url:  "ftp://example.com",
+			want: "connection URL must use http or https",
+		},
+		{
+			name: "embedded credentials",
+			url:  credentialedURL,
+			want: "connection URL must not include embedded credentials",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewClient(config.ConnectionConfig{URL: tc.url}, slog.Default())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestExecuteRejectsUnexpectedRequestTarget(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(config.ConnectionConfig{URL: "https://example.com/qbt"}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	req, err := client.newRequest(context.Background(), http.MethodGet, "app/version", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	req.URL = &url.URL{
+		Scheme: "https",
+		Host:   "evil.example",
+		Path:   "/qbt/api/v2/app/version",
+	}
+
+	resp, err := client.execute(req)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected execute to reject unexpected host")
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		t.Fatalf("expected validation error before transport call, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "unexpected host") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

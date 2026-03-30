@@ -25,7 +25,7 @@ type AppConfig struct {
 type ConnectionConfig struct {
 	URL                  string `json:"url"`
 	Username             string `json:"username"`
-	Password             string `json:"password"`
+	Password             string `json:"password"` //nolint:gosec // User-managed qBittorrent credential persisted in the local app config.
 	SkipCertificateCheck bool   `json:"skip_certificate_check"`
 }
 
