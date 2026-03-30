@@ -471,7 +471,7 @@ func humanElapsed(now time.Time, then time.Time) string {
 		if days > 0 {
 			return fmt.Sprintf("%dm%dd", months, days)
 		}
-		return fmt.Sprintf("%dm", months)
+		return fmt.Sprintf("%dmo", months)
 	case totalMinutes >= minutesPerDay:
 		days := totalMinutes / minutesPerDay
 		hours := (totalMinutes % minutesPerDay) / minutesPerHour
