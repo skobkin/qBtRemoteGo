@@ -462,14 +462,14 @@ func humanElapsed(now time.Time, then time.Time) string {
 		years := totalMinutes / minutesPerYear
 		months := (totalMinutes % minutesPerYear) / minutesPerMonth
 		if months > 0 {
-			return fmt.Sprintf("%dy%dm", years, months)
+			return fmt.Sprintf("%dy%dmo", years, months)
 		}
 		return fmt.Sprintf("%dy", years)
 	case totalMinutes >= minutesPerMonth:
 		months := totalMinutes / minutesPerMonth
 		days := (totalMinutes % minutesPerMonth) / minutesPerDay
 		if days > 0 {
-			return fmt.Sprintf("%dm%dd", months, days)
+			return fmt.Sprintf("%dmo%dd", months, days)
 		}
 		return fmt.Sprintf("%dmo", months)
 	case totalMinutes >= minutesPerDay:
