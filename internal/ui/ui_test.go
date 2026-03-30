@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
@@ -99,6 +100,63 @@ func TestAddTorrentWindowSize(t *testing.T) {
 	}
 	if got := addTorrentWindowSize(true); got != fyne.NewSize(720, 680) {
 		t.Fatalf("unexpected expanded size: %#v", got)
+	}
+}
+
+func TestInitialAddDialogSavePath(t *testing.T) {
+	t.Run("uses remembered path when enabled", func(t *testing.T) {
+		cfg := config.UIConfig{
+			RememberLastSaveLocation: true,
+			RecentSavePaths:          []string{"/data/recent", "/data/older"},
+		}
+
+		path, shouldFetchDefault := initialAddDialogSavePath(cfg)
+
+		if path != "/data/recent" {
+			t.Fatalf("unexpected initial path: %q", path)
+		}
+		if shouldFetchDefault {
+			t.Fatal("expected remembered path to skip default fetch")
+		}
+	})
+
+	t.Run("falls back to lazy default fetch when history is empty", func(t *testing.T) {
+		path, shouldFetchDefault := initialAddDialogSavePath(config.UIConfig{
+			RememberLastSaveLocation: true,
+		})
+
+		if path != "" {
+			t.Fatalf("unexpected initial path: %q", path)
+		}
+		if !shouldFetchDefault {
+			t.Fatal("expected empty history to trigger default fetch")
+		}
+	})
+
+	t.Run("ignores remembered history when disabled", func(t *testing.T) {
+		path, shouldFetchDefault := initialAddDialogSavePath(config.UIConfig{
+			RememberLastSaveLocation: false,
+			RecentSavePaths:          []string{"/data/recent"},
+		})
+
+		if path != "" {
+			t.Fatalf("unexpected initial path: %q", path)
+		}
+		if !shouldFetchDefault {
+			t.Fatal("expected disabled remember-last setting to trigger default fetch")
+		}
+	})
+}
+
+func TestShouldApplyLazySavePath(t *testing.T) {
+	if !shouldApplyLazySavePath("", "/data/default") {
+		t.Fatal("expected blank entry to accept fetched save path")
+	}
+	if shouldApplyLazySavePath("/data/current", "/data/default") {
+		t.Fatal("expected existing entry text to block fetched save path")
+	}
+	if shouldApplyLazySavePath("", "   ") {
+		t.Fatal("expected blank fetched save path to be ignored")
 	}
 }
 

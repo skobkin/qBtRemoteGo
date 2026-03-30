@@ -31,6 +31,7 @@ type ConnectionConfig struct {
 
 type UIConfig struct {
 	RememberPathCount          int                `json:"remember_path_count"`
+	RememberLastSaveLocation   bool               `json:"remember_last_save_location"`
 	PathAutocomplete           bool               `json:"path_autocomplete"`
 	ActivePollSeconds          int                `json:"active_poll_seconds"`
 	BackgroundPollSeconds      int                `json:"background_poll_seconds"`
@@ -58,6 +59,7 @@ func Default() AppConfig {
 		Connection: ConnectionConfig{},
 		UI: UIConfig{
 			RememberPathCount:          6,
+			RememberLastSaveLocation:   true,
 			PathAutocomplete:           true,
 			ActivePollSeconds:          5,
 			BackgroundPollSeconds:      30,

@@ -2,11 +2,13 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image/color"
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -302,6 +304,8 @@ func (a *application) openSettingsWindow() {
 	rememberEntry := widget.NewEntry()
 	rememberEntry.SetText(fmt.Sprintf("%d", cfg.UI.RememberPathCount))
 	rememberEntry.Validator = numberValidator
+	rememberLastSaveLocation := widget.NewCheck("", nil)
+	rememberLastSaveLocation.SetChecked(cfg.UI.RememberLastSaveLocation)
 	autocomplete := widget.NewCheck("", nil)
 	autocomplete.SetChecked(cfg.UI.PathAutocomplete)
 	activePoll := widget.NewEntry()
@@ -335,6 +339,7 @@ func (a *application) openSettingsWindow() {
 
 	uiForm := widget.NewForm(
 		widget.NewFormItem("Number of paths to remember", rememberEntry),
+		widget.NewFormItem("Remember last save location", rememberLastSaveLocation),
 		widget.NewFormItem("Path autocompletion", autocomplete),
 		widget.NewFormItem("Torrent list update time (seconds)", activePoll),
 		widget.NewFormItem("Background update time (seconds)", backgroundPoll),
@@ -392,6 +397,7 @@ func (a *application) openSettingsWindow() {
 		updated.Connection.Password = passwordEntry.Text
 		updated.Connection.SkipCertificateCheck = skipTLS.Checked
 		updated.UI.RememberPathCount = rememberCount
+		updated.UI.RememberLastSaveLocation = rememberLastSaveLocation.Checked
 		updated.UI.PathAutocomplete = autocomplete.Checked
 		updated.UI.ActivePollSeconds = activeSeconds
 		updated.UI.BackgroundPollSeconds = backgroundSeconds
@@ -480,21 +486,13 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		ContentLayout:  "Original",
 		SavePath:       "",
 	}
-	switch {
-	case prefill != nil:
+	if prefill != nil {
 		data.SourceType = prefill.SourceType
 		data.TorrentFilePath = prefill.TorrentFilePath
 		data.MagnetText = strings.Join(prefill.MagnetLinks, "\n")
-	case len(cfg.UI.RecentSavePaths) > 0:
-		data.SavePath = cfg.UI.RecentSavePaths[0]
-	default:
-		defaultSavePath, err := a.controller.FetchDefaultSavePath(context.Background())
-		if err != nil {
-			a.logger.Info("preload default save path", "error", err)
-		} else {
-			data.SavePath = defaultSavePath
-		}
 	}
+	var shouldFetchDefaultSavePath bool
+	data.SavePath, shouldFetchDefaultSavePath = initialAddDialogSavePath(cfg.UI)
 
 	categories, tags, preloadErr := a.controller.FetchCategoriesAndTags(context.Background())
 	if preloadErr != nil {
@@ -662,8 +660,13 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		container.NewVScroll(formContent),
 	)
 
+	defaultSavePathCtx, cancelDefaultSavePath := context.WithCancel(context.Background())
+	var addWindowClosed atomic.Bool
+
 	win.SetContent(content)
 	win.SetOnClosed(func() {
+		addWindowClosed.Store(true)
+		cancelDefaultSavePath()
 		savePathEntry.Close()
 
 		current := a.controller.Config()
@@ -676,6 +679,37 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		}
 	})
 	win.Show()
+
+	if shouldFetchDefaultSavePath {
+		go func() {
+			defaultSavePath, err := a.controller.FetchDefaultSavePath(defaultSavePathCtx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					a.logger.Info("load default save path", "error", err)
+				}
+				return
+			}
+
+			fyne.Do(func() {
+				if addWindowClosed.Load() || !shouldApplyLazySavePath(savePathEntry.Text, defaultSavePath) {
+					return
+				}
+				savePathEntry.SetText(strings.TrimSpace(defaultSavePath))
+			})
+		}()
+	}
+}
+
+func initialAddDialogSavePath(cfg config.UIConfig) (string, bool) {
+	if cfg.RememberLastSaveLocation && len(cfg.RecentSavePaths) > 0 {
+		return cfg.RecentSavePaths[0], false
+	}
+
+	return "", true
+}
+
+func shouldApplyLazySavePath(current string, fetched string) bool {
+	return strings.TrimSpace(current) == "" && strings.TrimSpace(fetched) != ""
 }
 
 type addTorrentFormControls struct {

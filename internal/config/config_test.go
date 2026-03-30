@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -53,6 +54,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg.UI.AddTorrentAdvancedExpanded = true
 	cfg.UI.ColumnWidths = map[string]float32{"name": 480, "progress": 160}
 	cfg.UI.RecentSavePaths = []string{"/data/one", "/data/two"}
+	cfg.UI.RememberLastSaveLocation = false
 
 	if err := Save(path, cfg); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -75,6 +77,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if len(loaded.UI.RecentSavePaths) != 2 {
 		t.Fatalf("unexpected paths: %#v", loaded.UI.RecentSavePaths)
 	}
+	if loaded.UI.RememberLastSaveLocation {
+		t.Fatal("expected remember-last-save-location override to round-trip")
+	}
 }
 
 func TestAddRecentPath(t *testing.T) {
@@ -96,6 +101,30 @@ func TestAddRecentPath(t *testing.T) {
 func TestDefaultAddTorrentAdvancedExpanded(t *testing.T) {
 	if Default().UI.AddTorrentAdvancedExpanded {
 		t.Fatal("expected advanced add-torrent section to default to collapsed")
+	}
+}
+
+func TestDefaultRememberLastSaveLocation(t *testing.T) {
+	if !Default().UI.RememberLastSaveLocation {
+		t.Fatal("expected remember-last-save-location to default to enabled")
+	}
+}
+
+func TestLoadMissingRememberLastSaveLocationDefaultsToTrue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	data := []byte("{\n  \"ui\": {\n    \"remember_path_count\": 3,\n    \"recent_save_paths\": [\"/data\"]\n  }\n}\n")
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !loaded.UI.RememberLastSaveLocation {
+		t.Fatal("expected missing remember-last-save-location to default to enabled")
 	}
 }
 
