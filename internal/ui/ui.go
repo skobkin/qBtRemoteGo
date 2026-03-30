@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"fyne.io/systray"
@@ -501,7 +502,7 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	uploadLimitEntry.Validator = optionalNumberValidator
 
 	browseButton := widget.NewButtonWithIcon("Browse", theme.FolderOpenIcon(), func() {
-		dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+		fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
 			if err != nil {
 				setStatus(err.Error())
 				return
@@ -512,6 +513,8 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 			fileEntry.SetText(reader.URI().Path())
 			_ = reader.Close()
 		}, win)
+		fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".torrent"}))
+		fileDialog.Show()
 	})
 
 	updateSource := func(selected string) {
