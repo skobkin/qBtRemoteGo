@@ -89,10 +89,12 @@ func StartActivationServer(appID string, logger *slog.Logger, handler func([]str
 				return
 			}
 
+			logger.Info("received activation request", "args", req.Args)
 			handler(req.Args)
 			w.WriteHeader(http.StatusNoContent)
 		}),
 	}
+	logger.Info("activation server started", "address", state.Address, "state_path", statePath)
 
 	go func() {
 		if err := server.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -110,6 +112,7 @@ func (s *ActivationServer) Close() error {
 
 	var closeErr error
 	s.closeOnce.Do(func() {
+		slog.Info("stopping activation server", "state_path", s.statePath)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
@@ -137,6 +140,7 @@ func ForwardActivation(appID string, args []string) error {
 	if err != nil {
 		return err
 	}
+	slog.Info("forwarding activation to running instance", "address", state.Address, "args", args)
 
 	body, err := json.Marshal(activationRequest{Args: args})
 	if err != nil {
@@ -161,6 +165,7 @@ func ForwardActivation(appID string, args []string) error {
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("activation request failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 	}
+	slog.Info("activation forwarded successfully", "address", state.Address)
 
 	return nil
 }

@@ -10,13 +10,17 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-func syncHandlers(exePath string, cfg config.IntegrationConfig, _ *slog.Logger) []error {
+func syncHandlers(exePath string, cfg config.IntegrationConfig, logger *slog.Logger) []error {
 	var errs []error
 	if err := syncMagnetHandler(exePath, cfg.RegisterMagnetHandler); err != nil {
 		errs = append(errs, fmt.Errorf("magnet handler: %w", err))
+	} else {
+		logger.Info("synced windows magnet handler", "enabled", cfg.RegisterMagnetHandler, "exe_path", exePath)
 	}
 	if err := syncTorrentHandler(exePath, cfg.RegisterTorrentHandler); err != nil {
 		errs = append(errs, fmt.Errorf(".torrent handler: %w", err))
+	} else {
+		logger.Info("synced windows torrent handler", "enabled", cfg.RegisterTorrentHandler, "exe_path", exePath)
 	}
 
 	return errs
@@ -51,7 +55,7 @@ func syncTorrentHandler(exePath string, enabled bool) error {
 	return writeString(registry.CURRENT_USER, `Software\Classes\qbtremotego.torrent\shell\open\command`, "", fmt.Sprintf(`"%s" "%%1"`, exePath))
 }
 
-func syncAutostart(exePath string, enabled bool, _ *slog.Logger) error {
+func syncAutostart(exePath string, enabled bool, logger *slog.Logger) error {
 	key, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
 	if err != nil {
 		return fmt.Errorf("open Run key: %w", err)
@@ -62,12 +66,14 @@ func syncAutostart(exePath string, enabled bool, _ *slog.Logger) error {
 		if err := key.DeleteValue("qBtRemoteGo"); err != nil && err != registry.ErrNotExist {
 			return fmt.Errorf("delete autostart value: %w", err)
 		}
+		logger.Info("removed windows autostart entry")
 		return nil
 	}
 
 	if err := key.SetStringValue("qBtRemoteGo", fmt.Sprintf(`"%s"`, exePath)); err != nil {
 		return fmt.Errorf("set autostart value: %w", err)
 	}
+	logger.Info("wrote windows autostart entry", "exe_path", exePath)
 
 	return nil
 }

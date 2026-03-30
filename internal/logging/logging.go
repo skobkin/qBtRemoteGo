@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/skobkin/qbtremotego/internal/config"
@@ -12,6 +13,8 @@ import (
 type Manager struct {
 	logger *slog.Logger
 }
+
+var supportedLevels = []string{"debug", "info", "warn", "error"}
 
 func New(cfg config.LoggingConfig) (*Manager, error) {
 	level, err := parseLevel(cfg.Level)
@@ -34,13 +37,29 @@ func (m *Manager) Logger(component string) *slog.Logger {
 	return m.logger.With("component", component)
 }
 
+func SupportedLevels() []string {
+	return append([]string(nil), supportedLevels...)
+}
+
+func NormalizeLevel(raw string) string {
+	level := strings.ToLower(strings.TrimSpace(raw))
+	if level == "" {
+		return "info"
+	}
+	if slices.Contains(supportedLevels, level) {
+		return level
+	}
+
+	return ""
+}
+
 func parseLevel(raw string) (slog.Leveler, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "info":
+	switch NormalizeLevel(raw) {
+	case "info":
 		return slog.LevelInfo, nil
 	case "debug":
 		return slog.LevelDebug, nil
-	case "warn", "warning":
+	case "warn":
 		return slog.LevelWarn, nil
 	case "error":
 		return slog.LevelError, nil

@@ -27,6 +27,13 @@ func main() {
 
 func run() error {
 	initialInvocation := appcore.ParseInvocationArgs(os.Args[1:])
+	if !initialInvocation.Empty() {
+		slog.Info(
+			"parsed startup invocation",
+			"magnet_links", initialInvocation.MagnetLinks,
+			"torrent_files", initialInvocation.TorrentFiles,
+		)
+	}
 
 	slog.Info("acquiring single-instance lock", "app_id", appcore.ID)
 	instanceLock, err := platform.AcquireInstanceLock(appcore.ID)
@@ -64,8 +71,10 @@ func run() error {
 	activationServer, err := platform.StartActivationServer(appcore.ID, slog.Default(), func(args []string) {
 		batch := appcore.ParseInvocationArgs(args)
 		if batch.Empty() {
+			slog.Info("ignoring empty activation request", "args", args)
 			return
 		}
+		slog.Info("queueing forwarded activation", "magnet_links", batch.MagnetLinks, "torrent_files", batch.TorrentFiles)
 		activations <- batch
 	})
 	if err != nil {

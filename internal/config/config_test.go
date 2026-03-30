@@ -98,3 +98,28 @@ func TestDefaultAddTorrentAdvancedExpanded(t *testing.T) {
 		t.Fatal("expected advanced add-torrent section to default to collapsed")
 	}
 }
+
+func TestNormalizeLoggingLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		want  string
+	}{
+		{name: "empty defaults to info", level: "", want: "info"},
+		{name: "warning alias normalizes", level: "warning", want: "warn"},
+		{name: "invalid falls back to info", level: "trace", want: "info"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Logging.Level = tc.level
+
+			Normalize(&cfg)
+
+			if cfg.Logging.Level != tc.want {
+				t.Fatalf("Normalize().Logging.Level = %q, want %q", cfg.Logging.Level, tc.want)
+			}
+		})
+	}
+}

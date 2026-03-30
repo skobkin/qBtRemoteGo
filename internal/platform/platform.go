@@ -23,9 +23,23 @@ func (m *Manager) Sync(cfg config.IntegrationConfig) []error {
 		return []error{fmt.Errorf("resolve executable path: %w", err)}
 	}
 
+	m.logger.Info(
+		"syncing desktop integrations",
+		"exe_path", exePath,
+		"magnet_handler", cfg.RegisterMagnetHandler,
+		"torrent_handler", cfg.RegisterTorrentHandler,
+		"autostart", cfg.StartWithSystem,
+	)
+
 	errs := syncHandlers(exePath, cfg, m.logger)
 	if err := syncAutostart(exePath, cfg.StartWithSystem, m.logger); err != nil {
 		errs = append(errs, fmt.Errorf("autostart: %w", err))
+	}
+
+	if len(errs) == 0 {
+		m.logger.Info("desktop integrations synced successfully")
+	} else {
+		m.logger.Info("desktop integrations synced with warnings", "warnings", JoinErrors(errs))
 	}
 
 	return errs

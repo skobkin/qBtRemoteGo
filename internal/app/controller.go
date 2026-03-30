@@ -60,6 +60,11 @@ func (c *Controller) Config() config.AppConfig {
 	return c.config
 }
 
+func (c *Controller) SetLogger(logger *slog.Logger) {
+	c.logger = logger
+	c.platform = platform.NewManager(logger)
+}
+
 func (c *Controller) SaveConfig(cfg config.AppConfig) error {
 	config.Normalize(&cfg)
 	if err := config.Save(c.configPath, cfg); err != nil {

@@ -104,6 +104,7 @@ func Normalize(cfg *AppConfig) {
 	cfg.UI.ColumnWidths = normalizeColumnWidths(cfg.UI.ColumnWidths)
 	cfg.UI.RecentSavePaths = normalizePaths(cfg.UI.RecentSavePaths, cfg.UI.RememberPathCount)
 
+	cfg.Logging.Level = normalizeLogLevel(cfg.Logging.Level)
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = def.Logging.Level
 	}
@@ -218,6 +219,21 @@ func isValidSortColumn(column string) bool {
 	return slices.Contains([]string{
 		"name", "size", "progress", "status", "down", "up", "eta", "added",
 	}, column)
+}
+
+func normalizeLogLevel(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "", "info":
+		return "info"
+	case "debug":
+		return "debug"
+	case "warn", "warning":
+		return "warn"
+	case "error":
+		return "error"
+	default:
+		return ""
+	}
 }
 
 func normalizeColumnWidths(widths map[string]float32) map[string]float32 {

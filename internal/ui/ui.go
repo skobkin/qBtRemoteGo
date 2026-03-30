@@ -316,6 +316,8 @@ func (a *application) openSettingsWindow() {
 	sortBy.SetSelected(sortColumnLabel(cfg.UI.SortColumn))
 	sortDescending := widget.NewCheck("", nil)
 	sortDescending.SetChecked(cfg.UI.SortDescending)
+	logLevel := widget.NewSelect(logging.SupportedLevels(), nil)
+	logLevel.SetSelected(cfg.Logging.Level)
 
 	registerMagnet := widget.NewCheck("", nil)
 	registerMagnet.SetChecked(cfg.Integration.RegisterMagnetHandler)
@@ -339,6 +341,7 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Start minimized to tray", startMinimized),
 		widget.NewFormItem("Sort by", sortBy),
 		widget.NewFormItem("Descending order", sortDescending),
+		widget.NewFormItem("Log level", logLevel),
 	)
 
 	integrationForm := widget.NewForm(
@@ -395,6 +398,7 @@ func (a *application) openSettingsWindow() {
 		updated.UI.StartMinimizedToTray = startMinimized.Checked
 		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
 		updated.UI.SortDescending = sortDescending.Checked
+		updated.Logging.Level = logLevel.Selected
 		updated.Integration.RegisterMagnetHandler = registerMagnet.Checked
 		updated.Integration.RegisterTorrentHandler = registerTorrent.Checked
 		updated.Integration.StartWithSystem = startWithSystem.Checked
@@ -402,6 +406,17 @@ func (a *application) openSettingsWindow() {
 		if err := a.controller.SaveConfig(updated); err != nil {
 			dialog.ShowError(fmt.Errorf("settings saved with integration warnings:\n%w", err), win)
 		}
+		if a.controller.Config().Logging.Level != updated.Logging.Level {
+			return
+		}
+		logManager, err := logging.New(updated.Logging)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("apply log level: %w", err), win)
+			return
+		}
+		a.logger = logManager.Logger("ui")
+		a.controller.SetLogger(logManager.Logger("controller"))
+		a.logger.Info("updated log level from settings", "level", updated.Logging.Level)
 		a.refreshVisibleTorrents()
 		win.Close()
 	})
@@ -430,6 +445,7 @@ func (a *application) openSettingsWindow() {
 }
 
 func (a *application) handleInvocation(batch appcore.InvocationBatch) {
+	a.logger.Info("handling activation in UI", "magnet_links", batch.MagnetLinks, "torrent_files", batch.TorrentFiles)
 	a.windowVisible = true
 	a.window.Show()
 	a.window.RequestFocus()
