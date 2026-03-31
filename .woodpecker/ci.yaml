@@ -12,6 +12,7 @@ clone:
 steps:
   fmt:
     image: golang:1.26-alpine
+    depends_on: []
     commands:
       - |
         export PATH=/usr/local/go/bin:/go/bin:$PATH
@@ -24,6 +25,7 @@ steps:
 
   lint:
     image: golangci/golangci-lint:latest-alpine
+    depends_on: []
     commands:
       - export CACHE_ROOT="$PWD/.ci-cache"
       - export GOMODCACHE="$CACHE_ROOT/gomod"
@@ -37,6 +39,7 @@ steps:
 
   vet:
     image: golang:1.26-alpine
+    depends_on: []
     commands:
       - export PATH=/usr/local/go/bin:/go/bin:$PATH
       - export CACHE_ROOT="$PWD/.ci-cache"
@@ -49,6 +52,7 @@ steps:
 
   test:
     image: golang:1.26-alpine
+    depends_on: []
     commands:
       - export PATH=/usr/local/go/bin:/go/bin:$PATH
       - export CACHE_ROOT="$PWD/.ci-cache"
@@ -61,6 +65,7 @@ steps:
 
   build:
     image: golang:1.26-alpine
+    depends_on: []
     when:
       - event: push
       - event: pull_request
@@ -76,6 +81,11 @@ steps:
 
   release:
     image: goreleaser/goreleaser-cross:v1.26
+    depends_on:
+      - fmt
+      - lint
+      - vet
+      - test
     environment:
       GITEA_TOKEN:
         from_secret: GITEA_TOKEN
