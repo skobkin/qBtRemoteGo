@@ -2,11 +2,13 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 )
 
 type autocompleteFetchResponse struct {
@@ -146,6 +148,131 @@ func TestPathAutocompleteEntryIgnoresStaleRemoteResults(t *testing.T) {
 	if len(entry.suggestions) != 1 || entry.suggestions[0] != "/data/alpine" {
 		t.Fatalf("stale suggestions overwrote current state: %#v", entry.suggestions)
 	}
+}
+
+func TestPathAutocompleteEntryPopupRespectsAvailableHeight(t *testing.T) {
+	test.NewTempApp(t)
+
+	entry := newPathAutocompleteEntryWithDelay(manyAutocompletePaths(), 0, nil, nil)
+	defer entry.Close()
+
+	win := test.NewWindow(entry)
+	defer win.Close()
+	win.Resize(fyne.NewSize(420, 150))
+	entry.Resize(fyne.NewSize(320, entry.MinSize().Height))
+	entry.Move(fyne.NewPos(20, 20))
+	entry.FocusGained()
+
+	fyne.DoAndWait(func() {
+		entry.SetText("/data/item")
+	})
+
+	if !entry.popupVisible() {
+		t.Fatalf("expected popup to be visible")
+	}
+
+	entryPos := fyne.CurrentApp().Driver().AbsolutePositionForObject(entry)
+	_, size := entry.popupLayout()
+	canvasPos, canvasSize := win.Canvas().InteractiveArea()
+	maxBelow := canvasPos.Y + canvasSize.Height - (entryPos.Y + entry.Size().Height - theme.InputBorderSize())
+	if size.Height > maxBelow {
+		t.Fatalf("expected popup height %v to fit below available space %v", size.Height, maxBelow)
+	}
+	if size.Height >= entry.popupHeight() {
+		t.Fatalf("expected popup height %v to shrink below desired height %v", size.Height, entry.popupHeight())
+	}
+}
+
+func TestPathAutocompleteEntryPopupOpensAboveNearBottom(t *testing.T) {
+	test.NewTempApp(t)
+
+	entry := newPathAutocompleteEntryWithDelay(manyAutocompletePaths(), 0, nil, nil)
+	defer entry.Close()
+
+	win := test.NewWindow(entry)
+	defer win.Close()
+	win.Resize(fyne.NewSize(420, 260))
+	entry.Resize(fyne.NewSize(320, entry.MinSize().Height))
+	entry.Move(fyne.NewPos(20, 210))
+	entry.FocusGained()
+
+	fyne.DoAndWait(func() {
+		entry.SetText("/data/item")
+	})
+
+	if !entry.popupVisible() {
+		t.Fatalf("expected popup to be visible")
+	}
+
+	entryPos := fyne.CurrentApp().Driver().AbsolutePositionForObject(entry)
+	if entry.popupPosition().Y >= entryPos.Y {
+		t.Fatalf("expected popup to open above entry, popup y=%v entry y=%v", entry.popupPosition().Y, entryPos.Y)
+	}
+}
+
+func TestPathAutocompleteEntryKeyboardSelectionScrollsPopup(t *testing.T) {
+	test.NewTempApp(t)
+
+	entry := newPathAutocompleteEntryWithDelay(manyAutocompletePaths(), 0, nil, nil)
+	defer entry.Close()
+
+	win := test.NewWindow(entry)
+	defer win.Close()
+	win.Resize(fyne.NewSize(420, 300))
+	entry.Resize(fyne.NewSize(320, entry.MinSize().Height))
+	entry.Move(fyne.NewPos(20, 20))
+	entry.FocusGained()
+
+	fyne.DoAndWait(func() {
+		entry.SetText("/data/item")
+	})
+
+	for range 8 {
+		fyne.DoAndWait(func() {
+			entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDown})
+		})
+	}
+
+	if entry.selectedIndex() != 7 {
+		t.Fatalf("expected seventh suggestion to be selected, got %d", entry.selectedIndex())
+	}
+	if entry.popupScroll.Offset.Y <= 0 {
+		t.Fatalf("expected keyboard navigation to scroll popup, got offset %v", entry.popupScroll.Offset.Y)
+	}
+}
+
+func TestPathAutocompleteEntryMouseWheelScrollsPopup(t *testing.T) {
+	test.NewTempApp(t)
+
+	entry := newPathAutocompleteEntryWithDelay(manyAutocompletePaths(), 0, nil, nil)
+	defer entry.Close()
+
+	win := test.NewWindow(entry)
+	defer win.Close()
+	win.Resize(fyne.NewSize(420, 300))
+	entry.Resize(fyne.NewSize(320, entry.MinSize().Height))
+	entry.Move(fyne.NewPos(20, 20))
+	entry.FocusGained()
+
+	fyne.DoAndWait(func() {
+		entry.SetText("/data/item")
+	})
+
+	scrollPos := fyne.CurrentApp().Driver().AbsolutePositionForObject(entry.popupScroll)
+	test.Scroll(win.Canvas(), scrollPos.Add(fyne.NewPos(12, 12)), 0, -entry.rowHeight()*3)
+
+	if entry.popupScroll.Offset.Y <= 0 {
+		t.Fatalf("expected mouse wheel scrolling to move popup, got offset %v", entry.popupScroll.Offset.Y)
+	}
+}
+
+func manyAutocompletePaths() []string {
+	const count = 12
+	paths := make([]string, 0, count)
+	for i := range count {
+		paths = append(paths, fmt.Sprintf("/data/item-%02d", i))
+	}
+	return paths
 }
 
 func waitForRequest(t *testing.T, requests <-chan autocompleteFetchRequest, query string) autocompleteFetchRequest {

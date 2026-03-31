@@ -34,6 +34,7 @@ type pathAutocompleteEntry struct {
 	suggestions    []string
 	popup          *widget.PopUp
 	popupContent   *fyne.Container
+	popupScroll    *container.Scroll
 	buttons        []*widget.Button
 	selected       int
 	suppressChange bool
@@ -67,6 +68,7 @@ func newPathAutocompleteEntryWithDelay(recentPaths []string, delay time.Duration
 	entry.Wrapping = fyne.TextWrap(fyne.TextTruncateClip)
 	entry.OnChanged = entry.handleChanged
 	entry.popupContent = container.NewVBox()
+	entry.popupScroll = container.NewVScroll(entry.popupContent)
 	return entry
 }
 
@@ -258,6 +260,9 @@ func (e *pathAutocompleteEntry) setSuggestions(items []string) {
 	e.suggestions = append([]string(nil), items...)
 	e.selected = -1
 	e.refreshButtons()
+	if e.popupScroll != nil {
+		e.popupScroll.ScrollToTop()
+	}
 	if len(e.suggestions) == 0 || !e.focused {
 		e.hidePopup()
 		return
@@ -288,10 +293,11 @@ func (e *pathAutocompleteEntry) showPopup() {
 		if e.popup != nil {
 			e.popup.Hide()
 		}
-		e.popup = widget.NewPopUp(e.popupContent, canvas)
+		e.popup = widget.NewPopUp(e.popupScroll, canvas)
 	}
-	e.popup.ShowAtPosition(e.popupPosition())
-	e.resizePopup()
+	pos, size := e.popupLayout()
+	e.popup.ShowAtPosition(pos)
+	e.popup.Resize(size)
 	e.installCanvasHandlers(canvas)
 	canvas.Focus(e)
 	e.restoreFocus()
@@ -308,29 +314,80 @@ func (e *pathAutocompleteEntry) resizePopup() {
 	if e.popup == nil || !e.popupVisible() {
 		return
 	}
-	e.popup.Move(e.popupPosition())
-
-	visibleItems := minInt(len(e.suggestions), maxAutocompletePopupItems)
-	if visibleItems <= 0 {
-		return
-	}
-	rowHeight := e.MinSize().Height
-	height := float32(visibleItems)*rowHeight + theme.Padding()*2
-	if height > maxAutocompletePopupHeight {
-		height = maxAutocompletePopupHeight
-	}
-	e.popup.Resize(fyne.NewSize(e.Size().Width, height))
+	pos, size := e.popupLayout()
+	e.popup.Move(pos)
+	e.popup.Resize(size)
+	e.ensureSelectionVisible(e.selected)
 }
 
 func (e *pathAutocompleteEntry) repositionPopup() {
 	if e.popup != nil && e.popupVisible() {
-		e.popup.Move(e.popupPosition())
+		pos, size := e.popupLayout()
+		e.popup.Move(pos)
+		e.popup.Resize(size)
 	}
 }
 
 func (e *pathAutocompleteEntry) popupPosition() fyne.Position {
+	pos, _ := e.popupLayout()
+	return pos
+}
+
+func (e *pathAutocompleteEntry) popupLayout() (fyne.Position, fyne.Size) {
 	entryPos := fyne.CurrentApp().Driver().AbsolutePositionForObject(e)
-	return entryPos.Add(fyne.NewPos(0, e.Size().Height-theme.InputBorderSize()))
+	width := e.Size().Width
+	height := e.popupHeight()
+
+	canvas := fyne.CurrentApp().Driver().CanvasForObject(e)
+	if canvas == nil {
+		return entryPos.Add(fyne.NewPos(0, e.Size().Height-theme.InputBorderSize())), fyne.NewSize(width, height)
+	}
+
+	areaPos, areaSize := canvas.InteractiveArea()
+	anchorBelowY := entryPos.Y + e.Size().Height - theme.InputBorderSize()
+	availableBelow := areaPos.Y + areaSize.Height - anchorBelowY
+	availableAbove := entryPos.Y - areaPos.Y
+	if availableBelow < 0 {
+		availableBelow = 0
+	}
+	if availableAbove < 0 {
+		availableAbove = 0
+	}
+
+	showAbove := availableBelow < height && availableAbove > availableBelow
+	availableHeight := availableBelow
+	y := anchorBelowY
+	if showAbove {
+		availableHeight = availableAbove
+		y = entryPos.Y - height + theme.InputBorderSize()
+	}
+	if availableHeight > 0 && height > availableHeight {
+		height = availableHeight
+		if showAbove {
+			y = entryPos.Y - height + theme.InputBorderSize()
+		}
+	}
+	if height < 0 {
+		height = 0
+	}
+	if y < areaPos.Y {
+		y = areaPos.Y
+	}
+
+	return fyne.NewPos(entryPos.X, y), fyne.NewSize(width, height)
+}
+
+func (e *pathAutocompleteEntry) popupHeight() float32 {
+	visibleItems := minInt(len(e.suggestions), maxAutocompletePopupItems)
+	if visibleItems <= 0 {
+		return 0
+	}
+	rowHeight := e.rowHeight()
+	height := float32(visibleItems)*rowHeight + theme.Padding()*2
+	if height > maxAutocompletePopupHeight {
+		height = maxAutocompletePopupHeight
+	}
+	return height
 }
 
 func (e *pathAutocompleteEntry) installCanvasHandlers(canvas fyne.Canvas) {
@@ -405,6 +462,7 @@ func (e *pathAutocompleteEntry) selectSuggestion(index int) {
 	}
 	e.selected = index
 	e.refreshButtons()
+	e.ensureSelectionVisible(index)
 }
 
 func (e *pathAutocompleteEntry) selectedIndex() int {
@@ -457,6 +515,36 @@ func (e *pathAutocompleteEntry) refreshButtons() {
 	}
 	e.popupContent.Objects = objects
 	e.popupContent.Refresh()
+}
+
+func (e *pathAutocompleteEntry) ensureSelectionVisible(index int) {
+	if index < 0 || e.popupScroll == nil {
+		return
+	}
+
+	rowHeight := e.rowHeight()
+	top := float32(index) * rowHeight
+	bottom := top + rowHeight
+	visibleTop := e.popupScroll.Offset.Y
+	visibleHeight := e.popupScroll.Size().Height
+	if visibleHeight <= 0 {
+		return
+	}
+	visibleBottom := visibleTop + visibleHeight
+
+	switch {
+	case top < visibleTop:
+		e.popupScroll.ScrollToOffset(fyne.NewPos(0, top))
+	case bottom > visibleBottom:
+		e.popupScroll.ScrollToOffset(fyne.NewPos(0, bottom-visibleHeight))
+	}
+}
+
+func (e *pathAutocompleteEntry) rowHeight() float32 {
+	if len(e.buttons) > 0 {
+		return e.buttons[0].MinSize().Height
+	}
+	return e.MinSize().Height
 }
 
 func (e *pathAutocompleteEntry) restoreFocus() {
