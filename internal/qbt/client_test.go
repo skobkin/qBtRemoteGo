@@ -14,8 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/skobkin/qbtremotego/internal/config"
 )
 
 func TestSplitRemotePath(t *testing.T) {
@@ -60,7 +58,7 @@ func TestNewClientRejectsUnsupportedURLs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := NewClient(config.ConnectionConfig{URL: tc.url}, slog.Default())
+			_, err := NewClient(ClientConfig{URL: tc.url}, slog.Default())
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected %q, got %v", tc.want, err)
 			}
@@ -71,7 +69,7 @@ func TestNewClientRejectsUnsupportedURLs(t *testing.T) {
 func TestExecuteRejectsUnexpectedRequestTarget(t *testing.T) {
 	t.Parallel()
 
-	client, err := NewClient(config.ConnectionConfig{URL: "https://example.com/qbt"}, slog.Default())
+	client, err := NewClient(ClientConfig{URL: "https://example.com/qbt"}, slog.Default())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -117,7 +115,7 @@ func TestDirectorySuggestionsFiltersPrefix(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(config.ConnectionConfig{
+	client, err := NewClient(ClientConfig{
 		URL:      server.URL + "/qbt",
 		Username: "user",
 		Password: "pass",
@@ -148,7 +146,7 @@ func TestDefaultSavePathLoadsServerValue(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(config.ConnectionConfig{
+	client, err := NewClient(ClientConfig{
 		URL:      server.URL,
 		Username: "user",
 		Password: "pass",
@@ -186,7 +184,7 @@ func TestAddTorrentEncodesMagnetFields(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(config.ConnectionConfig{
+	client, err := NewClient(ClientConfig{
 		URL:      server.URL,
 		Username: "user",
 		Password: "pass",
@@ -266,7 +264,7 @@ func TestAddTorrentUploadsFile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(config.ConnectionConfig{
+	client, err := NewClient(ClientConfig{
 		URL:      server.URL,
 		Username: "user",
 		Password: "pass",
@@ -310,7 +308,7 @@ func TestServerStateLoadsFreeSpaceAndSlowMode(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(config.ConnectionConfig{
+	client, err := NewClient(ClientConfig{
 		URL:      server.URL,
 		Username: "user",
 		Password: "pass",

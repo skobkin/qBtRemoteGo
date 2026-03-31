@@ -20,8 +20,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/skobkin/qbtremotego/internal/config"
 )
 
 type Client struct {
@@ -35,7 +33,14 @@ type Client struct {
 	authenticated bool
 }
 
-func NewClient(cfg config.ConnectionConfig, logger *slog.Logger) (*Client, error) {
+type ClientConfig struct {
+	URL                  string
+	Username             string
+	Password             string
+	SkipCertificateCheck bool
+}
+
+func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
 	base, err := url.Parse(strings.TrimSpace(cfg.URL))
 	if err != nil {
 		return nil, fmt.Errorf("parse URL: %w", err)

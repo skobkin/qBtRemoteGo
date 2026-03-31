@@ -7,6 +7,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/skobkin/qbtremotego/internal/config"
+	"github.com/skobkin/qbtremotego/internal/credentials"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
@@ -157,6 +158,45 @@ func TestShouldApplyLazySavePath(t *testing.T) {
 	}
 	if shouldApplyLazySavePath("", "   ") {
 		t.Fatal("expected blank fetched save path to be ignored")
+	}
+}
+
+func TestConnectionCredentialStorageText(t *testing.T) {
+	if got := connectionCredentialStorageText(config.CredentialStorageKeychain, credentials.Status{
+		Backend: "Secret Service",
+		State:   credentials.StateAvailable,
+	}, credentials.Credentials{}); got != "System keychain (Secret Service)" {
+		t.Fatalf("unexpected keychain text: %q", got)
+	}
+
+	if got := connectionCredentialStorageText(config.CredentialStoragePlaintext, credentials.Status{}, credentials.Credentials{}); got != "Plain text config file" {
+		t.Fatalf("unexpected plaintext text: %q", got)
+	}
+
+	if got := connectionCredentialStorageText(config.CredentialStorageNone, credentials.Status{}, credentials.Credentials{
+		Username: "demo",
+	}); got != "Session only" {
+		t.Fatalf("unexpected session-only text: %q", got)
+	}
+}
+
+func TestConnectionCredentialWarningText(t *testing.T) {
+	if got := connectionCredentialWarningText(config.CredentialStorageKeychain, credentials.Status{
+		Backend: "Secret Service",
+		State:   credentials.StateLocked,
+		Message: "keychain locked",
+	}, credentials.Credentials{}); got == "" {
+		t.Fatal("expected keychain warning")
+	}
+
+	if got := connectionCredentialWarningText(config.CredentialStoragePlaintext, credentials.Status{}, credentials.Credentials{}); got == "" {
+		t.Fatal("expected plaintext warning")
+	}
+
+	if got := connectionCredentialWarningText(config.CredentialStorageNone, credentials.Status{}, credentials.Credentials{
+		Username: "demo",
+	}); got == "" {
+		t.Fatal("expected session-only message")
 	}
 }
 

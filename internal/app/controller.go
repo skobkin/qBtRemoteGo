@@ -11,15 +11,19 @@ import (
 	"time"
 
 	"github.com/skobkin/qbtremotego/internal/config"
+	"github.com/skobkin/qbtremotego/internal/credentials"
 	"github.com/skobkin/qbtremotego/internal/platform"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
 type Controller struct {
-	configPath string
-	config     config.AppConfig
-	logger     *slog.Logger
-	platform   *platform.Manager
+	configPath         string
+	config             config.AppConfig
+	logger             *slog.Logger
+	platform           *platform.Manager
+	credentialStore    credentials.Store
+	sessionCredentials credentials.Credentials
+	credentialStatus   credentials.Status
 }
 
 type AddDialogData struct {
@@ -42,18 +46,41 @@ type AddDialogData struct {
 	UploadLimitText    string
 }
 
+type CredentialFallbackChoice string
+
+const (
+	CredentialFallbackUnspecified CredentialFallbackChoice = ""
+	CredentialFallbackPlaintext   CredentialFallbackChoice = "plaintext"
+	CredentialFallbackSessionOnly CredentialFallbackChoice = "session_only"
+)
+
+type SaveSettingsResult struct {
+	CredentialStatus credentials.Status
+	DecisionRequired bool
+}
+
 func NewController(configPath string, logger *slog.Logger) (*Controller, error) {
+	return newController(configPath, logger, credentials.NewStore())
+}
+
+func newController(configPath string, logger *slog.Logger, store credentials.Store) (*Controller, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Controller{
-		configPath: configPath,
-		config:     cfg,
-		logger:     logger,
-		platform:   platform.NewManager(logger),
-	}, nil
+	controller := &Controller{
+		configPath:      configPath,
+		config:          cfg,
+		logger:          logger,
+		platform:        platform.NewManager(logger),
+		credentialStore: store,
+	}
+	if err := controller.loadSessionCredentials(context.Background()); err != nil {
+		return nil, err
+	}
+
+	return controller, nil
 }
 
 func (c *Controller) Config() config.AppConfig {
@@ -65,26 +92,88 @@ func (c *Controller) SetLogger(logger *slog.Logger) {
 	c.platform = platform.NewManager(logger)
 }
 
-func (c *Controller) SaveConfig(cfg config.AppConfig) error {
+func (c *Controller) SessionCredentials() credentials.Credentials {
+	return c.sessionCredentials
+}
+
+func (c *Controller) CredentialStatus() credentials.Status {
+	return c.credentialStatus
+}
+
+func (c *Controller) SaveSettings(
+	ctx context.Context,
+	cfg config.AppConfig,
+	creds credentials.Credentials,
+	fallback CredentialFallbackChoice,
+) (SaveSettingsResult, error) {
 	config.Normalize(&cfg)
-	if err := config.Save(c.configPath, cfg); err != nil {
-		return err
+
+	cfg.Connection.Username = c.config.Connection.Username
+	cfg.Connection.Password = c.config.Connection.Password
+	cfg.Connection.CredentialStorage = c.config.Connection.CredentialStorage
+
+	trimmedCreds := credentials.Credentials{
+		Username: strings.TrimSpace(creds.Username),
+		Password: creds.Password,
+	}
+	credsChanged := trimmedCreds != c.sessionCredentials
+	status := c.credentialStore.Status(ctx)
+	c.credentialStatus = status
+
+	persistedMode := c.config.Connection.CredentialStorage
+	if status.State == credentials.StateAvailable {
+		if err := c.credentialStore.Set(ctx, trimmedCreds); err != nil {
+			status = c.statusFromError(err)
+			c.credentialStatus = status
+			if credsChanged && fallback == CredentialFallbackUnspecified {
+				return SaveSettingsResult{
+					CredentialStatus: status,
+					DecisionRequired: true,
+				}, nil
+			}
+
+			return c.saveWithFallback(cfg, trimmedCreds, persistedMode, fallback, status)
+		}
+
+		cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+		cfg.Connection.Username = ""
+		cfg.Connection.Password = ""
+		saved, err := c.persistConfig(cfg)
+		if err != nil && !saved {
+			return SaveSettingsResult{CredentialStatus: status}, err
+		}
+		c.sessionCredentials = trimmedCreds
+		c.credentialStatus = status
+
+		return SaveSettingsResult{CredentialStatus: status}, err
 	}
 
-	c.config = cfg
-	if errs := c.platform.Sync(cfg.Integration); len(errs) > 0 {
-		return errors.New(platform.JoinErrors(errs))
+	if !credsChanged {
+		_, err := c.persistConfig(cfg)
+		if err != nil {
+			return SaveSettingsResult{CredentialStatus: status}, err
+		}
+		c.credentialStatus = status
+
+		return SaveSettingsResult{CredentialStatus: status}, nil
 	}
 
-	return nil
+	if fallback == CredentialFallbackUnspecified {
+		return SaveSettingsResult{
+			CredentialStatus: status,
+			DecisionRequired: true,
+		}, nil
+	}
+
+	return c.saveWithFallback(cfg, trimmedCreds, persistedMode, fallback, status)
 }
 
 func (c *Controller) SaveLocalUI(cfg config.AppConfig) error {
 	config.Normalize(&cfg)
-	if err := config.Save(c.configPath, cfg); err != nil {
+	saved, err := c.persistConfig(cfg)
+	if err != nil && !saved {
 		return err
 	}
-	c.config = cfg
 
 	return nil
 }
@@ -93,8 +182,13 @@ func (c *Controller) SyncIntegrations() []error {
 	return c.platform.Sync(c.config.Integration)
 }
 
-func (c *Controller) TestConnection(ctx context.Context, cfg config.ConnectionConfig) error {
-	client, err := qbt.NewClient(cfg, c.logger.With("remote", strings.TrimSpace(cfg.URL)))
+func (c *Controller) TestConnection(ctx context.Context, cfg config.ConnectionConfig, creds credentials.Credentials) error {
+	client, err := qbt.NewClient(qbt.ClientConfig{
+		URL:                  cfg.URL,
+		Username:             strings.TrimSpace(creds.Username),
+		Password:             creds.Password,
+		SkipCertificateCheck: cfg.SkipCertificateCheck,
+	}, c.logger.With("remote", strings.TrimSpace(cfg.URL)))
 	if err != nil {
 		return err
 	}
@@ -558,6 +652,165 @@ func cmpFloat(a float64, b float64) int {
 	}
 }
 
+func (c *Controller) persistConfig(cfg config.AppConfig) (bool, error) {
+	if err := config.Save(c.configPath, cfg); err != nil {
+		return false, err
+	}
+
+	c.config = cfg
+	if c.platform == nil {
+		return true, nil
+	}
+	if errs := c.platform.Sync(cfg.Integration); len(errs) > 0 {
+		return true, errors.New(platform.JoinErrors(errs))
+	}
+
+	return true, nil
+}
+
+func (c *Controller) loadSessionCredentials(ctx context.Context) error {
+	status := c.credentialStore.Status(ctx)
+	c.credentialStatus = status
+
+	switch c.config.Connection.CredentialStorage {
+	case config.CredentialStorageKeychain:
+		creds, err := c.credentialStore.Get(ctx)
+		if err != nil {
+			c.sessionCredentials = credentials.Credentials{}
+			c.credentialStatus = c.statusFromError(err)
+			c.logger.Warn("system keychain credentials unavailable", "backend", c.credentialStatus.Backend, "state", c.credentialStatus.State, "error", err)
+
+			return nil
+		}
+		c.sessionCredentials = creds
+
+		return nil
+	case config.CredentialStoragePlaintext:
+		c.sessionCredentials = credentials.Credentials{
+			Username: c.config.Connection.Username,
+			Password: c.config.Connection.Password,
+		}
+
+		return nil
+	case config.CredentialStorageNone:
+		c.sessionCredentials = credentials.Credentials{}
+
+		return nil
+	default:
+		if c.config.Connection.Username == "" && c.config.Connection.Password == "" {
+			c.sessionCredentials = credentials.Credentials{}
+
+			return nil
+		}
+
+		legacy := credentials.Credentials{
+			Username: c.config.Connection.Username,
+			Password: c.config.Connection.Password,
+		}
+		c.sessionCredentials = legacy
+		if status.State != credentials.StateAvailable {
+			c.logger.Warn("legacy plaintext credentials remain because system keychain is unavailable", "backend", status.Backend, "state", status.State)
+
+			return nil
+		}
+		if err := c.credentialStore.Set(ctx, legacy); err != nil {
+			c.credentialStatus = c.statusFromError(err)
+			c.logger.Warn("migrate plaintext credentials to system keychain", "error", err, "backend", c.credentialStatus.Backend, "state", c.credentialStatus.State)
+
+			return nil
+		}
+
+		c.config.Connection.CredentialStorage = config.CredentialStorageKeychain
+		c.config.Connection.Username = ""
+		c.config.Connection.Password = ""
+		if err := config.Save(c.configPath, c.config); err != nil {
+			return err
+		}
+		c.logger.Info("migrated plaintext credentials to system keychain", "backend", status.Backend)
+
+		return nil
+	}
+}
+
+func (c *Controller) saveWithFallback(
+	cfg config.AppConfig,
+	creds credentials.Credentials,
+	persistedMode config.CredentialStorageMode,
+	fallback CredentialFallbackChoice,
+	status credentials.Status,
+) (SaveSettingsResult, error) {
+	switch fallback {
+	case CredentialFallbackPlaintext:
+		cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
+		cfg.Connection.Username = creds.Username
+		cfg.Connection.Password = creds.Password
+		saved, err := c.persistConfig(cfg)
+		if err != nil && !saved {
+			return SaveSettingsResult{CredentialStatus: status}, err
+		}
+		if err != nil {
+			c.sessionCredentials = creds
+			c.credentialStatus = status
+			return SaveSettingsResult{CredentialStatus: status}, err
+		}
+	case CredentialFallbackSessionOnly:
+		switch persistedMode {
+		case config.CredentialStorageKeychain:
+			cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+		default:
+			cfg.Connection.CredentialStorage = config.CredentialStorageNone
+		}
+		cfg.Connection.Username = ""
+		cfg.Connection.Password = ""
+		saved, err := c.persistConfig(cfg)
+		if err != nil && !saved {
+			return SaveSettingsResult{CredentialStatus: status}, err
+		}
+		if err != nil {
+			c.sessionCredentials = creds
+			c.credentialStatus = status
+			return SaveSettingsResult{CredentialStatus: status}, err
+		}
+	default:
+		return SaveSettingsResult{CredentialStatus: status}, fmt.Errorf("unsupported credential fallback: %q", fallback)
+	}
+
+	c.sessionCredentials = creds
+	c.credentialStatus = status
+
+	return SaveSettingsResult{CredentialStatus: status}, nil
+}
+
+func (c *Controller) statusFromError(err error) credentials.Status {
+	var credErr *credentials.Error
+	if errors.As(err, &credErr) {
+		return credentials.Status{
+			Backend: currentCredentialBackend(c.credentialStatus, c.credentialStore),
+			State:   credErr.State(),
+			Message: err.Error(),
+		}
+	}
+
+	return credentials.Status{
+		Backend: currentCredentialBackend(c.credentialStatus, c.credentialStore),
+		State:   credentials.StateUnavailable,
+		Message: err.Error(),
+	}
+}
+
+func currentCredentialBackend(status credentials.Status, store credentials.Store) string {
+	if status.Backend != "" {
+		return status.Backend
+	}
+
+	return store.Status(context.Background()).Backend
+}
+
 func (c *Controller) client() (*qbt.Client, error) {
-	return qbt.NewClient(c.config.Connection, c.logger)
+	return qbt.NewClient(qbt.ClientConfig{
+		URL:                  c.config.Connection.URL,
+		Username:             c.sessionCredentials.Username,
+		Password:             c.sessionCredentials.Password,
+		SkipCertificateCheck: c.config.Connection.SkipCertificateCheck,
+	}, c.logger)
 }

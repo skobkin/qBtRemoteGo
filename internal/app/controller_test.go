@@ -1,10 +1,18 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/skobkin/qbtremotego/internal/config"
+	"github.com/skobkin/qbtremotego/internal/credentials"
 	"github.com/skobkin/qbtremotego/internal/qbt"
+	keyring "github.com/zalando/go-keyring"
 )
 
 func TestValidateAddDialogData(t *testing.T) {
@@ -128,4 +136,147 @@ func TestHumanETA(t *testing.T) {
 			t.Fatalf("unexpected ETA for %d: got %q want %q", seconds, got, want)
 		}
 	}
+}
+
+func TestNewControllerMigratesLegacyPlaintextCredentials(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	cfg := config.Default()
+	cfg.Connection.Username = "demo"
+	cfg.Connection.Password = "secret"
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	var stored credentials.Credentials
+	store := credentials.NewStoreForTests(
+		func(service, user string) (string, error) {
+			if stored == (credentials.Credentials{}) {
+				return "", keyring.ErrNotFound
+			}
+			return `{"username":"` + stored.Username + `","password":"` + stored.Password + `"}`, nil
+		},
+		func(service, user, password string) error {
+			stored = credentials.Credentials{Username: "demo", Password: "secret"}
+			return nil
+		},
+		func(service, user string) error { return nil },
+	)
+
+	controller, err := newController(path, slog.Default(), store)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	controller.platform = nil
+
+	if controller.Config().Connection.CredentialStorage != config.CredentialStorageKeychain {
+		t.Fatalf("unexpected storage mode: %q", controller.Config().Connection.CredentialStorage)
+	}
+	if controller.Config().Connection.Username != "" || controller.Config().Connection.Password != "" {
+		t.Fatalf("expected config credentials to be scrubbed: %#v", controller.Config().Connection)
+	}
+	if controller.SessionCredentials().Username != "demo" || controller.SessionCredentials().Password != "secret" {
+		t.Fatalf("unexpected session credentials: %#v", controller.SessionCredentials())
+	}
+}
+
+func TestSaveSettingsRequiresDecisionWhenKeychainUnavailableAndCredentialsChanged(t *testing.T) {
+	controller := newTestController(t, config.Default(), credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", errors.New("keychain locked") },
+		func(service, user, password string) error { return errors.New("keychain locked") },
+		func(service, user string) error { return nil },
+	))
+
+	result, err := controller.SaveSettings(context.Background(), controller.Config(), credentials.Credentials{
+		Username: "new-user",
+		Password: "new-pass",
+	}, CredentialFallbackUnspecified)
+	if err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if !result.DecisionRequired {
+		t.Fatalf("expected decision to be required: %#v", result)
+	}
+}
+
+func TestSaveSettingsPlaintextFallback(t *testing.T) {
+	controller := newTestController(t, config.Default(), credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", errors.New("keychain unavailable") },
+		func(service, user, password string) error { return errors.New("keychain unavailable") },
+		func(service, user string) error { return nil },
+	))
+
+	updated := controller.Config()
+	updated.Logging.Level = "debug"
+
+	result, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
+		Username: "demo",
+		Password: "secret",
+	}, CredentialFallbackPlaintext)
+	if err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if result.DecisionRequired {
+		t.Fatalf("did not expect decision to be required: %#v", result)
+	}
+	if controller.Config().Connection.CredentialStorage != config.CredentialStoragePlaintext {
+		t.Fatalf("unexpected storage mode: %q", controller.Config().Connection.CredentialStorage)
+	}
+	if controller.Config().Connection.Username != "demo" || controller.Config().Connection.Password != "secret" {
+		t.Fatalf("unexpected persisted credentials: %#v", controller.Config().Connection)
+	}
+	if controller.SessionCredentials().Username != "demo" || controller.SessionCredentials().Password != "secret" {
+		t.Fatalf("unexpected session credentials: %#v", controller.SessionCredentials())
+	}
+}
+
+func TestSaveSettingsSessionOnlyKeepsKeychainModeDuringTemporaryOutage(t *testing.T) {
+	cfg := config.Default()
+	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", errors.New("keychain locked") },
+		func(service, user, password string) error { return errors.New("keychain locked") },
+		func(service, user string) error { return nil },
+	))
+	controller.config.Connection.CredentialStorage = config.CredentialStorageKeychain
+
+	result, err := controller.SaveSettings(context.Background(), controller.Config(), credentials.Credentials{
+		Username: "temp-user",
+		Password: "temp-pass",
+	}, CredentialFallbackSessionOnly)
+	if err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if result.DecisionRequired {
+		t.Fatalf("did not expect decision to be required: %#v", result)
+	}
+	if controller.Config().Connection.CredentialStorage != config.CredentialStorageKeychain {
+		t.Fatalf("expected keychain mode to remain configured: %q", controller.Config().Connection.CredentialStorage)
+	}
+	if controller.Config().Connection.Username != "" || controller.Config().Connection.Password != "" {
+		t.Fatalf("expected config credentials to be scrubbed: %#v", controller.Config().Connection)
+	}
+	if controller.SessionCredentials().Username != "temp-user" || controller.SessionCredentials().Password != "temp-pass" {
+		t.Fatalf("unexpected session credentials: %#v", controller.SessionCredentials())
+	}
+}
+
+func newTestController(t *testing.T, cfg config.AppConfig, store credentials.Store) *Controller {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	controller, err := newController(path, slog.Default(), store)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	controller.platform = nil
+	controller.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	return controller
 }

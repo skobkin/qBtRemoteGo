@@ -25,6 +25,7 @@ import (
 
 	appcore "github.com/skobkin/qbtremotego/internal/app"
 	"github.com/skobkin/qbtremotego/internal/config"
+	"github.com/skobkin/qbtremotego/internal/credentials"
 	"github.com/skobkin/qbtremotego/internal/logging"
 	"github.com/skobkin/qbtremotego/internal/platform"
 	"github.com/skobkin/qbtremotego/internal/qbt"
@@ -294,12 +295,23 @@ func (a *application) openSettingsWindow() {
 	urlEntry := widget.NewEntry()
 	urlEntry.SetText(cfg.Connection.URL)
 	usernameEntry := widget.NewEntry()
-	usernameEntry.SetText(cfg.Connection.Username)
+	usernameEntry.SetText(a.controller.SessionCredentials().Username)
 	passwordEntry := widget.NewPasswordEntry()
-	passwordEntry.SetText(cfg.Connection.Password)
+	passwordEntry.SetText(a.controller.SessionCredentials().Password)
 	skipTLS := widget.NewCheck("", nil)
 	skipTLS.SetChecked(cfg.Connection.SkipCertificateCheck)
 	testStatus := widget.NewLabel("")
+	credentialSummary := widget.NewLabel(connectionCredentialStorageText(
+		cfg.Connection.CredentialStorage,
+		a.controller.CredentialStatus(),
+		a.controller.SessionCredentials(),
+	))
+	credentialWarning := widget.NewLabel(connectionCredentialWarningText(
+		cfg.Connection.CredentialStorage,
+		a.controller.CredentialStatus(),
+		a.controller.SessionCredentials(),
+	))
+	credentialWarning.Wrapping = fyne.TextWrapWord
 
 	rememberEntry := widget.NewEntry()
 	rememberEntry.SetText(fmt.Sprintf("%d", cfg.UI.RememberPathCount))
@@ -335,6 +347,7 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Username", usernameEntry),
 		widget.NewFormItem("Password", passwordEntry),
 		widget.NewFormItem("Skip certificate validation", skipTLS),
+		widget.NewFormItem("Credential storage", credentialSummary),
 	)
 
 	uiForm := widget.NewForm(
@@ -360,9 +373,10 @@ func (a *application) openSettingsWindow() {
 		go func() {
 			err := a.controller.TestConnection(context.Background(), config.ConnectionConfig{
 				URL:                  urlEntry.Text,
-				Username:             usernameEntry.Text,
-				Password:             passwordEntry.Text,
 				SkipCertificateCheck: skipTLS.Checked,
+			}, credentials.Credentials{
+				Username: usernameEntry.Text,
+				Password: passwordEntry.Text,
 			})
 			fyne.Do(func() {
 				if err != nil {
@@ -373,6 +387,22 @@ func (a *application) openSettingsWindow() {
 			})
 		}()
 	})
+
+	finishSave := func(updated config.AppConfig) {
+		if a.controller.Config().Logging.Level != updated.Logging.Level {
+			return
+		}
+		logManager, err := logging.New(updated.Logging)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("apply log level: %w", err), win)
+			return
+		}
+		a.logger = logManager.Logger("ui")
+		a.controller.SetLogger(logManager.Logger("controller"))
+		a.logger.Info("updated log level from settings", "level", updated.Logging.Level)
+		a.refreshVisibleTorrents()
+		win.Close()
+	}
 
 	saveButton := widget.NewButton("Save", func() {
 		rememberCount, err := parsePositiveInt(rememberEntry.Text)
@@ -393,8 +423,6 @@ func (a *application) openSettingsWindow() {
 
 		updated := a.controller.Config()
 		updated.Connection.URL = urlEntry.Text
-		updated.Connection.Username = usernameEntry.Text
-		updated.Connection.Password = passwordEntry.Text
 		updated.Connection.SkipCertificateCheck = skipTLS.Checked
 		updated.UI.RememberPathCount = rememberCount
 		updated.UI.RememberLastSaveLocation = rememberLastSaveLocation.Checked
@@ -409,27 +437,42 @@ func (a *application) openSettingsWindow() {
 		updated.Integration.RegisterTorrentHandler = registerTorrent.Checked
 		updated.Integration.StartWithSystem = startWithSystem.Checked
 
-		if err := a.controller.SaveConfig(updated); err != nil {
-			dialog.ShowError(fmt.Errorf("settings saved with integration warnings:\n%w", err), win)
+		editedCreds := credentials.Credentials{
+			Username: usernameEntry.Text,
+			Password: passwordEntry.Text,
 		}
-		if a.controller.Config().Logging.Level != updated.Logging.Level {
-			return
+
+		var saveWithFallback func(appcore.CredentialFallbackChoice)
+		saveWithFallback = func(fallback appcore.CredentialFallbackChoice) {
+			result, err := a.controller.SaveSettings(context.Background(), updated, editedCreds, fallback)
+			if result.DecisionRequired {
+				message := "System keychain is unavailable.\n\nPress OK to save the connection credentials in plain text in the local config file.\nPress Cancel to keep the edited credentials only for this session."
+				if result.CredentialStatus.Message != "" {
+					message = result.CredentialStatus.Message + "\n\nPress OK to save the connection credentials in plain text in the local config file.\nPress Cancel to keep the edited credentials only for this session."
+				}
+				dialog.ShowConfirm("Store credentials as plain text?", message, func(ok bool) {
+					if ok {
+						saveWithFallback(appcore.CredentialFallbackPlaintext)
+						return
+					}
+					saveWithFallback(appcore.CredentialFallbackSessionOnly)
+				}, win)
+
+				return
+			}
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("settings saved with integration warnings:\n%w", err), win)
+			}
+			finishSave(updated)
 		}
-		logManager, err := logging.New(updated.Logging)
-		if err != nil {
-			dialog.ShowError(fmt.Errorf("apply log level: %w", err), win)
-			return
-		}
-		a.logger = logManager.Logger("ui")
-		a.controller.SetLogger(logManager.Logger("controller"))
-		a.logger.Info("updated log level from settings", "level", updated.Logging.Level)
-		a.refreshVisibleTorrents()
-		win.Close()
+
+		saveWithFallback(appcore.CredentialFallbackUnspecified)
 	})
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Connection", container.NewPadded(container.NewVBox(
 			connectionForm,
+			credentialWarning,
 			testButton,
 			testStatus,
 		))),
@@ -448,6 +491,52 @@ func (a *application) openSettingsWindow() {
 
 	win.SetContent(content)
 	win.Show()
+}
+
+func connectionCredentialStorageText(
+	mode config.CredentialStorageMode,
+	status credentials.Status,
+	session credentials.Credentials,
+) string {
+	switch mode {
+	case config.CredentialStorageKeychain:
+		if status.Backend != "" {
+			return "System keychain (" + status.Backend + ")"
+		}
+		return "System keychain"
+	case config.CredentialStoragePlaintext:
+		return "Plain text config file"
+	default:
+		if strings.TrimSpace(session.Username) != "" || session.Password != "" {
+			return "Session only"
+		}
+		return "Not saved"
+	}
+}
+
+func connectionCredentialWarningText(
+	mode config.CredentialStorageMode,
+	status credentials.Status,
+	session credentials.Credentials,
+) string {
+	switch mode {
+	case config.CredentialStorageKeychain:
+		if status.State == credentials.StateAvailable {
+			return ""
+		}
+		message := status.Message
+		if strings.TrimSpace(message) == "" {
+			message = "System keychain is currently unavailable."
+		}
+		return "Warning: Credentials are configured to use the system keychain, but it is currently unavailable. " + message
+	case config.CredentialStoragePlaintext:
+		return "Warning: Credentials are stored in plain text in the local config file."
+	default:
+		if strings.TrimSpace(session.Username) != "" || session.Password != "" {
+			return "Credentials are stored only in memory for this run."
+		}
+		return ""
+	}
 }
 
 func (a *application) handleInvocation(batch appcore.InvocationBatch) {

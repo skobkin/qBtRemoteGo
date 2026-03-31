@@ -23,11 +23,20 @@ type AppConfig struct {
 }
 
 type ConnectionConfig struct {
-	URL                  string `json:"url"`
-	Username             string `json:"username"`
-	Password             string `json:"password"` //nolint:gosec // User-managed qBittorrent credential persisted in the local app config.
-	SkipCertificateCheck bool   `json:"skip_certificate_check"`
+	URL                  string                `json:"url"`
+	CredentialStorage    CredentialStorageMode `json:"credential_storage,omitempty"`
+	Username             string                `json:"username,omitempty"`
+	Password             string                `json:"password,omitempty"` //nolint:gosec // User-managed qBittorrent credential persisted in the local app config.
+	SkipCertificateCheck bool                  `json:"skip_certificate_check"`
 }
+
+type CredentialStorageMode string
+
+const (
+	CredentialStorageNone      CredentialStorageMode = "none"
+	CredentialStoragePlaintext CredentialStorageMode = "plaintext"
+	CredentialStorageKeychain  CredentialStorageMode = "keychain"
+)
 
 type UIConfig struct {
 	RememberPathCount          int                `json:"remember_path_count"`
@@ -87,6 +96,7 @@ func Normalize(cfg *AppConfig) {
 
 	cfg.Connection.URL = strings.TrimSpace(cfg.Connection.URL)
 	cfg.Connection.Username = strings.TrimSpace(cfg.Connection.Username)
+	cfg.Connection.CredentialStorage = normalizeCredentialStorage(cfg.Connection.CredentialStorage)
 
 	if cfg.UI.RememberPathCount <= 0 {
 		cfg.UI.RememberPathCount = def.UI.RememberPathCount
@@ -215,6 +225,21 @@ func normalizePaths(paths []string, limit int) []string {
 	}
 
 	return out
+}
+
+func normalizeCredentialStorage(mode CredentialStorageMode) CredentialStorageMode {
+	switch strings.ToLower(strings.TrimSpace(string(mode))) {
+	case "":
+		return ""
+	case string(CredentialStorageNone):
+		return CredentialStorageNone
+	case string(CredentialStoragePlaintext):
+		return CredentialStoragePlaintext
+	case string(CredentialStorageKeychain):
+		return CredentialStorageKeychain
+	default:
+		return CredentialStorageNone
+	}
 }
 
 func isValidSortColumn(column string) bool {
