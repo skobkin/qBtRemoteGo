@@ -138,7 +138,7 @@ func (c *Controller) SaveSettings(
 		cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
 		cfg.Connection.Username = ""
 		cfg.Connection.Password = ""
-		saved, err := c.persistConfig(cfg)
+		saved, err := c.persistConfig(cfg, true)
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
@@ -149,7 +149,7 @@ func (c *Controller) SaveSettings(
 	}
 
 	if !credsChanged {
-		_, err := c.persistConfig(cfg)
+		_, err := c.persistConfig(cfg, true)
 		if err != nil {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
@@ -170,7 +170,7 @@ func (c *Controller) SaveSettings(
 
 func (c *Controller) SaveLocalUI(cfg config.AppConfig) error {
 	config.Normalize(&cfg)
-	saved, err := c.persistConfig(cfg)
+	saved, err := c.persistConfig(cfg, false)
 	if err != nil && !saved {
 		return err
 	}
@@ -652,13 +652,13 @@ func cmpFloat(a float64, b float64) int {
 	}
 }
 
-func (c *Controller) persistConfig(cfg config.AppConfig) (bool, error) {
+func (c *Controller) persistConfig(cfg config.AppConfig, syncIntegrations bool) (bool, error) {
 	if err := config.Save(c.configPath, cfg); err != nil {
 		return false, err
 	}
 
 	c.config = cfg
-	if c.platform == nil {
+	if !syncIntegrations || c.platform == nil {
 		return true, nil
 	}
 	if errs := c.platform.Sync(cfg.Integration); len(errs) > 0 {
@@ -744,7 +744,7 @@ func (c *Controller) saveWithFallback(
 		cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
 		cfg.Connection.Username = creds.Username
 		cfg.Connection.Password = creds.Password
-		saved, err := c.persistConfig(cfg)
+		saved, err := c.persistConfig(cfg, true)
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
@@ -762,7 +762,7 @@ func (c *Controller) saveWithFallback(
 		}
 		cfg.Connection.Username = ""
 		cfg.Connection.Password = ""
-		saved, err := c.persistConfig(cfg)
+		saved, err := c.persistConfig(cfg, true)
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}

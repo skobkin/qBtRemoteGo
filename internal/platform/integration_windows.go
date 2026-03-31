@@ -15,12 +15,12 @@ func syncHandlers(exePath string, cfg config.IntegrationConfig, logger *slog.Log
 	if err := syncMagnetHandler(exePath, cfg.RegisterMagnetHandler); err != nil {
 		errs = append(errs, fmt.Errorf("magnet handler: %w", err))
 	} else {
-		logger.Info("synced windows magnet handler", "enabled", cfg.RegisterMagnetHandler, "exe_path", exePath)
+		logger.Debug("synced windows magnet handler", "enabled", cfg.RegisterMagnetHandler, "exe_path", exePath)
 	}
 	if err := syncTorrentHandler(exePath, cfg.RegisterTorrentHandler); err != nil {
 		errs = append(errs, fmt.Errorf(".torrent handler: %w", err))
 	} else {
-		logger.Info("synced windows torrent handler", "enabled", cfg.RegisterTorrentHandler, "exe_path", exePath)
+		logger.Debug("synced windows torrent handler", "enabled", cfg.RegisterTorrentHandler, "exe_path", exePath)
 	}
 
 	return errs
@@ -66,14 +66,14 @@ func syncAutostart(exePath string, enabled bool, logger *slog.Logger) error {
 		if err := key.DeleteValue("qBtRemoteGo"); err != nil && err != registry.ErrNotExist {
 			return fmt.Errorf("delete autostart value: %w", err)
 		}
-		logger.Info("removed windows autostart entry")
+		logger.Debug("removed windows autostart entry")
 		return nil
 	}
 
 	if err := key.SetStringValue("qBtRemoteGo", fmt.Sprintf(`"%s"`, exePath)); err != nil {
 		return fmt.Errorf("set autostart value: %w", err)
 	}
-	logger.Info("wrote windows autostart entry", "exe_path", exePath)
+	logger.Debug("wrote windows autostart entry", "exe_path", exePath)
 
 	return nil
 }

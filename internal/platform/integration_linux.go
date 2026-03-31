@@ -32,9 +32,9 @@ func syncDesktopEntry(exePath string, cfg config.IntegrationConfig, logger *slog
 	desktopPath := filepath.Join(applicationsDir, desktopFileName)
 
 	mimeTypes := enabledMimeTypes(cfg)
-	logger.Info("syncing linux desktop handlers", "desktop_path", desktopPath, "mime_types", mimeTypes)
+	logger.Debug("syncing linux desktop handlers", "desktop_path", desktopPath, "mime_types", mimeTypes)
 	if len(mimeTypes) == 0 {
-		logger.Info("removing linux desktop handler registration", "desktop_path", desktopPath)
+		logger.Debug("removing linux desktop handler registration", "desktop_path", desktopPath)
 		_ = os.Remove(desktopPath)
 
 		return nil
@@ -59,7 +59,7 @@ func syncDesktopEntry(exePath string, cfg config.IntegrationConfig, logger *slog
 	if err := os.WriteFile(desktopPath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write desktop entry: %w", err)
 	}
-	logger.Info("wrote linux desktop entry", "desktop_path", desktopPath)
+	logger.Debug("wrote linux desktop entry", "desktop_path", desktopPath)
 
 	if err := tryCommand(logger, "update-desktop-database", applicationsDir); err != nil {
 		logger.Debug("update-desktop-database failed", "error", err)
@@ -69,7 +69,7 @@ func syncDesktopEntry(exePath string, cfg config.IntegrationConfig, logger *slog
 			logger.Debug("xdg-mime default failed", "mime_type", mimeType, "error", err)
 			continue
 		}
-		logger.Info("registered linux default handler", "desktop_file", desktopFileName, "mime_type", mimeType)
+		logger.Debug("registered linux default handler", "desktop_file", desktopFileName, "mime_type", mimeType)
 	}
 
 	return nil
@@ -94,7 +94,7 @@ func syncAutostart(exePath string, enabled bool, logger *slog.Logger) error {
 	}
 	path := filepath.Join(configDir, "autostart", desktopFileName)
 	if !enabled {
-		logger.Info("removing linux autostart entry", "path", path)
+		logger.Debug("removing linux autostart entry", "path", path)
 		_ = os.Remove(path)
 
 		return nil
@@ -118,7 +118,7 @@ func syncAutostart(exePath string, enabled bool, logger *slog.Logger) error {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write autostart entry: %w", err)
 	}
-	logger.Info("wrote linux autostart entry", "path", path, "exe_path", exePath)
+	logger.Debug("wrote linux autostart entry", "path", path, "exe_path", exePath)
 
 	return nil
 }
