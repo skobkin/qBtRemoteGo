@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -367,6 +368,12 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Register .torrent handler", registerTorrent),
 		widget.NewFormItem("Start with the system", startWithSystem),
 	)
+	integrationContent := []fyne.CanvasObject{integrationForm}
+	if runtime.GOOS == "windows" {
+		integrationHint := widget.NewLabel(platform.WindowsDefaultAppsSelectionHint())
+		integrationHint.Wrapping = fyne.TextWrapWord
+		integrationContent = append(integrationContent, integrationHint)
+	}
 
 	testButton := widget.NewButton("Test connection", func() {
 		testStatus.SetText("Testing connection...")
@@ -477,7 +484,7 @@ func (a *application) openSettingsWindow() {
 			testStatus,
 		))),
 		container.NewTabItem("UI", container.NewPadded(uiForm)),
-		container.NewTabItem("Integration", container.NewPadded(integrationForm)),
+		container.NewTabItem("Integration", container.NewPadded(container.NewVBox(integrationContent...))),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
