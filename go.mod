@@ -4,12 +4,12 @@ go 1.26
 
 require (
 	fyne.io/fyne/v2 v2.7.3
+	fyne.io/systray v1.12.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/sys v0.37.0
 )
 
 require (
-	fyne.io/systray v1.12.0 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
