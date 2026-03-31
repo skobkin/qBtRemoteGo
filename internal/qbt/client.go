@@ -214,6 +214,112 @@ func (c *Client) ServerState(ctx context.Context) (ServerState, error) {
 	return data.ServerState, nil
 }
 
+func (c *Client) TorrentProperties(ctx context.Context, hash string) (TorrentProperties, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return TorrentProperties{}, err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, "torrents/properties", nil)
+	if err != nil {
+		return TorrentProperties{}, err
+	}
+	query := req.URL.Query()
+	query.Set("hash", strings.TrimSpace(hash))
+	req.URL.RawQuery = query.Encode()
+
+	var properties TorrentProperties
+	if err := c.doJSON(req, &properties); err != nil {
+		return TorrentProperties{}, err
+	}
+
+	return properties, nil
+}
+
+func (c *Client) TorrentFiles(ctx context.Context, hash string) ([]TorrentFile, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return nil, err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, "torrents/files", nil)
+	if err != nil {
+		return nil, err
+	}
+	query := req.URL.Query()
+	query.Set("hash", strings.TrimSpace(hash))
+	req.URL.RawQuery = query.Encode()
+
+	var files []TorrentFile
+	if err := c.doJSON(req, &files); err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
+func (c *Client) TorrentTrackers(ctx context.Context, hash string) ([]TorrentTracker, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return nil, err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, "torrents/trackers", nil)
+	if err != nil {
+		return nil, err
+	}
+	query := req.URL.Query()
+	query.Set("hash", strings.TrimSpace(hash))
+	req.URL.RawQuery = query.Encode()
+
+	var trackers []TorrentTracker
+	if err := c.doJSON(req, &trackers); err != nil {
+		return nil, err
+	}
+
+	return trackers, nil
+}
+
+func (c *Client) TorrentWebSeeds(ctx context.Context, hash string) ([]TorrentWebSeed, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return nil, err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, "torrents/webseeds", nil)
+	if err != nil {
+		return nil, err
+	}
+	query := req.URL.Query()
+	query.Set("hash", strings.TrimSpace(hash))
+	req.URL.RawQuery = query.Encode()
+
+	var webSeeds []TorrentWebSeed
+	if err := c.doJSON(req, &webSeeds); err != nil {
+		return nil, err
+	}
+
+	return webSeeds, nil
+}
+
+func (c *Client) TorrentPeers(ctx context.Context, hash string, rid int) (TorrentPeersSync, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return TorrentPeersSync{}, err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, "sync/torrentPeers", nil)
+	if err != nil {
+		return TorrentPeersSync{}, err
+	}
+	query := req.URL.Query()
+	query.Set("hash", strings.TrimSpace(hash))
+	query.Set("rid", strconv.Itoa(rid))
+	req.URL.RawQuery = query.Encode()
+
+	var peers TorrentPeersSync
+	if err := c.doJSON(req, &peers); err != nil {
+		return TorrentPeersSync{}, err
+	}
+
+	return peers, nil
+}
+
 func (c *Client) Categories(ctx context.Context) ([]string, error) {
 	if err := c.ensureAuthenticated(ctx); err != nil {
 		return nil, err

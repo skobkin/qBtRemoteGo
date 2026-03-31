@@ -846,3 +846,80 @@ func TestServerStateLoadsFreeSpaceAndSlowMode(t *testing.T) {
 		t.Fatalf("unexpected state: %#v", state)
 	}
 }
+
+func TestTorrentDetailsEndpointsDecodeResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/properties":
+			_, _ = io.WriteString(w, `{"name":"Demo","hash":"abc","infohash_v1":"v1","infohash_v2":"v2","time_elapsed":3600,"share_ratio":1.5,"private":true,"progress":0.25}`)
+		case "/api/v2/torrents/files":
+			_, _ = io.WriteString(w, `[{"index":0,"name":"dir/file.bin","size":100,"progress":0.5,"priority":1,"availability":0.75,"piece_range":[0,3]}]`)
+		case "/api/v2/torrents/trackers":
+			_, _ = io.WriteString(w, `[{"url":"udp://tracker","tier":0,"status":2,"msg":"","num_peers":10,"num_seeds":5,"num_leeches":3,"num_downloaded":7}]`)
+		case "/api/v2/torrents/webseeds":
+			_, _ = io.WriteString(w, `[{"url":"https://seed.example/file"}]`)
+		case "/api/v2/sync/torrentPeers":
+			_, _ = io.WriteString(w, `{"rid":1,"full_update":true,"show_flags":false,"peers":{"1.2.3.4:6881":{"ip":"1.2.3.4","port":6881,"client":"qBittorrent","progress":0.7,"dl_speed":100,"up_speed":200,"downloaded":300,"uploaded":400,"connection":"uTP","flags":"D","flags_desc":"Downloading","relevance":1}}}`)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	properties, err := client.TorrentProperties(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("TorrentProperties() error = %v", err)
+	}
+	if properties.Name != "Demo" || properties.Hash != "abc" || properties.ShareRatio != 1.5 {
+		t.Fatalf("unexpected properties: %#v", properties)
+	}
+	if properties.Private == nil || !*properties.Private {
+		t.Fatalf("expected private flag to decode: %#v", properties.Private)
+	}
+
+	files, err := client.TorrentFiles(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("TorrentFiles() error = %v", err)
+	}
+	if len(files) != 1 || files[0].Name != "dir/file.bin" || files[0].PieceRange[1] != 3 {
+		t.Fatalf("unexpected files: %#v", files)
+	}
+
+	trackers, err := client.TorrentTrackers(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("TorrentTrackers() error = %v", err)
+	}
+	if len(trackers) != 1 || trackers[0].Peers != 10 || trackers[0].Status != 2 {
+		t.Fatalf("unexpected trackers: %#v", trackers)
+	}
+
+	webSeeds, err := client.TorrentWebSeeds(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("TorrentWebSeeds() error = %v", err)
+	}
+	if len(webSeeds) != 1 || webSeeds[0].URL == "" {
+		t.Fatalf("unexpected web seeds: %#v", webSeeds)
+	}
+
+	peers, err := client.TorrentPeers(context.Background(), "abc", 0)
+	if err != nil {
+		t.Fatalf("TorrentPeers() error = %v", err)
+	}
+	if peers.RID != 1 || len(peers.Peers) != 1 {
+		t.Fatalf("unexpected peers envelope: %#v", peers)
+	}
+	if peer := peers.Peers["1.2.3.4:6881"]; peer.Client != "qBittorrent" || peer.Connection != "uTP" {
+		t.Fatalf("unexpected peer payload: %#v", peer)
+	}
+}

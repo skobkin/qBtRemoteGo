@@ -70,6 +70,8 @@ type application struct {
 	tooltipManager *hoverTooltipManager
 	columnWidths   map[string]float32
 	previewX       float32
+	detailsHost    *torrentDetailsHost
+	detailsState   *torrentDetailsState
 
 	trayState trayState
 
@@ -133,6 +135,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		controller:    controller,
 		logManager:    logManager,
 		selection:     map[string]bool{},
+		detailsState:  newTorrentDetailsState(),
 		windowVisible: true,
 		statusLabel:   widget.NewLabel(""),
 	}
@@ -256,10 +259,11 @@ func (a *application) buildMainWindow() {
 	toolbar := container.NewBorder(nil, nil, leftTools, rightTools)
 
 	center := a.buildTorrentTable()
+	a.detailsHost = newTorrentDetailsHost(a, center)
 	statusIcons := container.NewHBox(a.slowModeIcon, a.connectionIcon)
 	statusBar := container.NewBorder(nil, nil, nil, statusIcons, a.statusLabel)
 	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, container.NewPadded(statusBar))
-	content := container.NewBorder(toolbar, bottom, nil, nil, center)
+	content := container.NewBorder(toolbar, bottom, nil, nil, a.detailsHost.Root())
 	a.window.SetContent(container.NewStack(content, a.tooltipLayer))
 
 	a.refreshVisibleTorrents()
@@ -369,6 +373,17 @@ func (a *application) openSettingsWindow() {
 	backgroundPoll.Validator = numberValidator
 	startMinimized := widget.NewCheck("", nil)
 	startMinimized.SetChecked(cfg.UI.StartMinimizedToTray)
+	detailsEnabled := widget.NewCheck("", nil)
+	detailsEnabled.SetChecked(cfg.UI.DetailsPanelEnabled)
+	detailsMode := widget.NewSelect([]string{"Disabled", "Right overlay", "Bottom pane"}, nil)
+	switch detailsModeFromConfig(cfg.UI) {
+	case detailsPanelModeOverlayRight:
+		detailsMode.SetSelected("Right overlay")
+	case detailsPanelModeBottomPane:
+		detailsMode.SetSelected("Bottom pane")
+	default:
+		detailsMode.SetSelected("Disabled")
+	}
 	sortBy := widget.NewSelect(sortColumnLabels(), nil)
 	sortBy.SetSelected(sortColumnLabel(cfg.UI.SortColumn))
 	sortDescending := widget.NewCheck("", nil)
@@ -408,6 +423,8 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Torrent list update time (seconds)", activePoll),
 		widget.NewFormItem("Background update time (seconds)", backgroundPoll),
 		widget.NewFormItem("Start minimized to tray", startMinimized),
+		widget.NewFormItem("Enable details panel", detailsEnabled),
+		widget.NewFormItem("Details panel mode", detailsMode),
 		widget.NewFormItem("Sort by", sortBy),
 		widget.NewFormItem("Descending order", sortDescending),
 		widget.NewFormItem("Log level", logLevel),
@@ -492,6 +509,8 @@ func (a *application) openSettingsWindow() {
 		// refresh probes it again.
 		a.serverVersion = ""
 		a.window.SetTitle(mainWindowTitle(a.connectionState, ""))
+		a.refreshDetailsPresentation()
+		a.ensureDetailsFocusForSelection()
 		a.refreshVisibleTorrents()
 		win.Close()
 		a.handlePendingInvocationAfterConnectionSetup()
@@ -524,6 +543,15 @@ func (a *application) openSettingsWindow() {
 		updated.UI.ActivePollSeconds = activeSeconds
 		updated.UI.BackgroundPollSeconds = backgroundSeconds
 		updated.UI.StartMinimizedToTray = startMinimized.Checked
+		updated.UI.DetailsPanelEnabled = detailsEnabled.Checked
+		switch detailsMode.Selected {
+		case "Right overlay":
+			updated.UI.DetailsPanelMode = string(detailsPanelModeOverlayRight)
+		case "Bottom pane":
+			updated.UI.DetailsPanelMode = string(detailsPanelModeBottomPane)
+		default:
+			updated.UI.DetailsPanelMode = string(detailsPanelModeOff)
+		}
 		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
 		updated.UI.SortDescending = sortDescending.Checked
 		updated.Logging.Level = logLevel.Selected
@@ -1094,6 +1122,7 @@ func (a *application) refreshVisibleTorrents() {
 		cfg.UI.SortDescending,
 	)
 	a.pruneSelectionToVisible()
+	a.ensureDetailsFocusForSelection()
 	if a.list != nil {
 		a.list.Refresh()
 	}
@@ -1203,6 +1232,7 @@ func (a *application) refreshNow() {
 			a.window.SetTitle(title)
 		}
 		a.refreshVisibleTorrents()
+		a.refreshActiveDetails()
 		a.updateTray()
 	})
 }
@@ -1497,6 +1527,7 @@ func (a *application) applyTorrentSelection(hash string, modifier fyne.KeyModifi
 		a.selectOnlyTorrent(hash)
 	}
 	a.refreshTorrentSelection()
+	a.ensureDetailsFocusForSelection()
 }
 
 func (a *application) prepareTorrentContextSelection(hash string) {
@@ -1508,6 +1539,7 @@ func (a *application) prepareTorrentContextSelection(hash string) {
 	}
 	a.selectOnlyTorrent(hash)
 	a.refreshTorrentSelection()
+	a.ensureDetailsFocusForSelection()
 }
 
 func (a *application) selectOnlyTorrent(hash string) {

@@ -234,6 +234,27 @@ func TestDefaultRememberLastSaveLocation(t *testing.T) {
 	}
 }
 
+func TestDefaultDetailsPanelDisabled(t *testing.T) {
+	if Default().UI.DetailsPanelEnabled {
+		t.Fatal("expected details panel to default to disabled")
+	}
+	if Default().UI.DetailsPanelMode != "off" {
+		t.Fatalf("unexpected details panel mode: %q", Default().UI.DetailsPanelMode)
+	}
+}
+
+func TestNormalizeInvalidDetailsPanelModeFallsBackToOff(t *testing.T) {
+	cfg := Default()
+	cfg.UI.DetailsPanelEnabled = true
+	cfg.UI.DetailsPanelMode = "drawer-left"
+
+	Normalize(&cfg)
+
+	if cfg.UI.DetailsPanelMode != "off" {
+		t.Fatalf("unexpected details mode: %q", cfg.UI.DetailsPanelMode)
+	}
+}
+
 func TestLoadMissingRememberLastSaveLocationDefaultsToTrue(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

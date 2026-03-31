@@ -262,6 +262,51 @@ func (c *Controller) FetchDefaultSavePath(ctx context.Context) (string, error) {
 	return client.DefaultSavePath(ctx)
 }
 
+func (c *Controller) FetchTorrentProperties(ctx context.Context, hash string) (qbt.TorrentProperties, error) {
+	client, err := c.client()
+	if err != nil {
+		return qbt.TorrentProperties{}, err
+	}
+
+	return client.TorrentProperties(ctx, hash)
+}
+
+func (c *Controller) FetchTorrentFiles(ctx context.Context, hash string) ([]qbt.TorrentFile, error) {
+	client, err := c.client()
+	if err != nil {
+		return nil, err
+	}
+
+	return client.TorrentFiles(ctx, hash)
+}
+
+func (c *Controller) FetchTorrentTrackers(ctx context.Context, hash string) ([]qbt.TorrentTracker, error) {
+	client, err := c.client()
+	if err != nil {
+		return nil, err
+	}
+
+	return client.TorrentTrackers(ctx, hash)
+}
+
+func (c *Controller) FetchTorrentWebSeeds(ctx context.Context, hash string) ([]qbt.TorrentWebSeed, error) {
+	client, err := c.client()
+	if err != nil {
+		return nil, err
+	}
+
+	return client.TorrentWebSeeds(ctx, hash)
+}
+
+func (c *Controller) FetchTorrentPeers(ctx context.Context, hash string, rid int) (qbt.TorrentPeersSync, error) {
+	client, err := c.client()
+	if err != nil {
+		return qbt.TorrentPeersSync{}, err
+	}
+
+	return client.TorrentPeers(ctx, hash, rid)
+}
+
 func (c *Controller) AddTorrent(ctx context.Context, data AddDialogData) error {
 	req, err := ValidateAddDialogData(data)
 	if err != nil {

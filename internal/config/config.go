@@ -50,6 +50,8 @@ type UIConfig struct {
 	BackgroundPollSeconds      int                `json:"background_poll_seconds"`
 	StartMinimizedToTray       bool               `json:"start_minimized_to_tray"`
 	AddTorrentAdvancedExpanded bool               `json:"add_torrent_advanced_expanded"`
+	DetailsPanelEnabled        bool               `json:"details_panel_enabled"`
+	DetailsPanelMode           string             `json:"details_panel_mode"`
 	FilterBy                   string             `json:"filter_by"`
 	SortColumn                 string             `json:"sort_column"`
 	SortDescending             bool               `json:"sort_descending"`
@@ -79,6 +81,8 @@ func Default() AppConfig {
 			BackgroundPollSeconds:      30,
 			StartMinimizedToTray:       false,
 			AddTorrentAdvancedExpanded: false,
+			DetailsPanelEnabled:        false,
+			DetailsPanelMode:           "off",
 			FilterBy:                   "name",
 			SortColumn:                 "added",
 			SortDescending:             true,
@@ -114,6 +118,9 @@ func Normalize(cfg *AppConfig) {
 	}
 	if cfg.UI.BackgroundPollSeconds <= 0 {
 		cfg.UI.BackgroundPollSeconds = def.UI.BackgroundPollSeconds
+	}
+	if !isValidDetailsPanelMode(cfg.UI.DetailsPanelMode) {
+		cfg.UI.DetailsPanelMode = def.UI.DetailsPanelMode
 	}
 	if cfg.UI.FilterBy != "name" && cfg.UI.FilterBy != "location" {
 		cfg.UI.FilterBy = def.UI.FilterBy
@@ -249,6 +256,10 @@ func isValidSortColumn(column string) bool {
 	return slices.Contains([]string{
 		"name", "size", "progress", "status", "down", "up", "eta", "added",
 	}, column)
+}
+
+func isValidDetailsPanelMode(mode string) bool {
+	return slices.Contains([]string{"off", "overlay_right", "bottom_pane"}, strings.ToLower(strings.TrimSpace(mode)))
 }
 
 func normalizeLogLevel(level string) string {

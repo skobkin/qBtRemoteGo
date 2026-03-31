@@ -406,6 +406,12 @@ func (r *torrentListRow) Tapped(*fyne.PointEvent) {
 	r.app.applyTorrentSelection(r.hash, r.modifier)
 }
 
+func (r *torrentListRow) DoubleTapped(*fyne.PointEvent) {
+	r.app.selectOnlyTorrent(r.hash)
+	r.app.refreshTorrentSelection()
+	r.app.openTorrentDetails(r.hash)
+}
+
 func (r *torrentListRow) TappedSecondary(event *fyne.PointEvent) {
 	r.app.prepareTorrentContextSelection(r.hash)
 	copyNameItem := fyne.NewMenuItem("Name", func() {
