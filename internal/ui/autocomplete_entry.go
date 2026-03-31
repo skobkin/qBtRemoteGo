@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -42,6 +44,7 @@ type pathAutocompleteEntry struct {
 	popupCanvas    fyne.Canvas
 	onTypedKey     func(*fyne.KeyEvent)
 	onTypedRune    func(rune)
+	popupShortcuts []fyne.Shortcut
 
 	mu            sync.Mutex
 	generation    uint64
@@ -419,17 +422,60 @@ func (e *pathAutocompleteEntry) installCanvasHandlers(canvas fyne.Canvas) {
 		}
 		e.TypedRune(r)
 	})
+	e.installCanvasShortcuts(canvas)
 }
 
 func (e *pathAutocompleteEntry) releaseCanvasHandlers() {
 	if e.popupCanvas == nil {
 		return
 	}
+	e.releaseCanvasShortcuts()
 	e.popupCanvas.SetOnTypedKey(e.onTypedKey)
 	e.popupCanvas.SetOnTypedRune(e.onTypedRune)
 	e.popupCanvas = nil
 	e.onTypedKey = nil
 	e.onTypedRune = nil
+}
+
+func (e *pathAutocompleteEntry) installCanvasShortcuts(canvas fyne.Canvas) {
+	if canvas == nil {
+		return
+	}
+
+	for _, shortcut := range e.canvasShortcuts() {
+		handler := shortcut
+		canvas.AddShortcut(handler, func(fyne.Shortcut) {
+			e.TypedShortcut(handler)
+		})
+		e.popupShortcuts = append(e.popupShortcuts, handler)
+	}
+}
+
+func (e *pathAutocompleteEntry) releaseCanvasShortcuts() {
+	if e.popupCanvas == nil {
+		e.popupShortcuts = nil
+		return
+	}
+	for _, shortcut := range e.popupShortcuts {
+		e.popupCanvas.RemoveShortcut(shortcut)
+	}
+	e.popupShortcuts = nil
+}
+
+func (e *pathAutocompleteEntry) canvasShortcuts() []fyne.Shortcut {
+	moveWordModifier := fyne.KeyModifierShortcutDefault
+	if runtime.GOOS == "darwin" {
+		moveWordModifier = fyne.KeyModifierAlt
+	}
+
+	return []fyne.Shortcut{
+		&desktop.CustomShortcut{KeyName: fyne.KeyLeft, Modifier: moveWordModifier},
+		&desktop.CustomShortcut{KeyName: fyne.KeyLeft, Modifier: moveWordModifier | fyne.KeyModifierShift},
+		&desktop.CustomShortcut{KeyName: fyne.KeyRight, Modifier: moveWordModifier},
+		&desktop.CustomShortcut{KeyName: fyne.KeyRight, Modifier: moveWordModifier | fyne.KeyModifierShift},
+		&desktop.CustomShortcut{KeyName: fyne.KeyBackspace, Modifier: moveWordModifier},
+		&desktop.CustomShortcut{KeyName: fyne.KeyDelete, Modifier: moveWordModifier},
+	}
 }
 
 func (e *pathAutocompleteEntry) moveSelection(delta int) {

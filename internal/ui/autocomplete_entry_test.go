@@ -3,10 +3,12 @@ package ui
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
 )
@@ -263,6 +265,48 @@ func TestPathAutocompleteEntryMouseWheelScrollsPopup(t *testing.T) {
 
 	if entry.popupScroll.Offset.Y <= 0 {
 		t.Fatalf("expected mouse wheel scrolling to move popup, got offset %v", entry.popupScroll.Offset.Y)
+	}
+}
+
+func TestPathAutocompleteEntryCtrlBackspaceWorksWithPopup(t *testing.T) {
+	test.NewTempApp(t)
+
+	entry := newPathAutocompleteEntryWithDelay(manyAutocompletePaths(), 0, nil, nil)
+	defer entry.Close()
+
+	win := test.NewWindow(entry)
+	defer win.Close()
+	win.Resize(fyne.NewSize(420, 300))
+	entry.Resize(fyne.NewSize(320, entry.MinSize().Height))
+	entry.Move(fyne.NewPos(20, 20))
+	entry.FocusGained()
+
+	fyne.DoAndWait(func() {
+		entry.SetText("/data/item-03")
+		entry.CursorColumn = len([]rune(entry.Text))
+	})
+
+	if !entry.popupVisible() {
+		t.Fatalf("expected popup to be visible")
+	}
+
+	fyne.DoAndWait(func() {
+		win.Canvas().Unfocus()
+	})
+
+	modifier := fyne.KeyModifierShortcutDefault
+	if runtime.GOOS == "darwin" {
+		modifier = fyne.KeyModifierAlt
+	}
+
+	fyne.DoAndWait(func() {
+		win.Canvas().(interface{ TypedShortcut(fyne.Shortcut) }).TypedShortcut(
+			&desktop.CustomShortcut{KeyName: fyne.KeyBackspace, Modifier: modifier},
+		)
+	})
+
+	if entry.Text != "/data/item-" {
+		t.Fatalf("expected ctrl+backspace to delete last path segment, got %q", entry.Text)
 	}
 }
 
