@@ -102,6 +102,140 @@ func TestExecuteRejectsUnexpectedRequestTarget(t *testing.T) {
 	}
 }
 
+func TestLoginAcceptsLegacyOKBody(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/app/version":
+			_, _ = io.WriteString(w, "5.1.2")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if err := client.TestConnection(context.Background()); err != nil {
+		t.Fatalf("test connection: %v", err)
+	}
+}
+
+func TestLoginAcceptsNoContentWithPortNamedSessionCookie(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			http.SetCookie(w, &http.Cookie{
+				Name:     "QBT_SID_8112",
+				Value:    "test-value",
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
+			})
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/v2/app/version":
+			cookie, err := r.Cookie("QBT_SID_8112")
+			if err != nil {
+				t.Fatalf("expected non-legacy session cookie: %v", err)
+			}
+			if cookie.Value != "test-value" {
+				t.Fatalf("unexpected cookie value: %q", cookie.Value)
+			}
+			_, _ = io.WriteString(w, "5.2.0")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if err := client.TestConnection(context.Background()); err != nil {
+		t.Fatalf("test connection: %v", err)
+	}
+}
+
+func TestLoginRejectsFailsBody(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Fails.")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "bad-pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	err = client.TestConnection(context.Background())
+	if err == nil {
+		t.Fatal("expected authentication failure")
+	}
+	if !strings.Contains(err.Error(), "authentication failed: Fails.") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoginRejectsErrorStatus(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			http.Error(w, "forbidden", http.StatusForbidden)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "bad-pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	err = client.TestConnection(context.Background())
+	if err == nil {
+		t.Fatal("expected login status failure")
+	}
+	if !strings.Contains(err.Error(), "auth/login returned 403 Forbidden") {
+		t.Fatalf("expected auth/login status in error, got %v", err)
+	}
+}
+
 func TestDirectorySuggestionsFiltersPrefix(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

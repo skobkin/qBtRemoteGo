@@ -477,13 +477,17 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 	}
 	defer closeAndLog(c.logger, resp.Body, "close auth/login response body")
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-	text := strings.TrimSpace(string(body))
-	if resp.StatusCode != http.StatusOK {
+	switch resp.StatusCode {
+	case http.StatusOK:
+		text := readLimitedResponseText(resp.Body, 2048)
+		if !strings.EqualFold(text, "ok.") && !strings.EqualFold(text, "ok") {
+			return fmt.Errorf("authentication failed: %s", text)
+		}
+	case http.StatusNoContent:
+	default:
+		text := readLimitedResponseText(resp.Body, 2048)
+
 		return fmt.Errorf("auth/login returned %s: %s", resp.Status, text)
-	}
-	if !strings.EqualFold(text, "ok.") && !strings.EqualFold(text, "ok") {
-		return fmt.Errorf("authentication failed: %s", text)
 	}
 
 	c.mu.Lock()
@@ -491,6 +495,12 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 	c.mu.Unlock()
 
 	return nil
+}
+
+func readLimitedResponseText(body io.Reader, limit int64) string {
+	data, _ := io.ReadAll(io.LimitReader(body, limit))
+
+	return strings.TrimSpace(string(data))
 }
 
 func (c *Client) newRequest(ctx context.Context, method string, endpoint string, body io.Reader) (*http.Request, error) {
