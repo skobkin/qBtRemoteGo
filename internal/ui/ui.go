@@ -1121,6 +1121,38 @@ func (a *application) openSetLocationDialog() {
 	setLocationDialog.Show()
 }
 
+func (a *application) openRenameTorrentDialog() {
+	torrent, ok := a.selectedRenameTarget()
+	if !ok {
+		dialog.ShowInformation("No torrent selected", "Select exactly one torrent first.", a.window)
+		return
+	}
+
+	hash := torrent.Hash
+	nameEntry := widget.NewEntry()
+	nameEntry.SetText(torrent.Name)
+
+	content := widget.NewForm(widget.NewFormItem("Name", nameEntry))
+	renameDialog := dialog.NewCustomConfirm("Rename torrent", "Rename", "Cancel", content, func(ok bool) {
+		if !ok {
+			return
+		}
+		name := nameEntry.Text
+		go func() {
+			err := a.controller.RenameTorrent(context.Background(), hash, name)
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("rename torrent: %w", err), a.window)
+					return
+				}
+				a.refreshNow()
+			})
+		}()
+	}, a.window)
+	renameDialog.Resize(relativeDialogSize(a.window.Canvas().Size(), renameDialog.MinSize(), 0.5))
+	renameDialog.Show()
+}
+
 func relativeDialogSize(parent fyne.Size, min fyne.Size, widthRatio float32) fyne.Size {
 	if parent.Width <= 0 || widthRatio <= 0 {
 		return min
@@ -1212,6 +1244,18 @@ func (a *application) commonSelectedSavePath(hashes []string) string {
 		}
 	}
 	return common
+}
+
+func (a *application) selectedRenameTarget() (qbt.Torrent, bool) {
+	if len(a.selection) != 1 {
+		return qbt.Torrent{}, false
+	}
+
+	for hash := range a.selection {
+		return a.findTorrentByHash(hash)
+	}
+
+	return qbt.Torrent{}, false
 }
 
 func (a *application) confirmDelete() {

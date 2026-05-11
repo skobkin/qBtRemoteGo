@@ -410,6 +410,12 @@ func (r *torrentListRow) TappedSecondary(event *fyne.PointEvent) {
 	}
 	copyItem := fyne.NewMenuItem("Copy", nil)
 	copyItem.ChildMenu = fyne.NewMenu("", copyNameItem, copyMagnetItem)
+	renameItem := fyne.NewMenuItem("Rename", func() {
+		r.app.openRenameTorrentDialog()
+	})
+	if _, ok := r.app.selectedRenameTarget(); !ok {
+		renameItem.Disabled = true
+	}
 
 	menu := fyne.NewMenu("",
 		fyne.NewMenuItem("Start", func() {
@@ -422,6 +428,7 @@ func (r *torrentListRow) TappedSecondary(event *fyne.PointEvent) {
 		fyne.NewMenuItem("Set location", func() {
 			r.app.openSetLocationDialog()
 		}),
+		renameItem,
 		fyne.NewMenuItem("Force recheck", func() {
 			r.app.forceRecheckSelectedTorrents()
 		}),

@@ -361,6 +361,13 @@ func (c *Client) SetLocation(ctx context.Context, hashes []string, location stri
 	})
 }
 
+func (c *Client) Rename(ctx context.Context, hash string, name string) error {
+	return c.postForm(ctx, "torrents/rename", url.Values{
+		"hash": []string{hash},
+		"name": []string{name},
+	})
+}
+
 func (c *Client) Delete(ctx context.Context, hashes []string, deleteFiles bool) error {
 	return c.postHashes(ctx, "torrents/delete", hashes, map[string]string{
 		"deleteFiles": strconv.FormatBool(deleteFiles),
@@ -436,14 +443,19 @@ func (c *Client) postHashes(ctx context.Context, endpoint string, hashes []strin
 	if len(hashes) == 0 {
 		return nil
 	}
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return err
-	}
 
 	form := url.Values{}
 	form.Set("hashes", strings.Join(hashes, "|"))
 	for key, value := range extra {
 		form.Set(key, value)
+	}
+
+	return c.postForm(ctx, endpoint, form)
+}
+
+func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values) error {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return err
 	}
 
 	req, err := c.newRequest(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))

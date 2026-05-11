@@ -334,6 +334,20 @@ func (c *Controller) SetTorrentLocation(ctx context.Context, hashes []string, lo
 	return nil
 }
 
+func (c *Controller) RenameTorrent(ctx context.Context, hash string, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("torrent name is required")
+	}
+
+	client, err := c.client()
+	if err != nil {
+		return err
+	}
+
+	return client.Rename(ctx, hash, name)
+}
+
 func (c *Controller) DeleteTorrents(ctx context.Context, hashes []string, deleteFiles bool) error {
 	client, err := c.client()
 	if err != nil {

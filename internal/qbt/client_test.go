@@ -330,6 +330,56 @@ func TestSetLocationPostsHashesAndLocation(t *testing.T) {
 	}
 }
 
+func TestRenamePostsHashAndName(t *testing.T) {
+	var (
+		contentType string
+		payload     string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/rename":
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			contentType = r.Header.Get("Content-Type")
+			data, _ := io.ReadAll(r.Body)
+			payload = string(data)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if err := client.Rename(context.Background(), "a", "New name"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if contentType != "application/x-www-form-urlencoded" {
+		t.Fatalf("unexpected content type: %q", contentType)
+	}
+	values, err := url.ParseQuery(payload)
+	if err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if got := values.Get("hash"); got != "a" {
+		t.Fatalf("unexpected hash: %q", got)
+	}
+	if got := values.Get("name"); got != "New name" {
+		t.Fatalf("unexpected name: %q", got)
+	}
+}
+
 func testHashesAction(t *testing.T, wantPath string, action func(context.Context, *Client, []string) error) url.Values {
 	t.Helper()
 

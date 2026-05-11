@@ -212,6 +212,78 @@ func TestCommonSelectedSavePath(t *testing.T) {
 	}
 }
 
+func TestSelectedRenameTarget(t *testing.T) {
+	tests := []struct {
+		name      string
+		selection map[string]bool
+		torrents  []qbt.Torrent
+		wantHash  string
+		wantOK    bool
+	}{
+		{
+			name:      "single selected torrent",
+			selection: map[string]bool{"a": true},
+			torrents: []qbt.Torrent{
+				{Hash: "a", Name: "Alpha"},
+			},
+			wantHash: "a",
+			wantOK:   true,
+		},
+		{
+			name: "zero selected torrents",
+			torrents: []qbt.Torrent{
+				{Hash: "a", Name: "Alpha"},
+			},
+		},
+		{
+			name: "multiple selected torrents",
+			selection: map[string]bool{
+				"a": true,
+				"b": true,
+			},
+			torrents: []qbt.Torrent{
+				{Hash: "a", Name: "Alpha"},
+				{Hash: "b", Name: "Beta"},
+			},
+		},
+		{
+			name:      "selected hash missing from torrent data",
+			selection: map[string]bool{"missing": true},
+			torrents: []qbt.Torrent{
+				{Hash: "a", Name: "Alpha"},
+			},
+		},
+		{
+			name: "multiple selected hashes with one missing from torrent data",
+			selection: map[string]bool{
+				"a":       true,
+				"missing": true,
+			},
+			torrents: []qbt.Torrent{
+				{Hash: "a", Name: "Alpha"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			app := &application{
+				selection:       tc.selection,
+				allTorrents:     tc.torrents,
+				visibleTorrents: tc.torrents,
+			}
+
+			got, ok := app.selectedRenameTarget()
+			if ok != tc.wantOK {
+				t.Fatalf("unexpected ok: got %t want %t", ok, tc.wantOK)
+			}
+			if got.Hash != tc.wantHash {
+				t.Fatalf("unexpected target hash: got %q want %q", got.Hash, tc.wantHash)
+			}
+		})
+	}
+}
+
 func TestRelativeDialogSizeUsesParentWidthRatio(t *testing.T) {
 	got := relativeDialogSize(fyne.NewSize(1000, 700), fyne.NewSize(240, 120), 0.85)
 	if got.Width != 850 || got.Height != 120 {

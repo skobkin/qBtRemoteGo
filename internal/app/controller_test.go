@@ -154,6 +154,22 @@ func TestSetTorrentLocationRejectsBlankLocation(t *testing.T) {
 	}
 }
 
+func TestRenameTorrentRejectsBlankName(t *testing.T) {
+	controller := newTestController(t, config.Default(), credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", nil },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	err := controller.RenameTorrent(context.Background(), "a", " \t ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := err.Error(); got != "torrent name is required" {
+		t.Fatalf("unexpected error: %q", got)
+	}
+}
+
 func TestNewControllerMigratesLegacyPlaintextCredentials(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
