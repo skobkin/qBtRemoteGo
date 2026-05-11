@@ -290,6 +290,24 @@ func (c *Controller) StopTorrents(ctx context.Context, hashes []string) error {
 	return client.Stop(ctx, hashes)
 }
 
+func (c *Controller) ForceRecheckTorrents(ctx context.Context, hashes []string) error {
+	client, err := c.client()
+	if err != nil {
+		return err
+	}
+
+	return client.ForceRecheck(ctx, hashes)
+}
+
+func (c *Controller) ForceReannounceTorrents(ctx context.Context, hashes []string) error {
+	client, err := c.client()
+	if err != nil {
+		return err
+	}
+
+	return client.ForceReannounce(ctx, hashes)
+}
+
 func (c *Controller) DeleteTorrents(ctx context.Context, hashes []string, deleteFiles bool) error {
 	client, err := c.client()
 	if err != nil {

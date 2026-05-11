@@ -347,6 +347,14 @@ func (c *Client) Stop(ctx context.Context, hashes []string) error {
 	return c.postHashes(ctx, "torrents/stop", hashes, nil)
 }
 
+func (c *Client) ForceRecheck(ctx context.Context, hashes []string) error {
+	return c.postHashes(ctx, "torrents/recheck", hashes, nil)
+}
+
+func (c *Client) ForceReannounce(ctx context.Context, hashes []string) error {
+	return c.postHashes(ctx, "torrents/reannounce", hashes, nil)
+}
+
 func (c *Client) Delete(ctx context.Context, hashes []string, deleteFiles bool) error {
 	return c.postHashes(ctx, "torrents/delete", hashes, map[string]string{
 		"deleteFiles": strconv.FormatBool(deleteFiles),

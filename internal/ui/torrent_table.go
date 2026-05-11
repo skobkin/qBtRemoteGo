@@ -399,6 +399,18 @@ func (r *torrentListRow) Tapped(*fyne.PointEvent) {
 
 func (r *torrentListRow) TappedSecondary(event *fyne.PointEvent) {
 	r.app.prepareTorrentContextSelection(r.hash)
+	copyNameItem := fyne.NewMenuItem("Name", func() {
+		r.app.copySelectedTorrentNames()
+	})
+	copyMagnetItem := fyne.NewMenuItem("Magnet link", func() {
+		r.app.copySelectedTorrentMagnetLinks()
+	})
+	if _, ok := r.app.selectedTorrentMagnetLinksText(); !ok {
+		copyMagnetItem.Disabled = true
+	}
+	copyItem := fyne.NewMenuItem("Copy", nil)
+	copyItem.ChildMenu = fyne.NewMenu("", copyNameItem, copyMagnetItem)
+
 	menu := fyne.NewMenu("",
 		fyne.NewMenuItem("Start", func() {
 			r.app.startSelectedTorrents()
@@ -406,6 +418,15 @@ func (r *torrentListRow) TappedSecondary(event *fyne.PointEvent) {
 		fyne.NewMenuItem("Stop", func() {
 			r.app.stopSelectedTorrents()
 		}),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Force recheck", func() {
+			r.app.forceRecheckSelectedTorrents()
+		}),
+		fyne.NewMenuItem("Force reannounce", func() {
+			r.app.forceReannounceSelectedTorrents()
+		}),
+		copyItem,
+		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Remove", func() {
 			r.app.confirmDelete()
 		}),

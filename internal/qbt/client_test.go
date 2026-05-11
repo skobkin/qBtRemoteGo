@@ -3,6 +3,7 @@ package qbt
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -295,6 +296,70 @@ func TestDefaultSavePathLoadsServerValue(t *testing.T) {
 	}
 	if path != "/srv/downloads" {
 		t.Fatalf("unexpected path: %q", path)
+	}
+}
+
+func TestTorrentsDecodesMagnetURI(t *testing.T) {
+	var torrent Torrent
+	if err := json.Unmarshal([]byte(`{"hash":"abc","name":"sample","magnet_uri":"magnet:?xt=urn:btih:abc"}`), &torrent); err != nil {
+		t.Fatalf("decode torrent: %v", err)
+	}
+	if torrent.MagnetURI != "magnet:?xt=urn:btih:abc" {
+		t.Fatalf("unexpected magnet URI: %q", torrent.MagnetURI)
+	}
+}
+
+func TestForceRecheckPostsHashes(t *testing.T) {
+	testHashesAction(t, "/api/v2/torrents/recheck", func(ctx context.Context, client *Client, hashes []string) error {
+		return client.ForceRecheck(ctx, hashes)
+	})
+}
+
+func TestForceReannouncePostsHashes(t *testing.T) {
+	testHashesAction(t, "/api/v2/torrents/reannounce", func(ctx context.Context, client *Client, hashes []string) error {
+		return client.ForceReannounce(ctx, hashes)
+	})
+}
+
+func testHashesAction(t *testing.T, wantPath string, action func(context.Context, *Client, []string) error) {
+	t.Helper()
+
+	var payload string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case wantPath:
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			data, _ := io.ReadAll(r.Body)
+			payload = string(data)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if err := action(context.Background(), client, []string{"a", "b"}); err != nil {
+		t.Fatalf("post hashes action: %v", err)
+	}
+	values, err := url.ParseQuery(payload)
+	if err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if got := values.Get("hashes"); got != "a|b" {
+		t.Fatalf("unexpected hashes: %q", got)
 	}
 }
 

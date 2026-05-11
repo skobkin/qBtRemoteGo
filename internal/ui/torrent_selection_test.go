@@ -60,6 +60,106 @@ func TestPrepareTorrentContextSelection(t *testing.T) {
 	}
 }
 
+func TestSelectedTorrentNamesTextSingle(t *testing.T) {
+	app := &application{
+		selection: map[string]bool{"a": true},
+		allTorrents: []qbt.Torrent{
+			{Hash: "a", Name: "Alpha"},
+		},
+		visibleTorrents: []qbt.Torrent{
+			{Hash: "a", Name: "Alpha"},
+		},
+	}
+
+	got, ok := app.selectedTorrentNamesText()
+	if !ok {
+		t.Fatal("expected copyable torrent name")
+	}
+	if got != "Alpha" {
+		t.Fatalf("unexpected names text: %q", got)
+	}
+}
+
+func TestSelectedTorrentNamesTextPreservesSelectedHashesOrder(t *testing.T) {
+	app := &application{
+		selection: map[string]bool{
+			"a": true,
+			"b": true,
+			"c": true,
+		},
+		allTorrents: []qbt.Torrent{
+			{Hash: "a", Name: "Alpha"},
+			{Hash: "b", Name: "Beta"},
+			{Hash: "c", Name: "Gamma"},
+		},
+		visibleTorrents: []qbt.Torrent{
+			{Hash: "b", Name: "Beta"},
+			{Hash: "a", Name: "Alpha"},
+		},
+	}
+
+	got, ok := app.selectedTorrentNamesText()
+	if !ok {
+		t.Fatal("expected copyable torrent names")
+	}
+	if got != "Beta\nAlpha\nGamma" {
+		t.Fatalf("unexpected names text: %q", got)
+	}
+}
+
+func TestSelectedTorrentMagnetLinksTextSkipsEmptyValues(t *testing.T) {
+	app := &application{
+		selection: map[string]bool{
+			"a": true,
+			"b": true,
+			"c": true,
+		},
+		allTorrents: []qbt.Torrent{
+			{Hash: "a", MagnetURI: "magnet:?xt=urn:btih:a"},
+			{Hash: "b"},
+			{Hash: "c", MagnetURI: "magnet:?xt=urn:btih:c"},
+		},
+		visibleTorrents: []qbt.Torrent{
+			{Hash: "a"},
+			{Hash: "b"},
+			{Hash: "c"},
+		},
+	}
+
+	got, ok := app.selectedTorrentMagnetLinksText()
+	if !ok {
+		t.Fatal("expected copyable magnet links")
+	}
+	if got != "magnet:?xt=urn:btih:a\nmagnet:?xt=urn:btih:c" {
+		t.Fatalf("unexpected magnet links text: %q", got)
+	}
+}
+
+func TestSelectedTorrentMagnetLinksTextAllEmpty(t *testing.T) {
+	app := &application{
+		selection: map[string]bool{
+			"a": true,
+			"b": true,
+		},
+		allTorrents: []qbt.Torrent{
+			{Hash: "a"},
+			{Hash: "b", MagnetURI: " "},
+		},
+		visibleTorrents: []qbt.Torrent{
+			{Hash: "a"},
+			{Hash: "b"},
+		},
+	}
+
+	got, ok := app.selectedTorrentMagnetLinksText()
+	if ok {
+		t.Fatalf("expected no copyable magnet links, got %q", got)
+	}
+	if got != "" {
+		t.Fatalf("unexpected magnet links text: %q", got)
+	}
+}
+
 func TestPruneSelectionToVisible(t *testing.T) {
 	app := &application{
 		selection: map[string]bool{

@@ -5,6 +5,7 @@ import "time"
 type Torrent struct {
 	Hash       string    `json:"hash"`
 	Name       string    `json:"name"`
+	MagnetURI  string    `json:"magnet_uri"`
 	Size       int64     `json:"size"`
 	Progress   float64   `json:"progress"`
 	State      string    `json:"state"`

@@ -1057,6 +1057,76 @@ func (a *application) stopSelectedTorrents() {
 	})
 }
 
+func (a *application) forceRecheckSelectedTorrents() {
+	a.runBulkAction("force recheck torrents", func(ctx context.Context, hashes []string) error {
+		return a.controller.ForceRecheckTorrents(ctx, hashes)
+	})
+}
+
+func (a *application) forceReannounceSelectedTorrents() {
+	a.runBulkAction("force reannounce torrents", func(ctx context.Context, hashes []string) error {
+		return a.controller.ForceReannounceTorrents(ctx, hashes)
+	})
+}
+
+func (a *application) copySelectedTorrentNames() {
+	content, ok := a.selectedTorrentNamesText()
+	if !ok || a.fyApp == nil {
+		return
+	}
+	a.fyApp.Clipboard().SetContent(content)
+}
+
+func (a *application) copySelectedTorrentMagnetLinks() {
+	content, ok := a.selectedTorrentMagnetLinksText()
+	if !ok || a.fyApp == nil {
+		return
+	}
+	a.fyApp.Clipboard().SetContent(content)
+}
+
+func (a *application) selectedTorrentNamesText() (string, bool) {
+	hashes := a.selectedHashes()
+	if len(hashes) == 0 {
+		return "", false
+	}
+
+	names := make([]string, 0, len(hashes))
+	for _, hash := range hashes {
+		torrent, ok := a.findTorrentByHash(hash)
+		if !ok {
+			continue
+		}
+		names = append(names, torrent.Name)
+	}
+	if len(names) == 0 {
+		return "", false
+	}
+
+	return strings.Join(names, "\n"), true
+}
+
+func (a *application) selectedTorrentMagnetLinksText() (string, bool) {
+	hashes := a.selectedHashes()
+	if len(hashes) == 0 {
+		return "", false
+	}
+
+	links := make([]string, 0, len(hashes))
+	for _, hash := range hashes {
+		torrent, ok := a.findTorrentByHash(hash)
+		if !ok || strings.TrimSpace(torrent.MagnetURI) == "" {
+			continue
+		}
+		links = append(links, torrent.MagnetURI)
+	}
+	if len(links) == 0 {
+		return "", false
+	}
+
+	return strings.Join(links, "\n"), true
+}
+
 func (a *application) confirmDelete() {
 	hashes := a.selectedHashes()
 	if len(hashes) == 0 {
