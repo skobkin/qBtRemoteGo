@@ -1033,6 +1033,10 @@ func (a *application) runBulkAction(label string, fn func(context.Context, []str
 		return
 	}
 
+	a.runBulkActionForHashes(label, hashes, fn)
+}
+
+func (a *application) runBulkActionForHashes(label string, hashes []string, fn func(context.Context, []string) error) {
 	go func() {
 		err := fn(context.Background(), hashes)
 		fyne.Do(func() {
@@ -1067,6 +1071,67 @@ func (a *application) forceReannounceSelectedTorrents() {
 	a.runBulkAction("force reannounce torrents", func(ctx context.Context, hashes []string) error {
 		return a.controller.ForceReannounceTorrents(ctx, hashes)
 	})
+}
+
+func (a *application) openSetLocationDialog() {
+	hashes := a.selectedHashes()
+	if len(hashes) == 0 {
+		dialog.ShowInformation("No selection", "Select at least one torrent first.", a.window)
+		return
+	}
+
+	cfg := a.controller.Config()
+	status := widget.NewLabel("")
+	status.Hide()
+	setStatus := func(message string) {
+		status.SetText(message)
+		if strings.TrimSpace(message) == "" {
+			status.Hide()
+			return
+		}
+		status.Show()
+	}
+
+	locationEntry := newPathAutocompleteEntry(
+		cfg.UI.RecentSavePaths,
+		a.controller.SuggestDirectories,
+		setStatus,
+	)
+	locationEntry.SetText(a.commonSelectedSavePath(hashes))
+
+	content := container.NewVBox(
+		widget.NewForm(widget.NewFormItem("Save location", locationEntry)),
+		status,
+	)
+	setLocationDialog := dialog.NewCustomConfirm("Set location", "Apply", "Cancel", content, func(ok bool) {
+		if !ok {
+			locationEntry.Close()
+			return
+		}
+		location := locationEntry.Text
+		locationEntry.Close()
+		a.runBulkActionForHashes("set torrent location", hashes, func(ctx context.Context, hashes []string) error {
+			return a.controller.SetTorrentLocation(ctx, hashes, location)
+		})
+	}, a.window)
+	setLocationDialog.SetOnClosed(func() {
+		locationEntry.Close()
+	})
+	setLocationDialog.Resize(relativeDialogSize(a.window.Canvas().Size(), setLocationDialog.MinSize(), 0.85))
+	setLocationDialog.Show()
+}
+
+func relativeDialogSize(parent fyne.Size, min fyne.Size, widthRatio float32) fyne.Size {
+	if parent.Width <= 0 || widthRatio <= 0 {
+		return min
+	}
+
+	width := parent.Width * widthRatio
+	if width < min.Width {
+		width = min.Width
+	}
+
+	return fyne.NewSize(width, min.Height)
 }
 
 func (a *application) copySelectedTorrentNames() {
@@ -1125,6 +1190,28 @@ func (a *application) selectedTorrentMagnetLinksText() (string, bool) {
 	}
 
 	return strings.Join(links, "\n"), true
+}
+
+func (a *application) commonSelectedSavePath(hashes []string) string {
+	var common string
+	for _, hash := range hashes {
+		torrent, ok := a.findTorrentByHash(hash)
+		if !ok {
+			return ""
+		}
+		savePath := strings.TrimSpace(torrent.SavePath)
+		if savePath == "" {
+			return ""
+		}
+		if common == "" {
+			common = savePath
+			continue
+		}
+		if savePath != common {
+			return ""
+		}
+	}
+	return common
 }
 
 func (a *application) confirmDelete() {

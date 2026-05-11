@@ -419,6 +419,9 @@ func (r *torrentListRow) TappedSecondary(event *fyne.PointEvent) {
 			r.app.stopSelectedTorrents()
 		}),
 		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Set location", func() {
+			r.app.openSetLocationDialog()
+		}),
 		fyne.NewMenuItem("Force recheck", func() {
 			r.app.forceRecheckSelectedTorrents()
 		}),

@@ -261,15 +261,22 @@ func (c *Controller) AddTorrent(ctx context.Context, data AddDialogData) error {
 		return err
 	}
 
+	c.rememberSavePath(req.SavePath, "add")
+
+	return nil
+}
+
+func (c *Controller) rememberSavePath(path string, trigger string) {
 	cfg := c.config
-	config.AddRecentPath(&cfg, req.SavePath)
+	config.AddRecentPath(&cfg, path)
+	if slices.Equal(cfg.UI.RecentSavePaths, c.config.UI.RecentSavePaths) {
+		return
+	}
 	if err := config.Save(c.configPath, cfg); err != nil {
-		c.logger.Warn("save config after add", "error", err)
+		c.logger.Warn("save config after recent path update", "trigger", trigger, "error", err)
 	} else {
 		c.config = cfg
 	}
-
-	return nil
 }
 
 func (c *Controller) StartTorrents(ctx context.Context, hashes []string) error {
@@ -306,6 +313,25 @@ func (c *Controller) ForceReannounceTorrents(ctx context.Context, hashes []strin
 	}
 
 	return client.ForceReannounce(ctx, hashes)
+}
+
+func (c *Controller) SetTorrentLocation(ctx context.Context, hashes []string, location string) error {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return errors.New("save location is required")
+	}
+
+	client, err := c.client()
+	if err != nil {
+		return err
+	}
+	if err := client.SetLocation(ctx, hashes, location); err != nil {
+		return err
+	}
+
+	c.rememberSavePath(location, "set_location")
+
+	return nil
 }
 
 func (c *Controller) DeleteTorrents(ctx context.Context, hashes []string, deleteFiles bool) error {

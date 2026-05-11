@@ -138,6 +138,22 @@ func TestHumanETA(t *testing.T) {
 	}
 }
 
+func TestSetTorrentLocationRejectsBlankLocation(t *testing.T) {
+	controller := newTestController(t, config.Default(), credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", nil },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	err := controller.SetTorrentLocation(context.Background(), []string{"a"}, " \t ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := err.Error(); got != "save location is required" {
+		t.Fatalf("unexpected error: %q", got)
+	}
+}
+
 func TestNewControllerMigratesLegacyPlaintextCredentials(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

@@ -321,7 +321,16 @@ func TestForceReannouncePostsHashes(t *testing.T) {
 	})
 }
 
-func testHashesAction(t *testing.T, wantPath string, action func(context.Context, *Client, []string) error) {
+func TestSetLocationPostsHashesAndLocation(t *testing.T) {
+	values := testHashesAction(t, "/api/v2/torrents/setLocation", func(ctx context.Context, client *Client, hashes []string) error {
+		return client.SetLocation(ctx, hashes, "/data/new")
+	})
+	if got := values.Get("location"); got != "/data/new" {
+		t.Fatalf("unexpected location: %q", got)
+	}
+}
+
+func testHashesAction(t *testing.T, wantPath string, action func(context.Context, *Client, []string) error) url.Values {
 	t.Helper()
 
 	var payload string
@@ -361,6 +370,7 @@ func testHashesAction(t *testing.T, wantPath string, action func(context.Context
 	if got := values.Get("hashes"); got != "a|b" {
 		t.Fatalf("unexpected hashes: %q", got)
 	}
+	return values
 }
 
 func TestAddTorrentEncodesMagnetFields(t *testing.T) {

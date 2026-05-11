@@ -160,6 +160,70 @@ func TestSelectedTorrentMagnetLinksTextAllEmpty(t *testing.T) {
 	}
 }
 
+func TestCommonSelectedSavePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		hashes   []string
+		torrents []qbt.Torrent
+		want     string
+	}{
+		{
+			name:   "single selected torrent",
+			hashes: []string{"a"},
+			torrents: []qbt.Torrent{
+				{Hash: "a", SavePath: "/data/main"},
+			},
+			want: "/data/main",
+		},
+		{
+			name:   "multiple selected torrents with same save path",
+			hashes: []string{"a", "b"},
+			torrents: []qbt.Torrent{
+				{Hash: "a", SavePath: "/data/main"},
+				{Hash: "b", SavePath: "/data/main"},
+			},
+			want: "/data/main",
+		},
+		{
+			name:   "mixed save paths",
+			hashes: []string{"a", "b"},
+			torrents: []qbt.Torrent{
+				{Hash: "a", SavePath: "/data/main"},
+				{Hash: "b", SavePath: "/data/other"},
+			},
+		},
+		{
+			name:   "empty save path",
+			hashes: []string{"a", "b"},
+			torrents: []qbt.Torrent{
+				{Hash: "a", SavePath: "/data/main"},
+				{Hash: "b"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			app := &application{allTorrents: tc.torrents}
+			if got := app.commonSelectedSavePath(tc.hashes); got != tc.want {
+				t.Fatalf("unexpected save path: got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRelativeDialogSizeUsesParentWidthRatio(t *testing.T) {
+	got := relativeDialogSize(fyne.NewSize(1000, 700), fyne.NewSize(240, 120), 0.85)
+	if got.Width != 850 || got.Height != 120 {
+		t.Fatalf("unexpected dialog size: %#v", got)
+	}
+
+	got = relativeDialogSize(fyne.NewSize(200, 700), fyne.NewSize(240, 120), 0.85)
+	if got.Width != 240 || got.Height != 120 {
+		t.Fatalf("expected minimum size to win, got %#v", got)
+	}
+}
+
 func TestPruneSelectionToVisible(t *testing.T) {
 	app := &application{
 		selection: map[string]bool{

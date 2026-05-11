@@ -355,6 +355,12 @@ func (c *Client) ForceReannounce(ctx context.Context, hashes []string) error {
 	return c.postHashes(ctx, "torrents/reannounce", hashes, nil)
 }
 
+func (c *Client) SetLocation(ctx context.Context, hashes []string, location string) error {
+	return c.postHashes(ctx, "torrents/setLocation", hashes, map[string]string{
+		"location": location,
+	})
+}
+
 func (c *Client) Delete(ctx context.Context, hashes []string, deleteFiles bool) error {
 	return c.postHashes(ctx, "torrents/delete", hashes, map[string]string{
 		"deleteFiles": strconv.FormatBool(deleteFiles),
