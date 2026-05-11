@@ -40,17 +40,19 @@ type application struct {
 
 	controller *appcore.Controller
 
-	allTorrents      []qbt.Torrent
-	visibleTorrents  []qbt.Torrent
-	selection        map[string]bool
-	selectionAnchor  string
-	filterQuery      string
-	transfer         qbt.TransferInfo
-	serverState      qbt.ServerState
-	serverStateKnown bool
-	lastError        string
-	windowVisible    bool
-	trayAvailable    bool
+	allTorrents       []qbt.Torrent
+	visibleTorrents   []qbt.Torrent
+	selection         map[string]bool
+	selectionAnchor   string
+	filterQuery       string
+	transfer          qbt.TransferInfo
+	serverState       qbt.ServerState
+	serverStateKnown  bool
+	lastError         string
+	windowVisible     bool
+	trayAvailable     bool
+	settingsWindow    fyne.Window
+	pendingInvocation appcore.InvocationBatch
 
 	list           *widget.List
 	tableHeader    *torrentHeaderRow
@@ -127,8 +129,9 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	ui.bindCloseBehavior()
 
 	startupSyncWarnings := platform.JoinErrors(controller.SyncIntegrations())
+	setupNeeded := needsConnectionSetup(controller.Config())
 
-	startHidden := controller.Config().UI.StartMinimizedToTray && ui.trayAvailable && initialInvocation.Empty() && startupSyncWarnings == ""
+	startHidden := !setupNeeded && controller.Config().UI.StartMinimizedToTray && ui.trayAvailable && initialInvocation.Empty() && startupSyncWarnings == ""
 	if startHidden {
 		ui.windowVisible = false
 	} else {
@@ -139,7 +142,12 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		dialog.ShowError(fmt.Errorf("integration warnings:\n%s", startupSyncWarnings), window)
 	}
 
-	if !initialInvocation.Empty() {
+	if setupNeeded {
+		fyne.Do(func() {
+			ui.deferInvocationUntilConnectionSetup(initialInvocation)
+			ui.openSettingsWindow()
+		})
+	} else if !initialInvocation.Empty() {
 		fyne.Do(func() {
 			ui.handleInvocation(initialInvocation)
 		})
@@ -152,7 +160,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 			}
 			batch := batch
 			fyne.Do(func() {
-				ui.handleInvocation(batch)
+				ui.handleOrDeferInvocation(batch)
 			})
 		}
 	}()
@@ -288,10 +296,22 @@ func (a *application) configureTray() {
 }
 
 func (a *application) openSettingsWindow() {
+	if a.settingsWindow != nil {
+		a.settingsWindow.Show()
+		a.settingsWindow.RequestFocus()
+		return
+	}
+
 	cfg := a.controller.Config()
 
 	win := a.fyApp.NewWindow("Settings")
+	a.settingsWindow = win
 	win.Resize(fyne.NewSize(620, 560))
+	win.SetOnClosed(func() {
+		if a.settingsWindow == win {
+			a.settingsWindow = nil
+		}
+	})
 
 	urlEntry := widget.NewEntry()
 	urlEntry.SetText(cfg.Connection.URL)
@@ -396,19 +416,19 @@ func (a *application) openSettingsWindow() {
 	})
 
 	finishSave := func(updated config.AppConfig) {
-		if a.controller.Config().Logging.Level != updated.Logging.Level {
-			return
+		if cfg.Logging.Level != updated.Logging.Level {
+			logManager, err := logging.New(updated.Logging)
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("apply log level: %w", err), win)
+				return
+			}
+			a.logger = logManager.Logger("ui")
+			a.controller.SetLogger(logManager.Logger("controller"))
+			a.logger.Info("updated log level from settings", "level", updated.Logging.Level)
 		}
-		logManager, err := logging.New(updated.Logging)
-		if err != nil {
-			dialog.ShowError(fmt.Errorf("apply log level: %w", err), win)
-			return
-		}
-		a.logger = logManager.Logger("ui")
-		a.controller.SetLogger(logManager.Logger("controller"))
-		a.logger.Info("updated log level from settings", "level", updated.Logging.Level)
 		a.refreshVisibleTorrents()
 		win.Close()
+		a.handlePendingInvocationAfterConnectionSetup()
 	}
 
 	saveButton := widget.NewButton("Save", func() {
@@ -500,6 +520,47 @@ func (a *application) openSettingsWindow() {
 	win.Show()
 }
 
+func needsConnectionSetup(cfg config.AppConfig) bool {
+	return strings.TrimSpace(cfg.Connection.URL) == ""
+}
+
+func mergeInvocationBatches(dst, src appcore.InvocationBatch) appcore.InvocationBatch {
+	dst.MagnetLinks = append(dst.MagnetLinks, src.MagnetLinks...)
+	dst.TorrentFiles = append(dst.TorrentFiles, src.TorrentFiles...)
+
+	return dst
+}
+
+func (a *application) handleOrDeferInvocation(batch appcore.InvocationBatch) {
+	if needsConnectionSetup(a.controller.Config()) {
+		a.deferInvocationUntilConnectionSetup(batch)
+		a.windowVisible = true
+		a.window.Show()
+		a.window.RequestFocus()
+		a.openSettingsWindow()
+		return
+	}
+
+	a.handleInvocation(batch)
+}
+
+func (a *application) deferInvocationUntilConnectionSetup(batch appcore.InvocationBatch) {
+	if batch.Empty() {
+		return
+	}
+	a.pendingInvocation = mergeInvocationBatches(a.pendingInvocation, batch)
+}
+
+func (a *application) handlePendingInvocationAfterConnectionSetup() {
+	if needsConnectionSetup(a.controller.Config()) || a.pendingInvocation.Empty() {
+		return
+	}
+
+	pending := a.pendingInvocation
+	a.pendingInvocation = appcore.InvocationBatch{}
+	a.handleInvocation(pending)
+}
+
 func connectionCredentialStorageText(
 	mode config.CredentialStorageMode,
 	status credentials.Status,
@@ -558,13 +619,10 @@ func (a *application) handleInvocation(batch appcore.InvocationBatch) {
 			MagnetLinks: batch.MagnetLinks,
 		})
 	}
-	if len(batch.TorrentFiles) > 0 {
-		if len(batch.TorrentFiles) > 1 {
-			a.logger.Warn("ignoring additional torrent files in invocation", "count", len(batch.TorrentFiles)-1)
-		}
+	for _, torrentFile := range batch.TorrentFiles {
 		a.openAddWindow(&appcore.AddDialogPrefill{
 			SourceType:      qbt.SourceTorrentFile,
-			TorrentFilePath: batch.TorrentFiles[0],
+			TorrentFilePath: torrentFile,
 		})
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
 
+	appcore "github.com/skobkin/qbtremotego/internal/app"
 	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/credentials"
 	"github.com/skobkin/qbtremotego/internal/qbt"
@@ -101,6 +102,67 @@ func TestAddTorrentWindowSize(t *testing.T) {
 	}
 	if got := addTorrentWindowSize(true); got != fyne.NewSize(720, 680) {
 		t.Fatalf("unexpected expanded size: %#v", got)
+	}
+}
+
+func TestNeedsConnectionSetup(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{
+			name: "blank URL requires setup",
+			url:  "",
+			want: true,
+		},
+		{
+			name: "whitespace URL requires setup",
+			url:  " \t\n ",
+			want: true,
+		},
+		{
+			name: "non-empty URL does not require setup",
+			url:  "https://example.invalid/qbt",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Connection.URL = tt.url
+
+			if got := needsConnectionSetup(cfg); got != tt.want {
+				t.Fatalf("unexpected setup requirement: got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeInvocationBatches(t *testing.T) {
+	pending := appcore.InvocationBatch{
+		MagnetLinks:  []string{"magnet:?xt=urn:btih:first"},
+		TorrentFiles: []string{"/tmp/first.torrent"},
+	}
+	next := appcore.InvocationBatch{
+		MagnetLinks:  []string{"magnet:?xt=urn:btih:second"},
+		TorrentFiles: []string{"/tmp/second.torrent"},
+	}
+
+	got := mergeInvocationBatches(pending, next)
+
+	if !equalStrings(got.MagnetLinks, []string{
+		"magnet:?xt=urn:btih:first",
+		"magnet:?xt=urn:btih:second",
+	}) {
+		t.Fatalf("unexpected magnet links: %#v", got.MagnetLinks)
+	}
+	if !equalStrings(got.TorrentFiles, []string{
+		"/tmp/first.torrent",
+		"/tmp/second.torrent",
+	}) {
+		t.Fatalf("unexpected torrent files: %#v", got.TorrentFiles)
 	}
 }
 
