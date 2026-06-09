@@ -16,6 +16,13 @@ type Paths struct {
 }
 
 const (
+	// ConfigFilename is the per-user config file name. The full path
+	// is resolved by ResolvePaths; keep the filename here so call
+	// sites and tests share a single source of truth.
+	ConfigFilename = "config.json"
+	// LogFilename is the per-user log file name. The full path is
+	// resolved by ResolvePaths; the file is opened lazily by the
+	// logging package when LogToFile is enabled.
 	LogFilename = "qbtremotego.log"
 )
 
@@ -34,7 +41,7 @@ func ResolvePaths() (Paths, error) {
 
 	return Paths{
 		RootDir:    dir,
-		ConfigFile: filepath.Join(dir, config.ConfigFileName),
+		ConfigFile: filepath.Join(dir, ConfigFilename),
 		LogFile:    filepath.Join(dir, LogFilename),
 	}, nil
 }

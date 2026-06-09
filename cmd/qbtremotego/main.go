@@ -111,15 +111,11 @@ func run() error {
 // If the log file cannot be opened (e.g. read-only config dir), the function
 // falls back to stdout-only logging and does not abort startup.
 func initBootstrapLogger() (*logging.Manager, error) {
-	configPath, err := config.DefaultConfigPath()
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return nil, err
-	}
 	paths, err := appcore.ResolvePaths()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := config.Load(paths.ConfigFile)
 	if err != nil {
 		return nil, err
 	}

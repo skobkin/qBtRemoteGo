@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	AppDirName     = "qbtremotego"
-	ConfigFileName = "config.json"
+	AppDirName = "qbtremotego"
 )
 
 type AppConfig struct {
@@ -174,15 +173,6 @@ func DefaultConfigDir() (string, error) {
 	}
 
 	return filepath.Join(base, AppDirName), nil
-}
-
-func DefaultConfigPath() (string, error) {
-	dir, err := DefaultConfigDir()
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Join(dir, ConfigFileName), nil
 }
 
 func AddRecentPath(cfg *AppConfig, path string) {

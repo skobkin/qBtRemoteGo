@@ -21,8 +21,8 @@ func TestResolvePaths(t *testing.T) {
 	if filepath.Base(paths.LogFile) != LogFilename {
 		t.Fatalf("expected LogFile to be named %q, got %q", LogFilename, paths.LogFile)
 	}
-	if filepath.Base(paths.ConfigFile) != "config.json" {
-		t.Fatalf("expected ConfigFile to be config.json, got %q", paths.ConfigFile)
+	if filepath.Base(paths.ConfigFile) != ConfigFilename {
+		t.Fatalf("expected ConfigFile to be %q, got %q", ConfigFilename, paths.ConfigFile)
 	}
 	if filepath.Dir(paths.LogFile) != paths.RootDir {
 		t.Fatalf("expected LogFile to live under RootDir, got %q under %q", paths.LogFile, paths.RootDir)

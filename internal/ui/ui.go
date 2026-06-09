@@ -82,17 +82,12 @@ type trayState struct {
 }
 
 func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.InvocationBatch) error {
-	configPath, err := config.DefaultConfigPath()
-	if err != nil {
-		return err
-	}
-
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-
 	paths, err := appcore.ResolvePaths()
+	if err != nil {
+		return err
+	}
+
+	cfg, err := config.Load(paths.ConfigFile)
 	if err != nil {
 		return err
 	}
