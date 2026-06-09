@@ -28,33 +28,9 @@ func main() {
 }
 
 func run() error {
-	// Configure the global slog logger as early as possible so that
-	// pre-init logs (single-instance lock, activation server) flow
-	// through the user-configured handler. The same manager is later
-	// re-configured in ui.Run for any settings saved during the
-	// session. See #13.
-	configPath, err := config.DefaultConfigPath()
+	bootstrapLog, err := initBootstrapLogger()
 	if err != nil {
 		return err
-	}
-	bootstrapCfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	bootstrapPaths, err := appcore.ResolvePaths()
-	if err != nil {
-		return err
-	}
-	bootstrapLog, err := logging.New(bootstrapCfg.Logging)
-	if err != nil {
-		return err
-	}
-	if err := bootstrapLog.Configure(bootstrapCfg.Logging, bootstrapPaths.LogFile); err != nil {
-		// Fall back to stdout-only if the log file cannot be opened
-		// (e.g. read-only config dir). Do not abort startup.
-		if _, lerr := logging.New(bootstrapCfg.Logging); lerr != nil {
-			return fmt.Errorf("configure logger: %w (fallback: %w)", err, lerr)
-		}
 	}
 	defer func() {
 		_ = bootstrapLog.Close()
@@ -125,6 +101,40 @@ func run() error {
 	}
 
 	return nil
+}
+
+// initBootstrapLogger configures the global slog logger as early as possible
+// so that pre-init logs (single-instance lock, activation server) flow through
+// the user-configured handler. The returned manager is later re-configured in
+// ui.Run for any settings saved during the session. See #13.
+//
+// If the log file cannot be opened (e.g. read-only config dir), the function
+// falls back to stdout-only logging and does not abort startup.
+func initBootstrapLogger() (*logging.Manager, error) {
+	configPath, err := config.DefaultConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := appcore.ResolvePaths()
+	if err != nil {
+		return nil, err
+	}
+
+	manager, err := logging.New(cfg.Logging)
+	if err != nil {
+		return nil, err
+	}
+	if err := manager.Configure(cfg.Logging, paths.LogFile); err != nil {
+		if _, lerr := logging.New(cfg.Logging); lerr != nil {
+			return nil, fmt.Errorf("configure logger: %w (fallback: %w)", err, lerr)
+		}
+	}
+
+	return manager, nil
 }
 
 func showActivationFailureDialog(err error) {
