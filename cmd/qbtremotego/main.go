@@ -12,6 +12,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 
 	appcore "github.com/skobkin/qbtremotego/internal/app"
+	"github.com/skobkin/qbtremotego/internal/config"
+	"github.com/skobkin/qbtremotego/internal/logging"
 	"github.com/skobkin/qbtremotego/internal/platform"
 	"github.com/skobkin/qbtremotego/internal/ui"
 )
@@ -26,6 +28,38 @@ func main() {
 }
 
 func run() error {
+	// Configure the global slog logger as early as possible so that
+	// pre-init logs (single-instance lock, activation server) flow
+	// through the user-configured handler. The same manager is later
+	// re-configured in ui.Run for any settings saved during the
+	// session. See #13.
+	configPath, err := config.DefaultConfigPath()
+	if err != nil {
+		return err
+	}
+	bootstrapCfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	bootstrapPaths, err := appcore.ResolvePaths()
+	if err != nil {
+		return err
+	}
+	bootstrapLog, err := logging.New(bootstrapCfg.Logging)
+	if err != nil {
+		return err
+	}
+	if err := bootstrapLog.Configure(bootstrapCfg.Logging, bootstrapPaths.LogFile); err != nil {
+		// Fall back to stdout-only if the log file cannot be opened
+		// (e.g. read-only config dir). Do not abort startup.
+		if _, lerr := logging.New(bootstrapCfg.Logging); lerr != nil {
+			return fmt.Errorf("configure logger: %w (fallback: %w)", err, lerr)
+		}
+	}
+	defer func() {
+		_ = bootstrapLog.Close()
+	}()
+
 	initialInvocation := appcore.ParseInvocationArgs(os.Args[1:])
 	if !initialInvocation.Empty() {
 		slog.Info(

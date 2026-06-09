@@ -60,7 +60,8 @@ type IntegrationConfig struct {
 }
 
 type LoggingConfig struct {
-	Level string `json:"level"`
+	Level     string `json:"level"`
+	LogToFile bool   `json:"log_to_file"`
 }
 
 func Default() AppConfig {
@@ -82,7 +83,8 @@ func Default() AppConfig {
 		},
 		Integration: IntegrationConfig{},
 		Logging: LoggingConfig{
-			Level: "info",
+			Level:     "info",
+			LogToFile: false,
 		},
 	}
 }
