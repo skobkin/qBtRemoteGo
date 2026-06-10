@@ -10,10 +10,6 @@ import (
 	"strings"
 )
 
-const (
-	AppDirName = "qbtremotego"
-)
-
 type AppConfig struct {
 	Connection  ConnectionConfig  `json:"connection"`
 	UI          UIConfig          `json:"ui"`
@@ -164,15 +160,6 @@ func Save(path string, cfg AppConfig) error {
 	}
 
 	return nil
-}
-
-func DefaultConfigDir() (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user config dir: %w", err)
-	}
-
-	return filepath.Join(base, AppDirName), nil
 }
 
 func AddRecentPath(cfg *AppConfig, path string) {
