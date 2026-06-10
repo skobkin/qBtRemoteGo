@@ -65,6 +65,7 @@
 
 ## Configuration & Data Paths
 - Runtime config is stored under `os.UserConfigDir()/qbtremotego/config.json`.
-- The app currently logs through `slog` to standard output; there is no repo-managed log file path to keep in sync.
+- When `logging.log_to_file` is enabled, the app appends to `os.UserConfigDir()/qbtremotego/qbtremotego.log` (`0o600`, mirror to stdout via `internal/logging/logging.go`).
+- The app falls back to stdout-only if the log file cannot be opened (e.g. read-only config dir); startup is not aborted.
 - Avoid hard-coding qBittorrent URLs, credentials, or user-specific filesystem paths in code or tests.
 - Treat OS integration sync as best-effort: failures should be reported clearly without breaking the rest of the app.

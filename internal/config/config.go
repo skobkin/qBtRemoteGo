@@ -10,11 +10,6 @@ import (
 	"strings"
 )
 
-const (
-	AppDirName     = "qbtremotego"
-	ConfigFileName = "config.json"
-)
-
 type AppConfig struct {
 	Connection  ConnectionConfig  `json:"connection"`
 	UI          UIConfig          `json:"ui"`
@@ -60,7 +55,8 @@ type IntegrationConfig struct {
 }
 
 type LoggingConfig struct {
-	Level string `json:"level"`
+	Level     string `json:"level"`
+	LogToFile bool   `json:"log_to_file"`
 }
 
 func Default() AppConfig {
@@ -82,7 +78,8 @@ func Default() AppConfig {
 		},
 		Integration: IntegrationConfig{},
 		Logging: LoggingConfig{
-			Level: "info",
+			Level:     "info",
+			LogToFile: false,
 		},
 	}
 }
@@ -163,24 +160,6 @@ func Save(path string, cfg AppConfig) error {
 	}
 
 	return nil
-}
-
-func DefaultConfigDir() (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user config dir: %w", err)
-	}
-
-	return filepath.Join(base, AppDirName), nil
-}
-
-func DefaultConfigPath() (string, error) {
-	dir, err := DefaultConfigDir()
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Join(dir, ConfigFileName), nil
 }
 
 func AddRecentPath(cfg *AppConfig, path string) {

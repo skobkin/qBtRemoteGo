@@ -183,6 +183,25 @@ func TestLoadMissingRememberLastSaveLocationDefaultsToTrue(t *testing.T) {
 	}
 }
 
+func TestLoadMissingLogToFileDefaultsToFalse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	// Existing config.json from before #13 landed: no log_to_file key.
+	data := []byte("{\n  \"logging\": {\n    \"level\": \"info\"\n  },\n  \"ui\": {}\n}\n")
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.Logging.LogToFile {
+		t.Fatal("expected missing log_to_file to default to false")
+	}
+}
+
 func TestNormalizeLoggingLevel(t *testing.T) {
 	tests := []struct {
 		name  string

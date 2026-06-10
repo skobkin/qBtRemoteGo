@@ -39,6 +39,7 @@ type application struct {
 	logger *slog.Logger
 
 	controller *appcore.Controller
+	logManager *logging.Manager
 
 	allTorrents       []qbt.Torrent
 	visibleTorrents   []qbt.Torrent
@@ -81,12 +82,12 @@ type trayState struct {
 }
 
 func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.InvocationBatch) error {
-	configPath, err := config.DefaultConfigPath()
+	paths, err := appcore.ResolvePaths()
 	if err != nil {
 		return err
 	}
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(paths.ConfigFile)
 	if err != nil {
 		return err
 	}
@@ -95,6 +96,15 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	if err != nil {
 		return err
 	}
+	// Open the log file (if enabled) so the bootstrap message below
+	// also lands on disk. If the file cannot be opened, fall back to
+	// stdout-only rather than aborting startup.
+	if cfgErr := logManager.Configure(cfg.Logging, paths.LogFile); cfgErr != nil {
+		slog.Warn("open log file at startup; continuing with stdout only", "error", cfgErr, "path", paths.LogFile)
+		if _, lerr := logging.New(cfg.Logging); lerr != nil {
+			return fmt.Errorf("configure logger: %w (fallback: %w)", cfgErr, lerr)
+		}
+	}
 
 	logManager.Logger("bootstrap").Info(
 		"starting qbtremotego",
@@ -102,7 +112,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		"build_date", appcore.BuildDateYMD(),
 	)
 
-	controller, err := appcore.NewController(configPath, logManager.Logger("controller"))
+	controller, err := appcore.NewController(paths.ConfigFile, logManager.Logger("controller"))
 	if err != nil {
 		return err
 	}
@@ -119,6 +129,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		window:        window,
 		logger:        logManager.Logger("ui"),
 		controller:    controller,
+		logManager:    logManager,
 		selection:     map[string]bool{},
 		windowVisible: true,
 		statusLabel:   widget.NewLabel(""),
@@ -167,6 +178,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 
 	go ui.pollLoop()
 	fyApp.Run()
+	_ = logManager.Close()
 
 	return nil
 }
@@ -355,6 +367,8 @@ func (a *application) openSettingsWindow() {
 	sortDescending.SetChecked(cfg.UI.SortDescending)
 	logLevel := widget.NewSelect(logging.SupportedLevels(), nil)
 	logLevel.SetSelected(cfg.Logging.Level)
+	logToFile := widget.NewCheck("", nil)
+	logToFile.SetChecked(cfg.Logging.LogToFile)
 
 	registerMagnet := widget.NewCheck("", nil)
 	registerMagnet.SetChecked(cfg.Integration.RegisterMagnetHandler)
@@ -381,6 +395,7 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Sort by", sortBy),
 		widget.NewFormItem("Descending order", sortDescending),
 		widget.NewFormItem("Log level", logLevel),
+		widget.NewFormItem("Log to file", logToFile),
 	)
 
 	integrationForm := widget.NewForm(
@@ -416,15 +431,23 @@ func (a *application) openSettingsWindow() {
 	})
 
 	finishSave := func(updated config.AppConfig) {
-		if cfg.Logging.Level != updated.Logging.Level {
-			logManager, err := logging.New(updated.Logging)
-			if err != nil {
-				dialog.ShowError(fmt.Errorf("apply log level: %w", err), win)
+		if cfg.Logging.Level != updated.Logging.Level || cfg.Logging.LogToFile != updated.Logging.LogToFile {
+			paths, pathsErr := appcore.ResolvePaths()
+			if pathsErr != nil {
+				dialog.ShowError(fmt.Errorf("resolve app paths: %w", pathsErr), win)
 				return
 			}
-			a.logger = logManager.Logger("ui")
-			a.controller.SetLogger(logManager.Logger("controller"))
-			a.logger.Info("updated log level from settings", "level", updated.Logging.Level)
+			if err := a.logManager.Configure(updated.Logging, paths.LogFile); err != nil {
+				dialog.ShowError(fmt.Errorf("apply log settings: %w", err), win)
+				return
+			}
+			a.logger = a.logManager.Logger("ui")
+			a.controller.SetLogger(a.logManager.Logger("controller"))
+			a.logger.Info(
+				"updated log settings from settings",
+				"level", updated.Logging.Level,
+				"log_to_file", updated.Logging.LogToFile,
+			)
 		}
 		a.refreshVisibleTorrents()
 		win.Close()
@@ -460,6 +483,7 @@ func (a *application) openSettingsWindow() {
 		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
 		updated.UI.SortDescending = sortDescending.Checked
 		updated.Logging.Level = logLevel.Selected
+		updated.Logging.LogToFile = logToFile.Checked
 		updated.Integration.RegisterMagnetHandler = registerMagnet.Checked
 		updated.Integration.RegisterTorrentHandler = registerTorrent.Checked
 		updated.Integration.StartWithSystem = startWithSystem.Checked
