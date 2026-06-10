@@ -112,7 +112,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		"build_date", appcore.BuildDateYMD(),
 	)
 
-	controller, err := appcore.NewController(configPath, logManager.Logger("controller"))
+	controller, err := appcore.NewController(paths.ConfigFile, logManager.Logger("controller"))
 	if err != nil {
 		return err
 	}
