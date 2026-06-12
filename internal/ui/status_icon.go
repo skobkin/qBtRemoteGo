@@ -32,7 +32,7 @@ func (h *hoverIcon) SetState(res fyne.Resource, tooltip string) {
 }
 
 func (h *hoverIcon) MouseIn(*desktop.MouseEvent) {
-	content := newTextTooltip(h.tooltip, 180)
+	content := newTextTooltip(h.tooltip, tooltipMaxWidthFor(h, tooltipMaxWidthRatio))
 	if content == nil {
 		return
 	}

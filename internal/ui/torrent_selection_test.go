@@ -296,6 +296,34 @@ func TestRelativeDialogSizeUsesParentWidthRatio(t *testing.T) {
 	}
 }
 
+func TestRelativeDialogSizeRejectsZeroParentWidth(t *testing.T) {
+	got := relativeDialogSize(fyne.NewSize(0, 700), fyne.NewSize(240, 120), 0.85)
+	if got.Width != 240 || got.Height != 120 {
+		t.Fatalf("expected minimum size when parent width is 0, got %#v", got)
+	}
+}
+
+func TestRelativeDialogSizeRejectsNegativeParentWidth(t *testing.T) {
+	got := relativeDialogSize(fyne.NewSize(-100, 700), fyne.NewSize(240, 120), 0.85)
+	if got.Width != 240 || got.Height != 120 {
+		t.Fatalf("expected minimum size when parent width is negative, got %#v", got)
+	}
+}
+
+func TestRelativeDialogSizeRejectsZeroWidthRatio(t *testing.T) {
+	got := relativeDialogSize(fyne.NewSize(1000, 700), fyne.NewSize(240, 120), 0)
+	if got.Width != 240 || got.Height != 120 {
+		t.Fatalf("expected minimum size when width ratio is 0, got %#v", got)
+	}
+}
+
+func TestRelativeDialogSizeRejectsNegativeWidthRatio(t *testing.T) {
+	got := relativeDialogSize(fyne.NewSize(1000, 700), fyne.NewSize(240, 120), -0.5)
+	if got.Width != 240 || got.Height != 120 {
+		t.Fatalf("expected minimum size when width ratio is negative, got %#v", got)
+	}
+}
+
 func TestPruneSelectionToVisible(t *testing.T) {
 	app := &application{
 		selection: map[string]bool{

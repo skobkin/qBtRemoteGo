@@ -33,7 +33,7 @@ func (h *buttonWithTooltip) SetTooltip(tooltip string) {
 
 func (h *buttonWithTooltip) MouseIn(ev *desktop.MouseEvent) {
 	h.Button.MouseIn(ev)
-	content := newTextTooltip(h.tooltip, 120)
+	content := newTextTooltip(h.tooltip, tooltipMaxWidthFor(h, tooltipMaxWidthRatio))
 	if content == nil {
 		return
 	}

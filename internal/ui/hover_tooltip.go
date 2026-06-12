@@ -12,7 +12,11 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-const tooltipHideDelay = 200 * time.Millisecond
+const (
+	tooltipHideDelay     = 200 * time.Millisecond
+	tooltipShowDelay     = 500 * time.Millisecond
+	tooltipMaxWidthRatio = 0.9
+)
 
 type tooltipOverlay struct {
 	widget.BaseWidget
@@ -39,6 +43,7 @@ func (o *tooltipOverlay) MinSize() fyne.Size {
 type hoverTooltipOwner struct {
 	hovered bool
 	hide    *time.Timer
+	show    *time.Timer
 	manager *hoverTooltipManager
 }
 
@@ -47,9 +52,41 @@ func (o *hoverTooltipOwner) showTooltip(owner fyne.CanvasObject, content fyne.Ca
 		return
 	}
 
+	o.cancelShow()
 	o.hovered = true
 	o.cancelHide()
 	o.manager.Show(owner, content)
+}
+
+func (o *hoverTooltipOwner) scheduleShow(owner fyne.CanvasObject, content fyne.CanvasObject, after time.Duration) {
+	if o == nil || content == nil {
+		return
+	}
+
+	o.cancelShow()
+	if after <= 0 {
+		o.showTooltip(owner, content)
+		return
+	}
+
+	o.show = time.AfterFunc(after, func() {
+		fyne.Do(func() {
+			if o == nil || o.show == nil {
+				return
+			}
+			o.show = nil
+			o.showTooltip(owner, content)
+		})
+	})
+}
+
+func (o *hoverTooltipOwner) cancelShow() {
+	if o == nil || o.show == nil {
+		return
+	}
+
+	o.show.Stop()
+	o.show = nil
 }
 
 func (o *hoverTooltipOwner) scheduleHide(owner fyne.CanvasObject) {
@@ -57,6 +94,7 @@ func (o *hoverTooltipOwner) scheduleHide(owner fyne.CanvasObject) {
 		return
 	}
 
+	o.cancelShow()
 	o.hovered = false
 	o.cancelHide()
 	o.hide = time.AfterFunc(tooltipHideDelay, func() {
@@ -152,20 +190,51 @@ func (m *hoverTooltipManager) Hide(owner fyne.CanvasObject) {
 	m.layer.layer.Refresh()
 }
 
-func newTextTooltip(text string, minWidth float32) fyne.CanvasObject {
+func newTextTooltip(text string, maxWidth float32) fyne.CanvasObject {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
 	}
 
-	label := widget.NewLabel(wrapTooltipText(text, minWidth-theme.Padding()*2))
+	labelText := text
+	if maxWidth > 0 {
+		labelText = wrapTooltipText(text, maxWidth-theme.Padding()*2)
+	}
+	label := widget.NewLabel(labelText)
 	padded := container.NewPadded(label)
 	size := padded.MinSize()
-	if size.Width < minWidth {
-		size.Width = minWidth
+	if maxWidth > 0 && size.Width > maxWidth {
+		size.Width = maxWidth
 	}
 
 	return container.NewGridWrap(size, padded)
+}
+
+// tooltipMaxWidthFor returns the maximum width a tooltip may use relative
+// to the canvas of owner. ratio=0.9 caps tooltips at 90% of the window
+// width. Returns 0 when the canvas size cannot be determined (no max
+// applied).
+func tooltipMaxWidthFor(owner fyne.CanvasObject, ratio float32) float32 {
+	if ratio <= 0 || owner == nil {
+		return 0
+	}
+	app := fyne.CurrentApp()
+	if app == nil {
+		return 0
+	}
+	driver := app.Driver()
+	if driver == nil {
+		return 0
+	}
+	cnv := driver.CanvasForObject(owner)
+	if cnv == nil {
+		return 0
+	}
+	size := cnv.Size()
+	if size.Width <= 0 {
+		return 0
+	}
+	return size.Width * ratio
 }
 
 func wrapTooltipText(text string, width float32) string {

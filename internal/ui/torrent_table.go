@@ -3,6 +3,7 @@ package ui
 import (
 	"image/color"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -56,6 +57,7 @@ type torrentListRow struct {
 	widget.BaseWidget
 	app        *application
 	background *canvas.Rectangle
+	hoverBG    *canvas.Rectangle
 	root       *fyne.Container
 	content    *fyne.Container
 	name       *hoverLabel
@@ -71,6 +73,8 @@ type torrentListRow struct {
 	separator  *widget.Separator
 	hash       string
 	modifier   fyne.KeyModifier
+	hovered    bool
+	hoverTimer *time.Timer
 }
 
 type columnResizeHandle struct {
@@ -86,8 +90,10 @@ type columnResizeHandle struct {
 type hoverLabel struct {
 	widget.BaseWidget
 	hoverTooltipOwner
-	label    *widget.Label
-	fullText string
+	label     *widget.Label
+	fullText  string
+	showDelay time.Duration
+	row       *torrentListRow
 }
 
 type torrentHeaderLayout struct {
@@ -305,18 +311,21 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row := &torrentListRow{
 		app:        app,
 		background: canvas.NewRectangle(theme.Color(theme.ColorNameSelection)),
-		name:       newHoverLabel(app.tooltipManager),
-		size:       newHoverLabel(app.tooltipManager),
-		progress:   widget.NewProgressBar(),
-		statusBG:   canvas.NewRectangle(color.Transparent),
-		statusTx:   widget.NewLabel(""),
-		down:       newHoverLabel(app.tooltipManager),
-		up:         newHoverLabel(app.tooltipManager),
-		eta:        newHoverLabel(app.tooltipManager),
-		added:      newHoverLabel(app.tooltipManager),
-		separator:  widget.NewSeparator(),
+		hoverBG:    canvas.NewRectangle(theme.Color(theme.ColorNameHover)),
 	}
+	row.name = newHoverLabel(app.tooltipManager, tooltipShowDelay, row)
+	row.size = newHoverLabel(app.tooltipManager, 0, row)
+	row.progress = widget.NewProgressBar()
+	row.statusBG = canvas.NewRectangle(color.Transparent)
+	row.statusTx = widget.NewLabel("")
+	row.down = newHoverLabel(app.tooltipManager, 0, row)
+	row.up = newHoverLabel(app.tooltipManager, 0, row)
+	row.eta = newHoverLabel(app.tooltipManager, 0, row)
+	row.added = newHoverLabel(app.tooltipManager, 0, row)
+	row.separator = widget.NewSeparator()
+
 	row.background.Hide()
+	row.hoverBG.Hide()
 	row.name.label.Truncation = fyne.TextTruncateEllipsis
 	row.size.label.Truncation = fyne.TextTruncateEllipsis
 	row.down.label.Truncation = fyne.TextTruncateEllipsis
@@ -336,7 +345,7 @@ func newTorrentListRow(app *application) *torrentListRow {
 		row.added,
 		row.separator,
 	)
-	row.root = container.NewStack(row.background, row.content)
+	row.root = container.NewStack(row.background, row.hoverBG, row.content)
 	row.ExtendBaseWidget(row)
 	return row
 }
@@ -652,12 +661,51 @@ func (r *columnResizeHandleRenderer) BackgroundColor() color.Color {
 	return color.Transparent
 }
 
-func newHoverLabel(manager *hoverTooltipManager) *hoverLabel {
+// hoverIn marks the row as hovered and shows the hover background. If a
+// pending hoverOut timer exists (cursor moving between cells in the same
+// row), it is cancelled so the row stays highlighted.
+func (r *torrentListRow) hoverIn() {
+	if r.hoverTimer != nil {
+		r.hoverTimer.Stop()
+		r.hoverTimer = nil
+	}
+	if r.hovered {
+		return
+	}
+	r.hovered = true
+	r.hoverBG.Show()
+	r.hoverBG.Refresh()
+}
+
+// hoverOut schedules the hover background to be hidden after a short delay.
+// The delay lets the cursor traverse gaps between cells (e.g. the status /
+// progress areas) without flashing the highlight off and back on.
+func (r *torrentListRow) hoverOut() {
+	if r.hoverTimer != nil {
+		r.hoverTimer.Stop()
+	}
+	r.hoverTimer = time.AfterFunc(50*time.Millisecond, func() {
+		fyne.Do(func() {
+			if !r.hovered {
+				r.hoverTimer = nil
+				return
+			}
+			r.hovered = false
+			r.hoverBG.Hide()
+			r.hoverBG.Refresh()
+			r.hoverTimer = nil
+		})
+	})
+}
+
+func newHoverLabel(manager *hoverTooltipManager, showDelay time.Duration, row *torrentListRow) *hoverLabel {
 	label := widget.NewLabel("")
 	label.Truncation = fyne.TextTruncateEllipsis
 	h := &hoverLabel{
 		hoverTooltipOwner: hoverTooltipOwner{manager: manager},
 		label:             label,
+		showDelay:         showDelay,
+		row:               row,
 	}
 	h.ExtendBaseWidget(h)
 	return h
@@ -669,6 +717,7 @@ func (h *hoverLabel) SetAlignment(alignment fyne.TextAlign) {
 }
 
 func (h *hoverLabel) SetText(display string, hover string) {
+	h.cancelShow()
 	h.hideTooltip(h)
 	h.label.SetText(display)
 	if strings.TrimSpace(hover) == "" {
@@ -679,14 +728,22 @@ func (h *hoverLabel) SetText(display string, hover string) {
 }
 
 func (h *hoverLabel) MouseIn(*desktop.MouseEvent) {
+	if h.row != nil {
+		h.row.hoverIn()
+	}
 	if strings.TrimSpace(h.fullText) == "" {
 		return
 	}
-	if h.fullText == h.label.Text && h.label.MinSize().Width <= h.Size().Width {
+	textWidth := fyne.MeasureText(h.fullText, theme.TextSize(), fyne.TextStyle{}).Width
+	if textWidth <= h.Size().Width {
 		return
 	}
-	content := newTextTooltip(h.fullText, 160)
+	content := newTextTooltip(h.fullText, tooltipMaxWidthFor(h, tooltipMaxWidthRatio))
 	if content == nil {
+		return
+	}
+	if h.showDelay > 0 {
+		h.scheduleShow(h, content, h.showDelay)
 		return
 	}
 	h.showTooltip(h, content)
@@ -696,6 +753,9 @@ func (h *hoverLabel) MouseMoved(*desktop.MouseEvent) {
 }
 
 func (h *hoverLabel) MouseOut() {
+	if h.row != nil {
+		h.row.hoverOut()
+	}
 	h.scheduleHide(h)
 }
 

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -291,6 +294,62 @@ func TestSaveSettingsSessionOnlyKeepsKeychainModeDuringTemporaryOutage(t *testin
 	}
 	if controller.SessionCredentials().Username != "temp-user" || controller.SessionCredentials().Password != "temp-pass" {
 		t.Fatalf("unexpected session credentials: %#v", controller.SessionCredentials())
+	}
+}
+
+func TestSetTorrentLocationHappyPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/setLocation":
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			data, _ := io.ReadAll(r.Body)
+			values, _ := url.ParseQuery(string(data))
+			if got := values.Get("location"); got != "/data/new" {
+				t.Fatalf("unexpected location: got %q want %q", got, "/data/new")
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server.URL
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	store := credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", nil },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	)
+
+	controller, err := newController(path, slog.New(slog.NewTextHandler(io.Discard, nil)), store)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	controller.platform = nil
+	controller.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	err = controller.SetTorrentLocation(context.Background(), []string{"abc123"}, "/data/new")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(controller.config.UI.RecentSavePaths) != 1 {
+		t.Fatalf("expected 1 recent path, got %d: %#v", len(controller.config.UI.RecentSavePaths), controller.config.UI.RecentSavePaths)
+	}
+	if controller.config.UI.RecentSavePaths[0] != "/data/new" {
+		t.Fatalf("unexpected recent path: %q", controller.config.UI.RecentSavePaths[0])
 	}
 }
 
