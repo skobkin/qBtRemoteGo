@@ -3,6 +3,7 @@ package ui
 import (
 	"image/color"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -86,8 +87,9 @@ type columnResizeHandle struct {
 type hoverLabel struct {
 	widget.BaseWidget
 	hoverTooltipOwner
-	label    *widget.Label
-	fullText string
+	label     *widget.Label
+	fullText  string
+	showDelay time.Duration
 }
 
 type torrentHeaderLayout struct {
@@ -305,15 +307,15 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row := &torrentListRow{
 		app:        app,
 		background: canvas.NewRectangle(theme.Color(theme.ColorNameSelection)),
-		name:       newHoverLabel(app.tooltipManager),
-		size:       newHoverLabel(app.tooltipManager),
+		name:       newHoverLabel(app.tooltipManager, tooltipShowDelay),
+		size:       newHoverLabel(app.tooltipManager, 0),
 		progress:   widget.NewProgressBar(),
 		statusBG:   canvas.NewRectangle(color.Transparent),
 		statusTx:   widget.NewLabel(""),
-		down:       newHoverLabel(app.tooltipManager),
-		up:         newHoverLabel(app.tooltipManager),
-		eta:        newHoverLabel(app.tooltipManager),
-		added:      newHoverLabel(app.tooltipManager),
+		down:       newHoverLabel(app.tooltipManager, 0),
+		up:         newHoverLabel(app.tooltipManager, 0),
+		eta:        newHoverLabel(app.tooltipManager, 0),
+		added:      newHoverLabel(app.tooltipManager, 0),
 		separator:  widget.NewSeparator(),
 	}
 	row.background.Hide()
@@ -652,12 +654,13 @@ func (r *columnResizeHandleRenderer) BackgroundColor() color.Color {
 	return color.Transparent
 }
 
-func newHoverLabel(manager *hoverTooltipManager) *hoverLabel {
+func newHoverLabel(manager *hoverTooltipManager, showDelay time.Duration) *hoverLabel {
 	label := widget.NewLabel("")
 	label.Truncation = fyne.TextTruncateEllipsis
 	h := &hoverLabel{
 		hoverTooltipOwner: hoverTooltipOwner{manager: manager},
 		label:             label,
+		showDelay:         showDelay,
 	}
 	h.ExtendBaseWidget(h)
 	return h
@@ -669,6 +672,7 @@ func (h *hoverLabel) SetAlignment(alignment fyne.TextAlign) {
 }
 
 func (h *hoverLabel) SetText(display string, hover string) {
+	h.cancelShow()
 	h.hideTooltip(h)
 	h.label.SetText(display)
 	if strings.TrimSpace(hover) == "" {
@@ -687,6 +691,10 @@ func (h *hoverLabel) MouseIn(*desktop.MouseEvent) {
 	}
 	content := newTextTooltip(h.fullText, 160)
 	if content == nil {
+		return
+	}
+	if h.showDelay > 0 {
+		h.scheduleShow(h, content, h.showDelay)
 		return
 	}
 	h.showTooltip(h, content)

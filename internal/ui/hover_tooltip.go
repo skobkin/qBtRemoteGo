@@ -12,7 +12,10 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-const tooltipHideDelay = 200 * time.Millisecond
+const (
+	tooltipHideDelay = 200 * time.Millisecond
+	tooltipShowDelay = 500 * time.Millisecond
+)
 
 type tooltipOverlay struct {
 	widget.BaseWidget
@@ -39,6 +42,7 @@ func (o *tooltipOverlay) MinSize() fyne.Size {
 type hoverTooltipOwner struct {
 	hovered bool
 	hide    *time.Timer
+	show    *time.Timer
 	manager *hoverTooltipManager
 }
 
@@ -47,9 +51,41 @@ func (o *hoverTooltipOwner) showTooltip(owner fyne.CanvasObject, content fyne.Ca
 		return
 	}
 
+	o.cancelShow()
 	o.hovered = true
 	o.cancelHide()
 	o.manager.Show(owner, content)
+}
+
+func (o *hoverTooltipOwner) scheduleShow(owner fyne.CanvasObject, content fyne.CanvasObject, after time.Duration) {
+	if o == nil || content == nil {
+		return
+	}
+
+	o.cancelShow()
+	if after <= 0 {
+		o.showTooltip(owner, content)
+		return
+	}
+
+	o.show = time.AfterFunc(after, func() {
+		fyne.Do(func() {
+			if o == nil || o.show == nil {
+				return
+			}
+			o.show = nil
+			o.showTooltip(owner, content)
+		})
+	})
+}
+
+func (o *hoverTooltipOwner) cancelShow() {
+	if o == nil || o.show == nil {
+		return
+	}
+
+	o.show.Stop()
+	o.show = nil
 }
 
 func (o *hoverTooltipOwner) scheduleHide(owner fyne.CanvasObject) {
@@ -57,6 +93,7 @@ func (o *hoverTooltipOwner) scheduleHide(owner fyne.CanvasObject) {
 		return
 	}
 
+	o.cancelShow()
 	o.hovered = false
 	o.cancelHide()
 	o.hide = time.AfterFunc(tooltipHideDelay, func() {

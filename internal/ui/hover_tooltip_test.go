@@ -149,3 +149,126 @@ func TestWrapTooltipTextWrapsLongParagraph(t *testing.T) {
 		t.Fatalf("expected wrapped tooltip text, got %q", wrapped)
 	}
 }
+
+func TestHoverTooltipOwnerScheduleShowFiresAfterDelay(t *testing.T) {
+	test.NewTempApp(t)
+
+	layer := newTooltipOverlay()
+	layer.Resize(fyne.NewSize(320, 240))
+	manager := newHoverTooltipManager(layer)
+
+	owner := widget.NewLabel("owner")
+	win := test.NewWindow(container.NewStack(owner, layer))
+	defer win.Close()
+	win.Resize(fyne.NewSize(320, 240))
+	owner.Resize(owner.MinSize())
+	owner.Move(fyne.NewPos(20, 20))
+
+	state := hoverTooltipOwner{manager: manager}
+
+	fyne.DoAndWait(func() {
+		state.scheduleShow(owner, widget.NewLabel("tip"), tooltipShowDelay)
+	})
+	if len(layer.layer.Objects) != 0 {
+		t.Fatalf("tooltip should not be visible immediately after schedule, got %d objects", len(layer.layer.Objects))
+	}
+
+	time.Sleep(tooltipShowDelay + 50*time.Millisecond)
+	fyne.DoAndWait(func() {})
+
+	if len(layer.layer.Objects) != 1 {
+		t.Fatalf("expected tooltip to be visible after delay, got %d objects", len(layer.layer.Objects))
+	}
+}
+
+func TestHoverTooltipOwnerScheduleShowCanBeCancelled(t *testing.T) {
+	test.NewTempApp(t)
+
+	layer := newTooltipOverlay()
+	layer.Resize(fyne.NewSize(320, 240))
+	manager := newHoverTooltipManager(layer)
+
+	owner := widget.NewLabel("owner")
+	win := test.NewWindow(container.NewStack(owner, layer))
+	defer win.Close()
+	win.Resize(fyne.NewSize(320, 240))
+	owner.Resize(owner.MinSize())
+	owner.Move(fyne.NewPos(20, 20))
+
+	state := hoverTooltipOwner{manager: manager}
+
+	fyne.DoAndWait(func() {
+		state.scheduleShow(owner, widget.NewLabel("tip"), tooltipShowDelay)
+	})
+	time.Sleep(tooltipShowDelay / 4)
+	fyne.DoAndWait(func() {
+		state.cancelShow()
+	})
+	time.Sleep(tooltipShowDelay + 50*time.Millisecond)
+	fyne.DoAndWait(func() {})
+
+	if len(layer.layer.Objects) != 0 {
+		t.Fatalf("tooltip should not appear after cancel, got %d objects", len(layer.layer.Objects))
+	}
+}
+
+func TestHoverTooltipOwnerScheduleHideCancelsPendingShow(t *testing.T) {
+	test.NewTempApp(t)
+
+	layer := newTooltipOverlay()
+	layer.Resize(fyne.NewSize(320, 240))
+	manager := newHoverTooltipManager(layer)
+
+	owner := widget.NewLabel("owner")
+	win := test.NewWindow(container.NewStack(owner, layer))
+	defer win.Close()
+	win.Resize(fyne.NewSize(320, 240))
+	owner.Resize(owner.MinSize())
+	owner.Move(fyne.NewPos(20, 20))
+
+	state := hoverTooltipOwner{manager: manager}
+
+	fyne.DoAndWait(func() {
+		state.scheduleShow(owner, widget.NewLabel("tip"), tooltipShowDelay)
+		state.scheduleHide(owner)
+	})
+	time.Sleep(tooltipShowDelay + tooltipHideDelay + 50*time.Millisecond)
+	fyne.DoAndWait(func() {})
+
+	if len(layer.layer.Objects) != 0 {
+		t.Fatalf("tooltip should not appear after hide cancels pending show, got %d objects", len(layer.layer.Objects))
+	}
+}
+
+func TestHoverTooltipLabelSetTextCancelsPendingShow(t *testing.T) {
+	test.NewTempApp(t)
+
+	layer := newTooltipOverlay()
+	layer.Resize(fyne.NewSize(320, 240))
+	manager := newHoverTooltipManager(layer)
+
+	owner := newHoverLabel(manager, tooltipShowDelay)
+	owner.Resize(fyne.NewSize(200, 20))
+	owner.Move(fyne.NewPos(20, 20))
+	win := test.NewWindow(container.NewStack(owner, layer))
+	defer win.Close()
+	win.Resize(fyne.NewSize(320, 240))
+
+	fyne.DoAndWait(func() {
+		owner.SetText("a very long torrent name that will be truncated by the cell width", "a very long torrent name that will be truncated by the cell width")
+		owner.MouseIn(nil)
+	})
+	if len(layer.layer.Objects) != 0 {
+		t.Fatalf("tooltip should not be visible immediately after MouseIn, got %d objects", len(layer.layer.Objects))
+	}
+
+	fyne.DoAndWait(func() {
+		owner.SetText("different long torrent name that should not show the old tooltip", "different long torrent name that should not show the old tooltip")
+	})
+	time.Sleep(tooltipShowDelay + 50*time.Millisecond)
+	fyne.DoAndWait(func() {})
+
+	if len(layer.layer.Objects) != 0 {
+		t.Fatalf("SetText should cancel pending show, got %d objects", len(layer.layer.Objects))
+	}
+}
