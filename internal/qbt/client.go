@@ -26,6 +26,7 @@ type Client struct {
 	baseURL    *url.URL
 	username   string
 	password   string
+	apiKey     string
 	httpClient *http.Client
 	logger     *slog.Logger
 
@@ -37,7 +38,32 @@ type ClientConfig struct {
 	URL                  string
 	Username             string
 	Password             string
+	APIKey               string
 	SkipCertificateCheck bool
+}
+
+const (
+	apiKeyPrefix = "qbt_"
+	apiKeyLength = 32
+)
+
+// ValidateAPIKey reports whether key matches the qBittorrent WebAPI key format:
+// 32 characters, prefix "qbt_" followed by 28 alphanumeric characters.
+func ValidateAPIKey(key string) error {
+	if len(key) != apiKeyLength || !strings.HasPrefix(key, apiKeyPrefix) {
+		return errors.New("invalid API key: expected 32 characters starting with \"qbt_\" (generated in qBittorrent Preferences > WebUI > API Key)")
+	}
+	for _, r := range key[len(apiKeyPrefix):] {
+		if !isASCIIAlphanumeric(r) {
+			return errors.New("invalid API key: expected only alphanumeric characters after the \"qbt_\" prefix")
+		}
+	}
+
+	return nil
+}
+
+func isASCIIAlphanumeric(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
 }
 
 func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
@@ -67,10 +93,18 @@ func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
 
+	apiKey := strings.TrimSpace(cfg.APIKey)
+	if apiKey != "" {
+		if err := ValidateAPIKey(apiKey); err != nil {
+			return nil, err
+		}
+	}
+
 	return &Client{
 		baseURL:  base,
 		username: cfg.Username,
 		password: cfg.Password,
+		apiKey:   apiKey,
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Jar:       jar,
@@ -97,9 +131,16 @@ func (c *Client) TestConnection(ctx context.Context) error {
 	defer closeAndLog(c.logger, resp.Body, "close app/version response body")
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		body := readLimitedResponseText(resp.Body, 2048)
+		if c.apiKey != "" && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return fmt.Errorf(
+				"app/version returned %s: %s. API-key authentication may have failed: the key might be invalid or no longer current "+
+					"(qBittorrent invalidates the previous key when it is rotated), the server might not support API keys "+
+					"(qBittorrent v5.2.0 or newer is required), or the server or an intermediate proxy might have denied the request",
+				resp.Status, body)
+		}
 
-		return fmt.Errorf("app/version returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return fmt.Errorf("app/version returned %s: %s", resp.Status, body)
 	}
 
 	return nil
@@ -480,6 +521,12 @@ func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values)
 }
 
 func (c *Client) ensureAuthenticated(ctx context.Context) error {
+	if c.apiKey != "" {
+		// API keys authenticate statelessly via the Authorization header; qBittorrent
+		// rejects them on the auth endpoints, so login must never be attempted.
+		return nil
+	}
+
 	c.mu.Lock()
 	alreadyAuthenticated := c.authenticated
 	c.mu.Unlock()
@@ -540,6 +587,9 @@ func (c *Client) newRequest(ctx context.Context, method string, endpoint string,
 	req, err := http.NewRequestWithContext(ctx, method, target.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("build request %s: %w", endpoint, err)
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
 	return req, nil

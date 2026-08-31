@@ -53,8 +53,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg := Default()
 	cfg.Connection.URL = "https://example.invalid/qbt"
 	cfg.Connection.CredentialStorage = CredentialStoragePlaintext
+	cfg.Connection.AuthMethod = AuthMethodAPIKey
 	cfg.Connection.Username = "demo"
 	cfg.Connection.Password = "secret"
+	cfg.Connection.APIKey = "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	cfg.UI.AddTorrentAdvancedExpanded = true
 	cfg.UI.ColumnWidths = map[string]float32{"name": 480, "progress": 160}
 	cfg.UI.RecentSavePaths = []string{"/data/one", "/data/two"}
@@ -78,6 +80,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if loaded.Connection.Username != "demo" || loaded.Connection.Password != "secret" {
 		t.Fatalf("unexpected credentials: %#v", loaded.Connection)
 	}
+	if loaded.Connection.AuthMethod != AuthMethodAPIKey {
+		t.Fatalf("unexpected auth method: %q", loaded.Connection.AuthMethod)
+	}
+	if loaded.Connection.APIKey != "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("unexpected API key: %q", loaded.Connection.APIKey)
+	}
 	if !loaded.UI.AddTorrentAdvancedExpanded {
 		t.Fatal("expected advanced add-torrent state to round-trip")
 	}
@@ -100,6 +108,63 @@ func TestNormalizeCredentialStorage(t *testing.T) {
 
 	if cfg.Connection.CredentialStorage != CredentialStorageKeychain {
 		t.Fatalf("unexpected credential storage: %q", cfg.Connection.CredentialStorage)
+	}
+}
+
+func TestNormalizeAuthMethod(t *testing.T) {
+	tests := []struct {
+		name   string
+		method AuthMethod
+		want   AuthMethod
+	}{
+		{name: "empty defaults to password", method: "", want: AuthMethodPassword},
+		{name: "unknown falls back to password", method: "bogus", want: AuthMethodPassword},
+		{name: "case and space insensitive", method: " Api_Key ", want: AuthMethodAPIKey},
+		{name: "api key preserved", method: AuthMethodAPIKey, want: AuthMethodAPIKey},
+		{name: "password preserved", method: AuthMethodPassword, want: AuthMethodPassword},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Connection.AuthMethod = tc.method
+
+			Normalize(&cfg)
+
+			if cfg.Connection.AuthMethod != tc.want {
+				t.Fatalf("unexpected auth method: got %q, want %q", cfg.Connection.AuthMethod, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeTrimsAPIKey(t *testing.T) {
+	cfg := Default()
+	cfg.Connection.APIKey = "  qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+
+	Normalize(&cfg)
+
+	if cfg.Connection.APIKey != "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("unexpected trimmed API key: %q", cfg.Connection.APIKey)
+	}
+}
+
+func TestLoadLegacyConfigDefaultsToPasswordAuth(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	data := []byte("{\n  \"connection\": {\n    \"url\": \"https://example.invalid/qbt\",\n    \"username\": \"demo\"\n  }\n}\n")
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if loaded.Connection.AuthMethod != AuthMethodPassword {
+		t.Fatalf("expected legacy config to default to password auth, got %q", loaded.Connection.AuthMethod)
 	}
 }
 
@@ -132,7 +197,7 @@ func TestSaveOmitsScrubbedKeychainCredentials(t *testing.T) {
 		t.Fatalf("read config: %v", err)
 	}
 	text := string(data)
-	if containsAny(text, `"username"`, `"password"`) {
+	if containsAny(text, `"username":`, `"password":`, `"api_key":`) {
 		t.Fatalf("expected scrubbed config to omit credentials:\n%s", text)
 	}
 }

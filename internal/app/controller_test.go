@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -294,6 +296,292 @@ func TestSaveSettingsSessionOnlyKeepsKeychainModeDuringTemporaryOutage(t *testin
 	}
 	if controller.SessionCredentials().Username != "temp-user" || controller.SessionCredentials().Password != "temp-pass" {
 		t.Fatalf("unexpected session credentials: %#v", controller.SessionCredentials())
+	}
+}
+
+var testAPIKey = "qbt_" + strings.Repeat("a", 28)
+
+func newCapturingKeychainStore() (credentials.Store, *string) {
+	var raw string
+	store := credentials.NewStoreForTests(
+		func(service, user string) (string, error) {
+			if raw == "" {
+				return "", keyring.ErrNotFound
+			}
+			return raw, nil
+		},
+		func(service, user, password string) error {
+			raw = password
+			return nil
+		},
+		func(service, user string) error { return nil },
+	)
+
+	return store, &raw
+}
+
+func decodeStoredPayload(t *testing.T, raw string) credentials.Credentials {
+	t.Helper()
+
+	var stored struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		APIKey   string `json:"api_key"`
+	}
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		t.Fatalf("decode stored payload %q: %v", raw, err)
+	}
+
+	return credentials.Credentials{Username: stored.Username, Password: stored.Password, APIKey: stored.APIKey}
+}
+
+func TestSaveSettingsAPIKeyDropsPasswordCredentials(t *testing.T) {
+	store, raw := newCapturingKeychainStore()
+	controller := newTestController(t, config.Default(), store)
+
+	updated := controller.Config()
+	updated.Connection.AuthMethod = config.AuthMethodAPIKey
+
+	if _, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
+		Username: "demo",
+		Password: "secret",
+		APIKey:   testAPIKey,
+	}, CredentialFallbackUnspecified); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+
+	stored := decodeStoredPayload(t, *raw)
+	if stored.Username != "" || stored.Password != "" {
+		t.Fatalf("expected keychain payload to drop password credentials, got %#v", stored)
+	}
+	if stored.APIKey != testAPIKey {
+		t.Fatalf("unexpected stored API key: %q", stored.APIKey)
+	}
+	if got := controller.SessionCredentials(); got != (credentials.Credentials{APIKey: testAPIKey}) {
+		t.Fatalf("unexpected session credentials: %#v", got)
+	}
+	conn := controller.Config().Connection
+	if conn.Username != "" || conn.Password != "" || conn.APIKey != "" {
+		t.Fatalf("expected config to be scrubbed, got %#v", conn)
+	}
+}
+
+func TestSaveSettingsPasswordDropsAPIKey(t *testing.T) {
+	store, raw := newCapturingKeychainStore()
+	controller := newTestController(t, config.Default(), store)
+
+	updated := controller.Config()
+
+	if _, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
+		Username: "demo",
+		Password: "secret",
+		APIKey:   testAPIKey,
+	}, CredentialFallbackUnspecified); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+
+	stored := decodeStoredPayload(t, *raw)
+	if stored.APIKey != "" {
+		t.Fatalf("expected keychain payload to drop the API key, got %#v", stored)
+	}
+	if stored.Username != "demo" || stored.Password != "secret" {
+		t.Fatalf("unexpected stored credentials: %#v", stored)
+	}
+	if got := controller.SessionCredentials(); got != (credentials.Credentials{Username: "demo", Password: "secret"}) {
+		t.Fatalf("unexpected session credentials: %#v", got)
+	}
+}
+
+func TestSaveSettingsAPIKeyPlaintextFallbackDropsPasswordCredentials(t *testing.T) {
+	controller := newTestController(t, config.Default(), credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", errors.New("keychain unavailable") },
+		func(service, user, password string) error { return errors.New("keychain unavailable") },
+		func(service, user string) error { return nil },
+	))
+
+	updated := controller.Config()
+	updated.Connection.AuthMethod = config.AuthMethodAPIKey
+
+	if _, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
+		Username: "demo",
+		Password: "secret",
+		APIKey:   testAPIKey,
+	}, CredentialFallbackPlaintext); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+
+	conn := controller.Config().Connection
+	if conn.CredentialStorage != config.CredentialStoragePlaintext {
+		t.Fatalf("unexpected storage mode: %q", conn.CredentialStorage)
+	}
+	if conn.Username != "" || conn.Password != "" {
+		t.Fatalf("expected plaintext config to drop password credentials, got %#v", conn)
+	}
+	if conn.APIKey != testAPIKey {
+		t.Fatalf("unexpected persisted API key: %q", conn.APIKey)
+	}
+	if got := controller.SessionCredentials(); got != (credentials.Credentials{APIKey: testAPIKey}) {
+		t.Fatalf("unexpected session credentials: %#v", got)
+	}
+}
+
+func TestControllerUsesAPIKeyAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/auth/login" {
+			t.Fatalf("API key auth must never call auth/login")
+		}
+		switch r.URL.Path {
+		case "/api/v2/torrents/info":
+			if got := r.Header.Get("Authorization"); got != "Bearer "+testAPIKey {
+				t.Fatalf("unexpected Authorization header: %q", got)
+			}
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server.URL
+	cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
+	cfg.Connection.AuthMethod = config.AuthMethodAPIKey
+	cfg.Connection.APIKey = testAPIKey
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	if got := controller.SessionCredentials(); got != (credentials.Credentials{APIKey: testAPIKey}) {
+		t.Fatalf("unexpected session credentials: %#v", got)
+	}
+
+	torrents, err := controller.FetchTorrents(context.Background())
+	if err != nil {
+		t.Fatalf("fetch torrents: %v", err)
+	}
+	if len(torrents) != 0 {
+		t.Fatalf("unexpected torrents: %#v", torrents)
+	}
+}
+
+func TestControllerRejectsMissingAPIKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request to %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server.URL
+	cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
+	cfg.Connection.AuthMethod = config.AuthMethodAPIKey
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	_, err := controller.FetchTorrents(context.Background())
+	if err == nil {
+		t.Fatal("expected missing API key error")
+	}
+	if !strings.Contains(err.Error(), "no API key is stored") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestControllerIgnoresAPIKeyInPasswordMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/info":
+			if got := r.Header.Get("Authorization"); got != "" {
+				t.Fatalf("did not expect Authorization header in password mode, got %q", got)
+			}
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server.URL
+	cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
+	cfg.Connection.Username = "demo"
+	cfg.Connection.Password = "secret"
+	cfg.Connection.APIKey = testAPIKey
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	torrents, err := controller.FetchTorrents(context.Background())
+	if err != nil {
+		t.Fatalf("fetch torrents: %v", err)
+	}
+	if len(torrents) != 0 {
+		t.Fatalf("unexpected torrents: %#v", torrents)
+	}
+}
+
+func TestNewControllerCanonicalizesKeychainCredentials(t *testing.T) {
+	cfg := config.Default()
+	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+
+	store := credentials.NewStoreForTests(
+		func(service, user string) (string, error) {
+			// Simulates a store written while another auth method was active.
+			return `{"username":"demo","password":"secret","api_key":"` + testAPIKey + `"}`, nil
+		},
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	)
+
+	controller := newTestController(t, cfg, store)
+
+	want := credentials.Credentials{Username: "demo", Password: "secret"}
+	if got := controller.SessionCredentials(); got != want {
+		t.Fatalf("expected read-side canonicalization to drop the API key, got %#v", got)
+	}
+}
+
+func TestNewControllerMigratesLegacyPlaintextAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	cfg := config.Default()
+	cfg.Connection.AuthMethod = config.AuthMethodAPIKey
+	cfg.Connection.APIKey = testAPIKey
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	store, raw := newCapturingKeychainStore()
+
+	controller, err := newController(path, slog.New(slog.NewTextHandler(io.Discard, nil)), store)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	controller.platform = nil
+
+	if controller.Config().Connection.CredentialStorage != config.CredentialStorageKeychain {
+		t.Fatalf("unexpected storage mode: %q", controller.Config().Connection.CredentialStorage)
+	}
+	if controller.Config().Connection.APIKey != "" {
+		t.Fatalf("expected config API key to be scrubbed: %#v", controller.Config().Connection)
+	}
+	stored := decodeStoredPayload(t, *raw)
+	if stored.APIKey != testAPIKey || stored.Username != "" || stored.Password != "" {
+		t.Fatalf("unexpected migrated payload: %#v", stored)
+	}
+	if got := controller.SessionCredentials(); got != (credentials.Credentials{APIKey: testAPIKey}) {
+		t.Fatalf("unexpected session credentials: %#v", got)
 	}
 }
 

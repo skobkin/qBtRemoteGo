@@ -237,6 +237,227 @@ func TestLoginRejectsErrorStatus(t *testing.T) {
 	}
 }
 
+const testAPIKey = "qbt_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func TestAPIKeySkipsLoginAndSendsBearer(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/auth/login" {
+			t.Fatalf("API key auth must never call auth/login")
+		}
+		switch r.URL.Path {
+		case "/api/v2/app/version":
+			if got := r.Header.Get("Authorization"); got != "Bearer "+testAPIKey {
+				t.Fatalf("unexpected Authorization header: %q", got)
+			}
+			_, _ = io.WriteString(w, "5.2.0")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:    server.URL,
+		APIKey: testAPIKey,
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if err := client.TestConnection(context.Background()); err != nil {
+		t.Fatalf("test connection: %v", err)
+	}
+}
+
+func TestAPIKeySendsBearerOnAllRequestKinds(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+testAPIKey {
+			t.Fatalf("unexpected Authorization header on %s: %q", r.URL.Path, got)
+		}
+		switch r.URL.Path {
+		case "/api/v2/torrents/info":
+			_, _ = io.WriteString(w, `[]`)
+		case "/api/v2/torrents/stop":
+			_, _ = io.WriteString(w, "{}")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:    server.URL,
+		APIKey: testAPIKey,
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if _, err := client.Torrents(context.Background()); err != nil {
+		t.Fatalf("fetch torrents: %v", err)
+	}
+	if err := client.Stop(context.Background(), []string{"abc"}); err != nil {
+		t.Fatalf("stop torrent: %v", err)
+	}
+}
+
+func TestNewClientRejectsMalformedAPIKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		apiKey string
+		want   string
+	}{
+		{
+			name:   "too short",
+			apiKey: "qbt_abc",
+			want:   "invalid API key",
+		},
+		{
+			name:   "missing prefix",
+			apiKey: strings.Repeat("a", 32),
+			want:   "invalid API key",
+		},
+		{
+			name:   "invalid character in secret part",
+			apiKey: "qbt_" + strings.Repeat("a", 27) + "!",
+			want:   "invalid API key",
+		},
+		{
+			name:   "valid key",
+			apiKey: testAPIKey,
+			want:   "",
+		},
+		{
+			name:   "surrounding whitespace is trimmed",
+			apiKey: "  " + testAPIKey + "\n",
+			want:   "",
+		},
+		{
+			name:   "empty key means password auth",
+			apiKey: "",
+			want:   "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewClient(ClientConfig{URL: "https://example.com", APIKey: tc.apiKey}, slog.Default())
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("expected success, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestTestConnectionAPIKeyFailureHint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{
+			name:   "unauthorized",
+			status: http.StatusUnauthorized,
+		},
+		{
+			name:   "forbidden",
+			status: http.StatusForbidden,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v2/app/version" {
+					t.Fatalf("unexpected path: %s", r.URL.Path)
+				}
+				http.Error(w, "denied", tc.status)
+			}))
+			defer server.Close()
+
+			client, err := NewClient(ClientConfig{
+				URL:    server.URL,
+				APIKey: testAPIKey,
+			}, slog.Default())
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+
+			err = client.TestConnection(context.Background())
+			if err == nil {
+				t.Fatal("expected connection failure")
+			}
+			message := err.Error()
+			if !strings.Contains(message, "may have failed") {
+				t.Fatalf("expected cautious API key hint, got %v", err)
+			}
+			if !strings.Contains(message, "v5.2.0") {
+				t.Fatalf("expected version requirement in hint, got %v", err)
+			}
+			if !strings.Contains(message, "proxy") {
+				t.Fatalf("expected server/proxy denial mention, got %v", err)
+			}
+			if got := strings.Count(message, http.StatusText(tc.status)); got != 1 {
+				t.Fatalf("expected status text exactly once, got %d in: %s", got, message)
+			}
+		})
+	}
+
+	t.Run("password mode keeps generic error", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v2/auth/login":
+				_, _ = io.WriteString(w, "Ok.")
+			case "/api/v2/app/version":
+				http.Error(w, "denied", http.StatusForbidden)
+			default:
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			URL:      server.URL,
+			Username: "user",
+			Password: "pass",
+		}, slog.Default())
+		if err != nil {
+			t.Fatalf("new client: %v", err)
+		}
+
+		err = client.TestConnection(context.Background())
+		if err == nil {
+			t.Fatal("expected connection failure")
+		}
+		message := err.Error()
+		if !strings.Contains(message, "app/version returned 403 Forbidden") {
+			t.Fatalf("expected generic error, got %v", err)
+		}
+		if strings.Contains(message, "may have failed") {
+			t.Fatalf("did not expect API key hint in password mode, got %v", err)
+		}
+	})
+}
+
 func TestDirectorySuggestionsFiltersPrefix(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

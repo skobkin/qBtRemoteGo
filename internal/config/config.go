@@ -19,11 +19,20 @@ type AppConfig struct {
 
 type ConnectionConfig struct {
 	URL                  string                `json:"url"`
+	AuthMethod           AuthMethod            `json:"auth_method,omitempty"`
 	CredentialStorage    CredentialStorageMode `json:"credential_storage,omitempty"`
 	Username             string                `json:"username,omitempty"`
 	Password             string                `json:"password,omitempty"` //nolint:gosec // User-managed qBittorrent credential persisted in the local app config.
+	APIKey               string                `json:"api_key,omitempty"`  //nolint:gosec // User-managed qBittorrent API key persisted in the local app config.
 	SkipCertificateCheck bool                  `json:"skip_certificate_check"`
 }
+
+type AuthMethod string
+
+const (
+	AuthMethodPassword AuthMethod = "password"
+	AuthMethodAPIKey   AuthMethod = "api_key"
+)
 
 type CredentialStorageMode string
 
@@ -94,6 +103,8 @@ func Normalize(cfg *AppConfig) {
 	cfg.Connection.URL = strings.TrimSpace(cfg.Connection.URL)
 	cfg.Connection.Username = strings.TrimSpace(cfg.Connection.Username)
 	cfg.Connection.CredentialStorage = normalizeCredentialStorage(cfg.Connection.CredentialStorage)
+	cfg.Connection.AuthMethod = normalizeAuthMethod(cfg.Connection.AuthMethod)
+	cfg.Connection.APIKey = strings.TrimSpace(cfg.Connection.APIKey)
 
 	if cfg.UI.RememberPathCount <= 0 {
 		cfg.UI.RememberPathCount = def.UI.RememberPathCount
@@ -204,6 +215,16 @@ func normalizePaths(paths []string, limit int) []string {
 	}
 
 	return out
+}
+
+// normalizeAuthMethod defaults unknown and empty values to password auth so
+// consumers can always switch on a canonical, non-empty method.
+func normalizeAuthMethod(method AuthMethod) AuthMethod {
+	if strings.ToLower(strings.TrimSpace(string(method))) == string(AuthMethodAPIKey) {
+		return AuthMethodAPIKey
+	}
+
+	return AuthMethodPassword
 }
 
 func normalizeCredentialStorage(mode CredentialStorageMode) CredentialStorageMode {

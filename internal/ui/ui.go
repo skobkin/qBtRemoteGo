@@ -327,19 +327,25 @@ func (a *application) openSettingsWindow() {
 
 	urlEntry := widget.NewEntry()
 	urlEntry.SetText(cfg.Connection.URL)
+	authMethod := widget.NewSelect(authMethodLabels(), nil)
 	usernameEntry := widget.NewEntry()
 	usernameEntry.SetText(a.controller.SessionCredentials().Username)
 	passwordEntry := widget.NewPasswordEntry()
 	passwordEntry.SetText(a.controller.SessionCredentials().Password)
+	apiKeyEntry := widget.NewPasswordEntry()
+	apiKeyEntry.SetPlaceHolder("qbt_…")
+	apiKeyEntry.SetText(a.controller.SessionCredentials().APIKey)
 	skipTLS := widget.NewCheck("", nil)
 	skipTLS.SetChecked(cfg.Connection.SkipCertificateCheck)
 	testStatus := widget.NewLabel("")
 	credentialSummary := widget.NewLabel(connectionCredentialStorageText(
+		cfg.Connection.AuthMethod,
 		cfg.Connection.CredentialStorage,
 		a.controller.CredentialStatus(),
 		a.controller.SessionCredentials(),
 	))
 	credentialWarning := widget.NewLabel(connectionCredentialWarningText(
+		cfg.Connection.AuthMethod,
 		cfg.Connection.CredentialStorage,
 		a.controller.CredentialStatus(),
 		a.controller.SessionCredentials(),
@@ -377,13 +383,35 @@ func (a *application) openSettingsWindow() {
 	startWithSystem := widget.NewCheck("", nil)
 	startWithSystem.SetChecked(cfg.Integration.StartWithSystem)
 
-	connectionForm := widget.NewForm(
-		widget.NewFormItem("URL", urlEntry),
-		widget.NewFormItem("Username", usernameEntry),
-		widget.NewFormItem("Password", passwordEntry),
-		widget.NewFormItem("Skip certificate validation", skipTLS),
-		widget.NewFormItem("Credential storage", credentialSummary),
-	)
+	urlItem := widget.NewFormItem("URL", urlEntry)
+	authMethodItem := widget.NewFormItem("Authentication", authMethod)
+	usernameItem := widget.NewFormItem("Username", usernameEntry)
+	passwordItem := widget.NewFormItem("Password", passwordEntry)
+	apiKeyItem := widget.NewFormItem("API key", apiKeyEntry)
+	skipTLSItem := widget.NewFormItem("Skip certificate validation", skipTLS)
+	storageItem := widget.NewFormItem("Credential storage", credentialSummary)
+
+	connectionForm := widget.NewForm(urlItem, authMethodItem, usernameItem, passwordItem, skipTLSItem, storageItem)
+
+	// The select is wired only after the form exists: SetSelected fires
+	// OnChanged immediately, which swaps the credential rows in the form.
+	updateAuthFields := func() {
+		method := authMethodKey(authMethod.Selected)
+		if method == config.AuthMethodAPIKey {
+			connectionForm.Items = []*widget.FormItem{urlItem, authMethodItem, apiKeyItem, skipTLSItem, storageItem}
+		} else {
+			connectionForm.Items = []*widget.FormItem{urlItem, authMethodItem, usernameItem, passwordItem, skipTLSItem, storageItem}
+		}
+		connectionForm.Refresh()
+		credentialWarning.SetText(connectionCredentialWarningText(
+			method,
+			cfg.Connection.CredentialStorage,
+			a.controller.CredentialStatus(),
+			a.controller.SessionCredentials(),
+		))
+	}
+	authMethod.OnChanged = func(string) { updateAuthFields() }
+	authMethod.SetSelected(authMethodLabel(cfg.Connection.AuthMethod))
 
 	uiForm := widget.NewForm(
 		widget.NewFormItem("Number of paths to remember", rememberEntry),
@@ -415,10 +443,12 @@ func (a *application) openSettingsWindow() {
 		go func() {
 			err := a.controller.TestConnection(context.Background(), config.ConnectionConfig{
 				URL:                  urlEntry.Text,
+				AuthMethod:           authMethodKey(authMethod.Selected),
 				SkipCertificateCheck: skipTLS.Checked,
 			}, credentials.Credentials{
 				Username: usernameEntry.Text,
 				Password: passwordEntry.Text,
+				APIKey:   apiKeyEntry.Text,
 			})
 			fyne.Do(func() {
 				if err != nil {
@@ -473,6 +503,7 @@ func (a *application) openSettingsWindow() {
 
 		updated := a.controller.Config()
 		updated.Connection.URL = urlEntry.Text
+		updated.Connection.AuthMethod = authMethodKey(authMethod.Selected)
 		updated.Connection.SkipCertificateCheck = skipTLS.Checked
 		updated.UI.RememberPathCount = rememberCount
 		updated.UI.RememberLastSaveLocation = rememberLastSaveLocation.Checked
@@ -491,15 +522,26 @@ func (a *application) openSettingsWindow() {
 		editedCreds := credentials.Credentials{
 			Username: usernameEntry.Text,
 			Password: passwordEntry.Text,
+			APIKey:   strings.TrimSpace(apiKeyEntry.Text),
+		}
+		if updated.Connection.AuthMethod == config.AuthMethodAPIKey {
+			if editedCreds.APIKey == "" {
+				dialog.ShowError(errors.New("API key is required when API key authentication is selected"), win)
+				return
+			}
+			if err := qbt.ValidateAPIKey(editedCreds.APIKey); err != nil {
+				dialog.ShowError(err, win)
+				return
+			}
 		}
 
 		var saveWithFallback func(appcore.CredentialFallbackChoice)
 		saveWithFallback = func(fallback appcore.CredentialFallbackChoice) {
 			result, err := a.controller.SaveSettings(context.Background(), updated, editedCreds, fallback)
 			if result.DecisionRequired {
-				message := "System keychain is unavailable.\n\nPress OK to save the connection credentials in plain text in the local config file.\nPress Cancel to keep the edited credentials only for this session."
+				message := "System keychain is unavailable.\n\nPress OK to save the connection credentials or API key in plain text in the local config file.\nPress Cancel to keep the edited credentials only for this session."
 				if result.CredentialStatus.Message != "" {
-					message = result.CredentialStatus.Message + "\n\nPress OK to save the connection credentials in plain text in the local config file.\nPress Cancel to keep the edited credentials only for this session."
+					message = result.CredentialStatus.Message + "\n\nPress OK to save the connection credentials or API key in plain text in the local config file.\nPress Cancel to keep the edited credentials only for this session."
 				}
 				dialog.ShowConfirm("Store credentials as plain text?", message, func(ok bool) {
 					if ok {
@@ -585,7 +627,33 @@ func (a *application) handlePendingInvocationAfterConnectionSetup() {
 	a.handleInvocation(pending)
 }
 
+const (
+	authMethodLabelPassword = "Username & password"
+	authMethodLabelAPIKey   = "API key"
+)
+
+func authMethodLabels() []string {
+	return []string{authMethodLabelPassword, authMethodLabelAPIKey}
+}
+
+func authMethodLabel(method config.AuthMethod) string {
+	if method == config.AuthMethodAPIKey {
+		return authMethodLabelAPIKey
+	}
+
+	return authMethodLabelPassword
+}
+
+func authMethodKey(label string) config.AuthMethod {
+	if strings.TrimSpace(label) == authMethodLabelAPIKey {
+		return config.AuthMethodAPIKey
+	}
+
+	return config.AuthMethodPassword
+}
+
 func connectionCredentialStorageText(
+	method config.AuthMethod,
 	mode config.CredentialStorageMode,
 	status credentials.Status,
 	session credentials.Credentials,
@@ -599,6 +667,12 @@ func connectionCredentialStorageText(
 	case config.CredentialStoragePlaintext:
 		return "Plain text config file"
 	default:
+		if method == config.AuthMethodAPIKey {
+			if strings.TrimSpace(session.APIKey) != "" {
+				return "Session only"
+			}
+			return "Not saved"
+		}
 		if strings.TrimSpace(session.Username) != "" || session.Password != "" {
 			return "Session only"
 		}
@@ -607,6 +681,7 @@ func connectionCredentialStorageText(
 }
 
 func connectionCredentialWarningText(
+	method config.AuthMethod,
 	mode config.CredentialStorageMode,
 	status credentials.Status,
 	session credentials.Credentials,
@@ -622,8 +697,17 @@ func connectionCredentialWarningText(
 		}
 		return "Warning: Credentials are configured to use the system keychain, but it is currently unavailable. " + message
 	case config.CredentialStoragePlaintext:
+		if method == config.AuthMethodAPIKey {
+			return "Warning: The API key is stored in plain text in the local config file."
+		}
 		return "Warning: Credentials are stored in plain text in the local config file."
 	default:
+		if method == config.AuthMethodAPIKey {
+			if strings.TrimSpace(session.APIKey) != "" {
+				return "The API key is stored only in memory for this run."
+			}
+			return ""
+		}
 		if strings.TrimSpace(session.Username) != "" || session.Password != "" {
 			return "Credentials are stored only in memory for this run."
 		}

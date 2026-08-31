@@ -28,6 +28,7 @@ const (
 type Credentials struct {
 	Username string
 	Password string
+	APIKey   string
 }
 
 type Status struct {
@@ -81,6 +82,7 @@ type keyringStore struct {
 type payload struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	APIKey   string `json:"api_key,omitempty"`
 }
 
 func NewStore() Store {
@@ -139,10 +141,11 @@ func (s *keyringStore) Get(_ context.Context) (Credentials, error) {
 }
 
 func (s *keyringStore) Set(_ context.Context, creds Credentials) error {
-	//nolint:gosec // Password must be serialized before handing it to the system keychain backend.
+	//nolint:gosec // Credentials must be serialized before handing them to the system keychain backend.
 	data, err := json.Marshal(payload{
 		Username: strings.TrimSpace(creds.Username),
 		Password: creds.Password,
+		APIKey:   strings.TrimSpace(creds.APIKey),
 	})
 	if err != nil {
 		return fmt.Errorf("encode keychain credentials: %w", err)

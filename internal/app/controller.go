@@ -108,13 +108,19 @@ func (c *Controller) SaveSettings(
 ) (SaveSettingsResult, error) {
 	config.Normalize(&cfg)
 
+	// Keep only credentials for the active auth method; inactive ones must not
+	// reach the keychain, the config file, or the session.
+	creds = canonicalCredentials(cfg.Connection.AuthMethod, creds)
+
 	cfg.Connection.Username = c.config.Connection.Username
 	cfg.Connection.Password = c.config.Connection.Password
+	cfg.Connection.APIKey = c.config.Connection.APIKey
 	cfg.Connection.CredentialStorage = c.config.Connection.CredentialStorage
 
 	trimmedCreds := credentials.Credentials{
 		Username: strings.TrimSpace(creds.Username),
 		Password: creds.Password,
+		APIKey:   strings.TrimSpace(creds.APIKey),
 	}
 	credsChanged := trimmedCreds != c.sessionCredentials
 	status := c.credentialStore.Status(ctx)
@@ -138,6 +144,7 @@ func (c *Controller) SaveSettings(
 		cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
 		cfg.Connection.Username = ""
 		cfg.Connection.Password = ""
+		cfg.Connection.APIKey = ""
 		saved, err := c.persistConfig(cfg, true)
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
@@ -183,12 +190,11 @@ func (c *Controller) SyncIntegrations() []error {
 }
 
 func (c *Controller) TestConnection(ctx context.Context, cfg config.ConnectionConfig, creds credentials.Credentials) error {
-	client, err := qbt.NewClient(qbt.ClientConfig{
-		URL:                  cfg.URL,
-		Username:             strings.TrimSpace(creds.Username),
-		Password:             creds.Password,
-		SkipCertificateCheck: cfg.SkipCertificateCheck,
-	}, c.logger.With("remote", strings.TrimSpace(cfg.URL)))
+	qcfg, err := connectionClientConfig(cfg, creds)
+	if err != nil {
+		return err
+	}
+	client, err := qbt.NewClient(qcfg, c.logger.With("remote", strings.TrimSpace(cfg.URL)))
 	if err != nil {
 		return err
 	}
@@ -730,6 +736,7 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 	status := c.credentialStore.Status(ctx)
 	c.credentialStatus = status
 
+	method := c.config.Connection.AuthMethod
 	switch c.config.Connection.CredentialStorage {
 	case config.CredentialStorageKeychain:
 		creds, err := c.credentialStore.Get(ctx)
@@ -740,14 +747,15 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 
 			return nil
 		}
-		c.sessionCredentials = creds
+		c.sessionCredentials = canonicalCredentials(method, creds)
 
 		return nil
 	case config.CredentialStoragePlaintext:
-		c.sessionCredentials = credentials.Credentials{
+		c.sessionCredentials = canonicalCredentials(method, credentials.Credentials{
 			Username: c.config.Connection.Username,
 			Password: c.config.Connection.Password,
-		}
+			APIKey:   c.config.Connection.APIKey,
+		})
 
 		return nil
 	case config.CredentialStorageNone:
@@ -755,16 +763,17 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 
 		return nil
 	default:
-		if c.config.Connection.Username == "" && c.config.Connection.Password == "" {
+		if c.config.Connection.Username == "" && c.config.Connection.Password == "" && c.config.Connection.APIKey == "" {
 			c.sessionCredentials = credentials.Credentials{}
 
 			return nil
 		}
 
-		legacy := credentials.Credentials{
+		legacy := canonicalCredentials(method, credentials.Credentials{
 			Username: c.config.Connection.Username,
 			Password: c.config.Connection.Password,
-		}
+			APIKey:   c.config.Connection.APIKey,
+		})
 		c.sessionCredentials = legacy
 		if status.State != credentials.StateAvailable {
 			c.logger.Warn("legacy plaintext credentials remain because system keychain is unavailable", "backend", status.Backend, "state", status.State)
@@ -781,6 +790,7 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 		c.config.Connection.CredentialStorage = config.CredentialStorageKeychain
 		c.config.Connection.Username = ""
 		c.config.Connection.Password = ""
+		c.config.Connection.APIKey = ""
 		if err := config.Save(c.configPath, c.config); err != nil {
 			return err
 		}
@@ -802,6 +812,7 @@ func (c *Controller) saveWithFallback(
 		cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
 		cfg.Connection.Username = creds.Username
 		cfg.Connection.Password = creds.Password
+		cfg.Connection.APIKey = creds.APIKey
 		saved, err := c.persistConfig(cfg, true)
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
@@ -820,6 +831,7 @@ func (c *Controller) saveWithFallback(
 		}
 		cfg.Connection.Username = ""
 		cfg.Connection.Password = ""
+		cfg.Connection.APIKey = ""
 		saved, err := c.persistConfig(cfg, true)
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
@@ -864,11 +876,39 @@ func currentCredentialBackend(status credentials.Status, store credentials.Store
 	return store.Status(context.Background()).Backend
 }
 
+// canonicalCredentials drops credentials that do not belong to the active auth
+// method so only the method in use is ever stored or applied.
+func canonicalCredentials(method config.AuthMethod, creds credentials.Credentials) credentials.Credentials {
+	if method == config.AuthMethodAPIKey {
+		return credentials.Credentials{APIKey: creds.APIKey}
+	}
+
+	return credentials.Credentials{Username: creds.Username, Password: creds.Password}
+}
+
+func connectionClientConfig(cfg config.ConnectionConfig, creds credentials.Credentials) (qbt.ClientConfig, error) {
+	qcfg := qbt.ClientConfig{
+		URL:                  cfg.URL,
+		Username:             strings.TrimSpace(creds.Username),
+		Password:             creds.Password,
+		SkipCertificateCheck: cfg.SkipCertificateCheck,
+	}
+	if cfg.AuthMethod == config.AuthMethodAPIKey {
+		key := strings.TrimSpace(creds.APIKey)
+		if key == "" {
+			return qbt.ClientConfig{}, errors.New("API key authentication is selected but no API key is stored; open Settings > Connection and paste the API key")
+		}
+		qcfg.APIKey = key
+	}
+
+	return qcfg, nil
+}
+
 func (c *Controller) client() (*qbt.Client, error) {
-	return qbt.NewClient(qbt.ClientConfig{
-		URL:                  c.config.Connection.URL,
-		Username:             c.sessionCredentials.Username,
-		Password:             c.sessionCredentials.Password,
-		SkipCertificateCheck: c.config.Connection.SkipCertificateCheck,
-	}, c.logger)
+	qcfg, err := connectionClientConfig(c.config.Connection, c.sessionCredentials)
+	if err != nil {
+		return nil, err
+	}
+
+	return qbt.NewClient(qcfg, c.logger)
 }
