@@ -16,7 +16,7 @@ type torrentDetailsHost struct {
 	table  fyne.CanvasObject
 	view   *torrentDetailsView
 	split  *container.Split
-	panel  *fyne.Container
+	panel  *detailsPanelChrome
 	drawer *detailsDrawer
 	mode   detailsPanelMode
 }
@@ -42,7 +42,7 @@ func (h *torrentDetailsHost) Refresh() {
 	mode := h.app.currentDetailsMode()
 	if h.view == nil || h.mode != mode {
 		h.view = newTorrentDetailsView(h.app)
-		h.panel = newDetailsPanelContainer(h.view.Root())
+		h.panel = newDetailsPanelChrome(h.view.Root())
 		h.drawer = newDetailsDrawer(h.app, h.panel)
 		h.split = container.NewVSplit(h.table, h.panel)
 		h.split.SetOffset(0.62)
@@ -65,13 +65,32 @@ func (h *torrentDetailsHost) Refresh() {
 	h.root.Refresh()
 }
 
-func newDetailsPanelContainer(content fyne.CanvasObject) *fyne.Container {
+// detailsPanelChrome is the drawer/pane panel surface: background, border and
+// the tab content. As a Tappable it consumes taps landing on its own chrome so
+// they never reach the drawer backdrop underneath (which closes the drawer);
+// interactive children still receive their events first.
+type detailsPanelChrome struct {
+	widget.BaseWidget
+	root *fyne.Container
+}
+
+func newDetailsPanelChrome(content fyne.CanvasObject) *detailsPanelChrome {
 	bg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
 	border := canvas.NewRectangle(color.Transparent)
 	border.StrokeColor = theme.Color(theme.ColorNameSeparator)
 	border.StrokeWidth = 1
-	return container.NewStack(bg, border, content)
+	panel := &detailsPanelChrome{
+		root: container.NewStack(bg, border, content),
+	}
+	panel.ExtendBaseWidget(panel)
+	return panel
 }
+
+func (p *detailsPanelChrome) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(p.root)
+}
+
+func (p *detailsPanelChrome) Tapped(*fyne.PointEvent) {}
 
 type detailsDrawer struct {
 	widget.BaseWidget
