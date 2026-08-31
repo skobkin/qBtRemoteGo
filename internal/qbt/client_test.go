@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -844,6 +845,60 @@ func TestServerStateLoadsFreeSpaceAndSlowMode(t *testing.T) {
 	}
 	if state.FreeSpaceOnDisk != 5368709120 || !state.UseAltSpeedLimits {
 		t.Fatalf("unexpected state: %#v", state)
+	}
+}
+
+func TestClientReauthenticatesAfterSessionExpiry(t *testing.T) {
+	var logins atomic.Int32
+	var expired atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			logins.Add(1)
+			// The session cookie must stay non-Secure: the test server is plain
+			// HTTP and the jar would not resend a Secure cookie.
+			http.SetCookie(w, &http.Cookie{Name: "SID", Value: "session"}) //nolint:gosec
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/info":
+			if expired.Load() {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = io.WriteString(w, "expired session")
+
+				return
+			}
+			_, _ = io.WriteString(w, "[]")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	ctx := context.Background()
+	if _, err := client.Torrents(ctx); err != nil {
+		t.Fatalf("initial torrents fetch: %v", err)
+	}
+
+	expired.Store(true)
+	if _, err := client.Torrents(ctx); err == nil {
+		t.Fatalf("expected expired session to fail the request")
+	}
+
+	expired.Store(false)
+	if _, err := client.Torrents(ctx); err != nil {
+		t.Fatalf("torrents fetch after re-login: %v", err)
+	}
+
+	if got := logins.Load(); got != 2 {
+		t.Fatalf("expected a fresh login after session expiry, got %d logins", got)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -736,6 +737,104 @@ func TestFetchServerVersion(t *testing.T) {
 	}
 	if version != "5.1.2" {
 		t.Fatalf("unexpected version: %q", version)
+	}
+}
+
+func TestClientCacheReusesSingleLogin(t *testing.T) {
+	var logins atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			logins.Add(1)
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/info":
+			_, _ = io.WriteString(w, "[]")
+		case "/api/v2/torrents/properties":
+			_, _ = io.WriteString(w, "{}")
+		case "/api/v2/sync/torrentPeers":
+			_, _ = io.WriteString(w, "{}")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server.URL
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	ctx := context.Background()
+	if _, err := controller.FetchTorrents(ctx); err != nil {
+		t.Fatalf("fetch torrents: %v", err)
+	}
+	if _, err := controller.FetchTorrentProperties(ctx, "abc"); err != nil {
+		t.Fatalf("fetch properties: %v", err)
+	}
+	if _, err := controller.FetchTorrentPeers(ctx, "abc", 0); err != nil {
+		t.Fatalf("fetch peers: %v", err)
+	}
+
+	if got := logins.Load(); got != 1 {
+		t.Fatalf("expected exactly one auth/login across requests, got %d", got)
+	}
+}
+
+func TestClientCacheInvalidatedOnConnectionChange(t *testing.T) {
+	var logins atomic.Int32
+	newServer := func() *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v2/auth/login":
+				logins.Add(1)
+				_, _ = io.WriteString(w, "Ok.")
+			case "/api/v2/torrents/info":
+				_, _ = io.WriteString(w, "[]")
+			default:
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+		}))
+	}
+	server1 := newServer()
+	defer server1.Close()
+	server2 := newServer()
+	defer server2.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server1.URL
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	ctx := context.Background()
+	if _, err := controller.FetchTorrents(ctx); err != nil {
+		t.Fatalf("fetch torrents from first server: %v", err)
+	}
+
+	updated := controller.Config()
+	updated.Connection.URL = server2.URL
+	if _, err := controller.SaveSettings(ctx, updated, credentials.Credentials{
+		Username: "demo",
+		Password: "secret",
+	}, CredentialFallbackUnspecified); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+
+	if _, err := controller.FetchTorrents(ctx); err != nil {
+		t.Fatalf("fetch torrents from second server: %v", err)
+	}
+
+	if got := logins.Load(); got != 2 {
+		t.Fatalf("expected one auth/login per server, got %d", got)
 	}
 }
 

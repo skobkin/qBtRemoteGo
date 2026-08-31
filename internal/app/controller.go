@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/skobkin/qbtremotego/internal/config"
@@ -24,6 +25,12 @@ type Controller struct {
 	credentialStore    credentials.Store
 	sessionCredentials credentials.Credentials
 	credentialStatus   credentials.Status
+
+	// Cached qBittorrent client: caching keeps the login session (cookie jar)
+	// alive across requests instead of performing a fresh auth/login per call.
+	clientMu           sync.Mutex
+	cachedClient       *qbt.Client
+	cachedClientConfig qbt.ClientConfig
 }
 
 type AddDialogData struct {
@@ -992,11 +999,27 @@ func connectionClientConfig(cfg config.ConnectionConfig, creds credentials.Crede
 	return qcfg, nil
 }
 
+// client returns a cached qBittorrent client for the current connection
+// configuration, rebuilding it whenever the connection settings or session
+// credentials change (the config struct doubles as the cache key).
 func (c *Controller) client() (*qbt.Client, error) {
 	qcfg, err := connectionClientConfig(c.config.Connection, c.sessionCredentials)
 	if err != nil {
 		return nil, err
 	}
 
-	return qbt.NewClient(qcfg, c.logger)
+	c.clientMu.Lock()
+	defer c.clientMu.Unlock()
+	if c.cachedClient != nil && c.cachedClientConfig == qcfg {
+		return c.cachedClient, nil
+	}
+
+	client, err := qbt.NewClient(qcfg, c.logger)
+	if err != nil {
+		return nil, err
+	}
+	c.cachedClient = client
+	c.cachedClientConfig = qcfg
+
+	return client, nil
 }

@@ -626,12 +626,30 @@ func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values)
 	defer closeAndLog(c.logger, resp.Body, "close "+endpoint+" response body")
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		c.invalidateSessionOnAuthFailure(resp.StatusCode)
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
 		return fmt.Errorf("%s returned %s: %s", endpoint, resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	return nil
+}
+
+// invalidateSessionOnAuthFailure drops the cached login after the server
+// rejected a request with an authentication error, so the next request performs
+// a fresh login instead of failing until the client is rebuilt. API keys
+// authenticate statelessly and never need this.
+func (c *Client) invalidateSessionOnAuthFailure(statusCode int) {
+	if c.apiKey != "" {
+		return
+	}
+	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
+		return
+	}
+
+	c.mu.Lock()
+	c.authenticated = false
+	c.mu.Unlock()
 }
 
 func (c *Client) ensureAuthenticated(ctx context.Context) error {
@@ -717,6 +735,7 @@ func (c *Client) doJSON(req *http.Request, target any) error {
 	defer closeAndLog(c.logger, resp.Body, "close "+req.URL.Path+" response body")
 
 	if resp.StatusCode != http.StatusOK {
+		c.invalidateSessionOnAuthFailure(resp.StatusCode)
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
 		return fmt.Errorf("%s returned %s: %s", req.URL.Path, resp.Status, strings.TrimSpace(string(body)))
