@@ -205,13 +205,10 @@ func buildContentTree(files []qbt.TorrentFile) *contentTree {
 				fileCopy := file
 				child.file = &fileCopy
 				child.size = file.Size
-				if file.Priority == contentPriorityIgnored {
-					child.progress = 1
-					child.remaining = 0
-				} else {
-					child.progress = file.Progress
-					child.remaining = int64(float64(file.Size) * (1 - file.Progress))
-				}
+				// Trust the server-reported progress even for skipped files;
+				// faking 100% would hide real download state.
+				child.progress = file.Progress
+				child.remaining = int64(float64(file.Size) * (1 - file.Progress))
 				child.availability = file.Availability
 				child.priority = file.Priority
 				child.hasAvail = file.Availability >= 0

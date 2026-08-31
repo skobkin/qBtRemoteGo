@@ -49,6 +49,28 @@ func TestBuildContentTreeAggregatesFolderState(t *testing.T) {
 	}
 }
 
+func TestBuildContentTreeKeepsSkippedFileProgress(t *testing.T) {
+	tree := buildContentTree([]qbt.TorrentFile{
+		{Name: "skip.bin", Size: 300, Progress: 0.1, Priority: contentPriorityIgnored},
+	})
+
+	skip := tree.root.children[0]
+	if skip.progress != 0.1 {
+		t.Fatalf("expected server progress for a skipped file, got %f", skip.progress)
+	}
+	if skip.remaining != 270 {
+		t.Fatalf("expected size-derived remaining for a skipped file, got %d", skip.remaining)
+	}
+
+	// The parent folder still aggregates over active children only.
+	if tree.root.progress != 1 {
+		t.Fatalf("expected folder with no active children to be complete, got %f", tree.root.progress)
+	}
+	if tree.root.remaining != 0 {
+		t.Fatalf("expected folder remaining to exclude ignored children, got %d", tree.root.remaining)
+	}
+}
+
 func TestContentVisibleRowsFilterIncludesAncestors(t *testing.T) {
 	tree := buildContentTree([]qbt.TorrentFile{
 		{Name: "folder/child.bin", Size: 10, Progress: 1, Priority: contentPriorityNormal},
