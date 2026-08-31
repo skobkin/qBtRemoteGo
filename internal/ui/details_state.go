@@ -448,7 +448,12 @@ func (a *application) setContentFilter(value string) {
 	if a.detailsState == nil {
 		return
 	}
-	a.detailsState.Content.Filter = strings.TrimSpace(value)
+	// Store the raw text: trimming here fights the Entry caret (typing a space
+	// would be swallowed); the match logic trims when comparing paths.
+	if a.detailsState.Content.Filter == value {
+		return
+	}
+	a.detailsState.Content.Filter = value
 	a.refreshDetailsPresentation()
 }
 

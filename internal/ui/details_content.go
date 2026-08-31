@@ -24,14 +24,18 @@ const (
 )
 
 type detailsContentTabView struct {
-	app    *application
-	root   *fyne.Container
-	filter *widget.Entry
-	header *detailsContentHeader
-	list   *widget.List
-	scroll *container.Scroll
-	rows   []*contentVisibleRow
-	tree   *contentTree
+	app        *application
+	root       *fyne.Container
+	content    *fyne.Container
+	filter     *widget.Entry
+	status     *widget.Label
+	retry      *widget.Button
+	statusWrap *fyne.Container
+	header     *detailsContentHeader
+	list       *widget.List
+	scroll     *container.Scroll
+	rows       []*contentVisibleRow
+	tree       *contentTree
 }
 
 type contentColumnSpec struct {
@@ -125,6 +129,18 @@ func newDetailsContentTabView(app *application) *detailsContentTabView {
 	v.list.HideSeparators = true
 	table := container.New(&contentTableLayout{}, v.header, v.list)
 	v.scroll = container.NewHScroll(table)
+	// Chrome is built once; Refresh only updates text and visibility so the
+	// filter entry and scroll position survive poll ticks.
+	v.content = container.NewBorder(v.filter, nil, nil, nil, v.scroll)
+	v.status = widget.NewLabel("")
+	v.status.Wrapping = fyne.TextWrapWord
+	v.status.Truncation = fyne.TextTruncateEllipsis
+	v.retry = widget.NewButton("Retry", func() { v.app.retryActiveDetailsLoad() })
+	v.statusWrap = container.NewVBox(
+		container.NewCenter(container.NewPadded(v.status)),
+		container.NewCenter(v.retry),
+	)
+	v.root.Objects = []fyne.CanvasObject{v.content, v.statusWrap}
 	return v
 }
 
@@ -133,22 +149,31 @@ func (v *detailsContentTabView) Root() fyne.CanvasObject {
 }
 
 func (v *detailsContentTabView) Refresh() {
-	state := v.app.detailsState.Content
-	if v.filter.Text != state.Filter {
-		v.filter.SetText(state.Filter)
+	state := v.app.detailsState
+	dataset := state.activeDataset(detailsTabContent)
+	if dataset != nil && v.filter.Text != state.Content.Filter {
+		// Fires only for external resets; the resulting OnChanged is absorbed
+		// by setContentFilter's equality short-circuit.
+		v.filter.SetText(state.Content.Filter)
 	}
 	switch {
-	case state.Loading && !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading content...")}
-	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load content:\n"+state.Error, v.app.retryActiveDetailsLoad)}
-	case !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Content will load when this tab becomes active.")}
+	case state == nil || dataset == nil || (dataset.Loading && !dataset.Loaded):
+		v.status.SetText("Loading content...")
+		v.retry.Hide()
+		v.statusWrap.Show()
+	case strings.TrimSpace(dataset.Error) != "":
+		v.status.SetText("Failed to load content:\n" + dataset.Error)
+		v.retry.Show()
+		v.statusWrap.Show()
+	case !dataset.Loaded:
+		v.status.SetText("Content will load when this tab becomes active.")
+		v.retry.Hide()
+		v.statusWrap.Show()
 	default:
-		v.tree = buildContentTree(state.Files)
-		v.rows = v.tree.visibleRows(strings.TrimSpace(state.Filter), state.Expanded)
+		v.tree = buildContentTree(state.Content.Files)
+		v.rows = v.tree.visibleRows(strings.TrimSpace(state.Content.Filter), state.Content.Expanded)
 		v.list.Refresh()
-		v.root.Objects = []fyne.CanvasObject{container.NewBorder(v.filter, nil, nil, nil, v.scroll)}
+		v.statusWrap.Hide()
 	}
 	v.root.Refresh()
 }
