@@ -62,6 +62,66 @@ func TestContentVisibleRowsFilterIncludesAncestors(t *testing.T) {
 	if rows[0].node.name != "folder" || rows[1].node.name != "child.bin" {
 		t.Fatalf("unexpected filtered rows: %#v %#v", rows[0].node.name, rows[1].node.name)
 	}
+	if !rows[0].filtering || !rows[1].filtering {
+		t.Fatalf("expected filtered rows to be flagged as filtering: %#v", rows)
+	}
+	if rows[0].depth != 0 || rows[1].depth != 1 {
+		t.Fatalf("unexpected depths: %d %d", rows[0].depth, rows[1].depth)
+	}
+}
+
+func TestContentRowExpanded(t *testing.T) {
+	dir := &contentNode{path: "dir", isDir: true}
+	file := &contentNode{path: "file.bin", isDir: false}
+
+	tests := []struct {
+		name      string
+		node      *contentNode
+		filtering bool
+		expanded  map[string]bool
+		want      bool
+	}{
+		{
+			name:     "collapsed directory stays closed",
+			node:     dir,
+			expanded: map[string]bool{},
+			want:     false,
+		},
+		{
+			name:     "expanded directory is open",
+			node:     dir,
+			expanded: map[string]bool{"dir": true},
+			want:     true,
+		},
+		{
+			name:      "filtering forces directories open",
+			node:      dir,
+			filtering: true,
+			expanded:  map[string]bool{},
+			want:      true,
+		},
+		{
+			name:     "files never expand",
+			node:     file,
+			expanded: map[string]bool{"file.bin": true},
+			want:     false,
+		},
+		{
+			name:      "files never expand while filtering",
+			node:      file,
+			filtering: true,
+			expanded:  map[string]bool{},
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := contentRowExpanded(tt.node, tt.filtering, tt.expanded); got != tt.want {
+				t.Fatalf("contentRowExpanded(%q, %v, %#v) = %v, want %v", tt.node.path, tt.filtering, tt.expanded, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestSortedPeersOrdersByAddressKey(t *testing.T) {

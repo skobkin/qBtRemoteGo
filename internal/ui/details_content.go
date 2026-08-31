@@ -2,13 +2,11 @@ package ui
 
 import (
 	"fmt"
-	"image/color"
 	"path"
 	"sort"
 	"strings"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -20,6 +18,9 @@ import (
 const (
 	contentRowHeight    float32 = 36
 	contentHeaderHeight float32 = 34
+	// contentExpanderWidth is the fixed width of the expand/collapse toggle;
+	// file rows reserve the same space so names align at equal depth.
+	contentExpanderWidth float32 = 24
 )
 
 type detailsContentTabView struct {
@@ -70,8 +71,9 @@ type contentNode struct {
 }
 
 type contentVisibleRow struct {
-	node  *contentNode
-	depth int
+	node      *contentNode
+	depth     int
+	filtering bool
 }
 
 type detailsContentHeader struct {
@@ -83,16 +85,16 @@ type detailsContentRow struct {
 	widget.BaseWidget
 	app          *application
 	root         *fyne.Container
+	nameCell     *fyne.Container
 	checkbox     *widget.Label
-	expander     *widget.Button
+	expander     *contentExpanderToggle
 	name         *widget.Label
 	size         *widget.Label
 	progress     *widget.ProgressBar
 	priority     *widget.Label
 	remaining    *widget.Label
 	availability *widget.Label
-	indent       *canvas.Rectangle
-	row          *contentVisibleRow
+	current      *contentVisibleRow
 }
 
 type contentHeaderLayout struct{}
@@ -299,13 +301,20 @@ func (t *contentTree) walkVisible(node *contentNode, depth int, filter string, e
 	if filter != "" && !matches && !childMatch {
 		return false
 	}
-	*out = append(*out, &contentVisibleRow{node: node, depth: depth})
-	if node.isDir && (filter != "" || expanded[node.path]) {
+	*out = append(*out, &contentVisibleRow{node: node, depth: depth, filtering: filter != ""})
+	if contentRowExpanded(node, filter != "", expanded) {
 		for _, child := range node.children {
 			t.walkVisible(child, depth+1, filter, expanded, out)
 		}
 	}
 	return true
+}
+
+// contentRowExpanded reports whether a directory row's children are shown.
+// While filtering, directories are forced open regardless of the saved
+// expansion state so matches stay reachable.
+func contentRowExpanded(node *contentNode, filtering bool, expanded map[string]bool) bool {
+	return node.isDir && (filtering || expanded[node.path])
 }
 
 func newDetailsContentHeader() *detailsContentHeader {
@@ -314,6 +323,7 @@ func newDetailsContentHeader() *detailsContentHeader {
 	for _, spec := range contentColumnSpecs {
 		label := widget.NewLabel(spec.label)
 		label.TextStyle = fyne.TextStyle{Bold: true}
+		label.Truncation = fyne.TextTruncateEllipsis
 		objects = append(objects, label)
 	}
 	h.root = container.New(&contentHeaderLayout{}, objects...)
@@ -325,26 +335,69 @@ func (h *detailsContentHeader) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(h.root)
 }
 
+// contentExpanderToggle is a compact expand/collapse control drawn as a glyph.
+// A plain Button is too wide for the fixed name column and steals space from
+// long file names.
+type contentExpanderToggle struct {
+	widget.BaseWidget
+	label    *widget.Label
+	onTapped func()
+}
+
+func newContentExpanderToggle(onTapped func()) *contentExpanderToggle {
+	toggle := &contentExpanderToggle{
+		label:    widget.NewLabel(""),
+		onTapped: onTapped,
+	}
+	toggle.label.Truncation = fyne.TextTruncateEllipsis
+	toggle.ExtendBaseWidget(toggle)
+	return toggle
+}
+
+func (t *contentExpanderToggle) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(t.label)
+}
+
+func (t *contentExpanderToggle) MinSize() fyne.Size {
+	return fyne.NewSize(contentExpanderWidth, widget.NewLabel("").MinSize().Height)
+}
+
+func (t *contentExpanderToggle) Tapped(*fyne.PointEvent) {
+	if t.onTapped != nil {
+		t.onTapped()
+	}
+}
+
+func (t *contentExpanderToggle) SetExpanded(open bool) {
+	if open {
+		t.label.SetText("▾")
+	} else {
+		t.label.SetText("▸")
+	}
+}
+
 func newDetailsContentRow(app *application) *detailsContentRow {
 	row := &detailsContentRow{
 		app:          app,
 		checkbox:     widget.NewLabel(""),
-		expander:     widget.NewButton("", nil),
 		name:         widget.NewLabel(""),
 		size:         widget.NewLabel(""),
 		progress:     widget.NewProgressBar(),
 		priority:     widget.NewLabel(""),
 		remaining:    widget.NewLabel(""),
 		availability: widget.NewLabel(""),
-		indent:       canvas.NewRectangle(color.Transparent),
+	}
+	for _, label := range []*widget.Label{row.checkbox, row.name, row.size, row.priority, row.remaining, row.availability} {
+		label.Truncation = fyne.TextTruncateEllipsis
 	}
 	row.size.Alignment = fyne.TextAlignTrailing
 	row.remaining.Alignment = fyne.TextAlignTrailing
 	row.availability.Alignment = fyne.TextAlignTrailing
-	row.expander.Importance = widget.LowImportance
+	row.expander = newContentExpanderToggle(nil)
+	row.nameCell = container.New(&contentNameLayout{row: row}, row.expander, row.name)
 	row.root = container.New(&contentRowLayout{},
 		row.checkbox,
-		container.NewHBox(row.indent, row.expander, row.name),
+		row.nameCell,
 		row.size,
 		row.progress,
 		row.priority,
@@ -360,7 +413,7 @@ func (r *detailsContentRow) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (r *detailsContentRow) SetRow(row *contentVisibleRow) {
-	r.row = row
+	r.current = row
 	if row == nil || row.node == nil {
 		return
 	}
@@ -372,21 +425,52 @@ func (r *detailsContentRow) SetRow(row *contentVisibleRow) {
 	r.priority.SetText(contentPriorityLabel(node.priority))
 	r.remaining.SetText(appcore.HumanBytes(node.remaining))
 	r.availability.SetText(contentAvailabilityLabel(node))
-	r.indent.SetMinSize(fyne.NewSize(float32(row.depth)*theme.IconInlineSize(), 1))
 	if node.isDir {
-		if r.app.detailsState.Content.Expanded[node.path] {
-			r.expander.SetText("v")
-		} else {
-			r.expander.SetText(">")
-		}
 		nodePath := node.path
-		r.expander.OnTapped = func() {
+		r.expander.onTapped = func() {
 			r.app.toggleContentNode(nodePath)
 		}
+		r.expander.SetExpanded(contentRowExpanded(node, row.filtering, r.app.detailsState.Content.Expanded))
 		r.expander.Show()
 	} else {
 		r.expander.Hide()
 	}
+	// Recycled rows are resized by the list before UpdateCell runs, which
+	// silently skips layout; re-run it at the stored size.
+	r.root.Refresh()
+}
+
+// contentNameLayout indents the name cell by tree depth and gives the name
+// label the remaining width so truncation applies inside the column.
+type contentNameLayout struct {
+	row *detailsContentRow
+}
+
+func (l *contentNameLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) != 2 {
+		return
+	}
+	expander, name := objects[0], objects[1]
+	x := float32(0)
+	if l.row != nil && l.row.current != nil {
+		x = float32(l.row.current.depth) * theme.IconInlineSize()
+	}
+	// Always reserve the toggle width so file rows align with directory rows.
+	expander.Move(fyne.NewPos(x, 0))
+	expander.Resize(fyne.NewSize(contentExpanderWidth, size.Height))
+	x += contentExpanderWidth
+	name.Move(fyne.NewPos(x, 0))
+	name.Resize(fyne.NewSize(size.Width-x, size.Height))
+}
+
+func (l *contentNameLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	min := fyne.NewSize(contentExpanderWidth, 0)
+	if len(objects) == 2 {
+		nameMin := objects[1].MinSize()
+		min.Width += nameMin.Width
+		min.Height = nameMin.Height
+	}
+	return min
 }
 
 func (l *contentHeaderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
