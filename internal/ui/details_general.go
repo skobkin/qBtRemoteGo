@@ -11,18 +11,53 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	appcore "github.com/skobkin/qbtremotego/internal/app"
+	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
 type detailsGeneralTabView struct {
-	app  *application
-	root *fyne.Container
+	app         *application
+	root        *fyne.Container
+	content     *fyne.Container
+	scroll      *container.Scroll
+	progressRow *fyne.Container
+	progress    *widget.ProgressBar
+	progressPct *widget.Label
+	transfer    *detailsGeneralSection
+	info        *detailsGeneralSection
+	status      *widget.Label
+	retry       *widget.Button
+	statusWrap  *fyne.Container
 }
 
 func newDetailsGeneralTabView(app *application) *detailsGeneralTabView {
-	return &detailsGeneralTabView{
+	v := &detailsGeneralTabView{
 		app:  app,
 		root: container.NewStack(),
 	}
+	v.progress = widget.NewProgressBar()
+	v.progressPct = widget.NewLabel("")
+	v.progressRow = container.NewBorder(nil, nil, widget.NewLabel("Progress"), v.progressPct, v.progress)
+	v.transfer = newDetailsGeneralSection("Transfer", detailsTransferSpecs)
+	v.info = newDetailsGeneralSection("Information", detailsInfoSpecs)
+	// The scroll is built once so its offset survives poll ticks; the content
+	// below is only updated in place.
+	v.scroll = container.NewVScroll(container.NewPadded(container.NewVBox(
+		v.progressRow,
+		v.transfer.card,
+		v.info.card,
+		layout.NewSpacer(),
+	)))
+	v.content = container.NewStack(v.scroll)
+	v.status = widget.NewLabel("")
+	v.status.Wrapping = fyne.TextWrapWord
+	v.status.Truncation = fyne.TextTruncateEllipsis
+	v.retry = widget.NewButton("Retry", func() { v.app.retryActiveDetailsLoad() })
+	v.statusWrap = container.NewVBox(
+		container.NewCenter(container.NewPadded(v.status)),
+		container.NewCenter(v.retry),
+	)
+	v.root.Objects = []fyne.CanvasObject{v.content, v.statusWrap}
+	return v
 }
 
 func (v *detailsGeneralTabView) Root() fyne.CanvasObject {
@@ -30,107 +65,107 @@ func (v *detailsGeneralTabView) Root() fyne.CanvasObject {
 }
 
 func (v *detailsGeneralTabView) Refresh() {
-	state := v.app.detailsState.General
+	state := v.app.detailsState
+	dataset := state.activeDataset(detailsTabGeneral)
 	switch {
-	case state.Loading && !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading details...")}
-	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load details:\n"+state.Error, v.app.retryActiveDetailsLoad)}
-	case !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Details will load when this tab becomes active.")}
+	case state == nil || dataset == nil || (dataset.Loading && !dataset.Loaded):
+		v.status.SetText("Loading details...")
+		v.retry.Hide()
+		v.statusWrap.Show()
+	case strings.TrimSpace(dataset.Error) != "":
+		v.status.SetText("Failed to load details:\n" + dataset.Error)
+		v.retry.Show()
+		v.statusWrap.Show()
+	case !dataset.Loaded:
+		v.status.SetText("Details will load when this tab becomes active.")
+		v.retry.Hide()
+		v.statusWrap.Show()
 	default:
-		v.root.Objects = []fyne.CanvasObject{container.NewVScroll(v.buildContent())}
+		data := state.General.Data
+		v.progress.SetValue(data.Progress)
+		v.progressPct.SetText(fmt.Sprintf("%.1f%%", data.Progress*100))
+		v.transfer.update(data)
+		v.info.update(data)
+		v.statusWrap.Hide()
 	}
 	v.root.Refresh()
 }
 
-func (v *detailsGeneralTabView) buildContent() fyne.CanvasObject {
-	data := v.app.detailsState.General.Data
-	progress := widget.NewProgressBar()
-	progress.SetValue(data.Progress)
-	progress.Resize(fyne.NewSize(0, 10))
-
-	progressRow := container.NewBorder(
-		nil,
-		nil,
-		widget.NewLabel("Progress"),
-		widget.NewLabel(fmt.Sprintf("%.1f%%", data.Progress*100)),
-		progress,
-	)
-
-	transfer := detailsSection("Transfer", []detailsField{
-		{Label: "Time Active", Value: appcore.HumanDuration(data.TimeElapsed)},
-		{Label: "ETA", Value: detailsETA(data.ETASeconds)},
-		{Label: "Connections", Value: detailsCountLimit(data.Connections, data.ConnectionLimit)},
-		{Label: "Downloaded", Value: detailsSessionBytes(data.TotalDownloaded, data.SessionDownloaded)},
-		{Label: "Uploaded", Value: detailsSessionBytes(data.TotalUploaded, data.SessionUploaded)},
-		{Label: "Seeds", Value: fmt.Sprintf("%d (%d total)", data.Seeds, data.SeedsTotal)},
-		{Label: "Download Speed", Value: detailsSpeedWithAverage(data.DownloadSpeed, data.AverageDownloadSpeed)},
-		{Label: "Upload Speed", Value: detailsSpeedWithAverage(data.UploadSpeed, data.AverageUploadSpeed)},
-		{Label: "Peers", Value: fmt.Sprintf("%d (%d total)", data.Peers, data.PeersTotal)},
-		{Label: "Download Limit", Value: appcore.HumanSpeedLimit(data.DownloadLimit)},
-		{Label: "Upload Limit", Value: appcore.HumanSpeedLimit(data.UploadLimit)},
-		{Label: "Wasted", Value: appcore.HumanBytes(data.TotalWasted)},
-		{Label: "Share Ratio", Value: detailsRatio(data.ShareRatio)},
-		{Label: "Reannounce In", Value: detailsETA(data.ReannounceSeconds)},
-		{Label: "Last Seen Complete", Value: detailsUnix(data.LastSeenCompleteUnix, "Never")},
-		{Label: "Popularity", Value: detailsRatio(data.Popularity)},
-		{Label: "Availability", Value: detailsAvailability(data.Availability)},
-	})
-
-	info := detailsSection("Information", []detailsField{
-		{Label: "Total Size", Value: appcore.HumanBytes(data.TotalSize)},
-		{Label: "Pieces", Value: fmt.Sprintf("%d x %s (have %d)", data.PiecesNum, appcore.HumanBytes(data.PieceSize), data.PiecesHave)},
-		{Label: "Created By", Value: detailsTextOrDash(data.CreatedBy)},
-		{Label: "Added On", Value: detailsUnix(data.AdditionDateUnix, "")},
-		{Label: "Completed On", Value: detailsUnix(data.CompletionDateUnix, "Never")},
-		{Label: "Created On", Value: detailsUnix(data.CreationDateUnix, "")},
-		{Label: "Private", Value: detailsPrivateFlag(data.Private)},
-		{Label: "Info Hash v1", Value: detailsTextOrDash(data.InfoHashV1)},
-		{Label: "Info Hash v2", Value: detailsTextOrDash(data.InfoHashV2)},
-		{Label: "Save Path", Value: detailsTextOrDash(data.SavePath)},
-		{Label: "Comment", Value: detailsTextOrDash(data.Comment)},
-	})
-
-	return container.NewPadded(container.NewVBox(
-		progressRow,
-		transfer,
-		info,
-		layout.NewSpacer(),
-	))
+// detailsFieldSpec describes one General tab row: a fixed label and how to
+// format its value from the torrent properties.
+type detailsFieldSpec struct {
+	label  string
+	format func(qbt.TorrentProperties) string
 }
 
-type detailsField struct {
-	Label string
-	Value string
+// detailsGeneralSection is a build-once card of label/value rows laid out on a
+// shared two-column grid so labels align within the section.
+type detailsGeneralSection struct {
+	card   *widget.Card
+	specs  []detailsFieldSpec
+	values []*widget.Label
 }
 
-func detailsSection(title string, fields []detailsField) fyne.CanvasObject {
-	titleLabel := widget.NewLabel(title)
-	titleLabel.TextStyle = fyne.TextStyle{Bold: true}
-	rows := make([]fyne.CanvasObject, 0, len(fields)+1)
-	rows = append(rows, titleLabel)
-	for _, field := range fields {
-		value := widget.NewLabel(field.Value)
+func newDetailsGeneralSection(title string, specs []detailsFieldSpec) *detailsGeneralSection {
+	section := &detailsGeneralSection{specs: specs}
+	grid := container.New(layout.NewFormLayout())
+	for _, spec := range specs {
+		grid.Add(widget.NewLabel(spec.label))
+		value := widget.NewLabel("")
 		value.Wrapping = fyne.TextWrapWord
-		rows = append(rows, container.NewBorder(nil, nil, widget.NewLabel(field.Label), nil, value))
+		section.values = append(section.values, value)
+		grid.Add(value)
 	}
-	return widget.NewCard("", "", container.NewVBox(rows...))
+	section.card = widget.NewCard("", title, grid)
+	return section
 }
 
-func detailsStatusState(text string) fyne.CanvasObject {
-	label := widget.NewLabel(text)
-	label.Wrapping = fyne.TextWrapWord
-	return container.NewCenter(container.NewPadded(label))
+func (s *detailsGeneralSection) update(data qbt.TorrentProperties) {
+	for index, spec := range s.specs {
+		s.values[index].SetText(spec.format(data))
+	}
 }
 
-// detailsErrorState renders a failed details load with an explicit retry
-// affordance; failed datasets are never re-fetched automatically.
-func detailsErrorState(message string, onRetry func()) fyne.CanvasObject {
-	return container.NewVBox(
-		detailsStatusState(message),
-		container.NewCenter(widget.NewButton("Retry", onRetry)),
-	)
+var detailsTransferSpecs = []detailsFieldSpec{
+	{label: "Time Active", format: func(d qbt.TorrentProperties) string { return appcore.HumanDuration(d.TimeElapsed) }},
+	{label: "ETA", format: func(d qbt.TorrentProperties) string { return detailsETA(d.ETASeconds) }},
+	{label: "Connections", format: func(d qbt.TorrentProperties) string { return detailsCountLimit(d.Connections, d.ConnectionLimit) }},
+	{label: "Downloaded", format: func(d qbt.TorrentProperties) string {
+		return detailsSessionBytes(d.TotalDownloaded, d.SessionDownloaded)
+	}},
+	{label: "Uploaded", format: func(d qbt.TorrentProperties) string { return detailsSessionBytes(d.TotalUploaded, d.SessionUploaded) }},
+	{label: "Seeds", format: func(d qbt.TorrentProperties) string { return fmt.Sprintf("%d (%d total)", d.Seeds, d.SeedsTotal) }},
+	{label: "Download Speed", format: func(d qbt.TorrentProperties) string {
+		return detailsSpeedWithAverage(d.DownloadSpeed, d.AverageDownloadSpeed)
+	}},
+	{label: "Upload Speed", format: func(d qbt.TorrentProperties) string {
+		return detailsSpeedWithAverage(d.UploadSpeed, d.AverageUploadSpeed)
+	}},
+	{label: "Peers", format: func(d qbt.TorrentProperties) string { return fmt.Sprintf("%d (%d total)", d.Peers, d.PeersTotal) }},
+	{label: "Download Limit", format: func(d qbt.TorrentProperties) string { return appcore.HumanSpeedLimit(d.DownloadLimit) }},
+	{label: "Upload Limit", format: func(d qbt.TorrentProperties) string { return appcore.HumanSpeedLimit(d.UploadLimit) }},
+	{label: "Wasted", format: func(d qbt.TorrentProperties) string { return appcore.HumanBytes(d.TotalWasted) }},
+	{label: "Share Ratio", format: func(d qbt.TorrentProperties) string { return detailsRatio(d.ShareRatio) }},
+	{label: "Reannounce In", format: func(d qbt.TorrentProperties) string { return detailsETA(d.ReannounceSeconds) }},
+	{label: "Last Seen Complete", format: func(d qbt.TorrentProperties) string { return detailsUnix(d.LastSeenCompleteUnix, "Never") }},
+	{label: "Popularity", format: func(d qbt.TorrentProperties) string { return detailsRatio(d.Popularity) }},
+	{label: "Availability", format: func(d qbt.TorrentProperties) string { return detailsAvailability(d.Availability) }},
+}
+
+var detailsInfoSpecs = []detailsFieldSpec{
+	{label: "Total Size", format: func(d qbt.TorrentProperties) string { return appcore.HumanBytes(d.TotalSize) }},
+	{label: "Pieces", format: func(d qbt.TorrentProperties) string {
+		return fmt.Sprintf("%d x %s (have %d)", d.PiecesNum, appcore.HumanBytes(d.PieceSize), d.PiecesHave)
+	}},
+	{label: "Created By", format: func(d qbt.TorrentProperties) string { return detailsTextOrDash(d.CreatedBy) }},
+	{label: "Added On", format: func(d qbt.TorrentProperties) string { return detailsUnix(d.AdditionDateUnix, "") }},
+	{label: "Completed On", format: func(d qbt.TorrentProperties) string { return detailsUnix(d.CompletionDateUnix, "Never") }},
+	{label: "Created On", format: func(d qbt.TorrentProperties) string { return detailsUnix(d.CreationDateUnix, "") }},
+	{label: "Private", format: func(d qbt.TorrentProperties) string { return detailsPrivateFlag(d.Private) }},
+	{label: "Info Hash v1", format: func(d qbt.TorrentProperties) string { return detailsTextOrDash(d.InfoHashV1) }},
+	{label: "Info Hash v2", format: func(d qbt.TorrentProperties) string { return detailsTextOrDash(d.InfoHashV2) }},
+	{label: "Save Path", format: func(d qbt.TorrentProperties) string { return detailsTextOrDash(d.SavePath) }},
+	{label: "Comment", format: func(d qbt.TorrentProperties) string { return detailsTextOrDash(d.Comment) }},
 }
 
 func detailsETA(seconds int64) string {
