@@ -101,6 +101,57 @@ func TestActiveDataset(t *testing.T) {
 	})
 }
 
+func TestDetailsShouldEnsureLoad(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  detailsDatasetState
+		ensure bool
+	}{
+		{name: "fresh dataset needs a load", state: detailsDatasetState{}, ensure: true},
+		{name: "loading dataset does not re-load", state: detailsDatasetState{Loading: true}, ensure: false},
+		{name: "loaded dataset does not re-load", state: detailsDatasetState{Loaded: true}, ensure: false},
+		{name: "errored dataset waits for explicit retry", state: detailsDatasetState{Error: "boom"}, ensure: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detailsShouldEnsureLoad(&tt.state); got != tt.ensure {
+				t.Fatalf("detailsShouldEnsureLoad(%#v) = %v, want %v", tt.state, got, tt.ensure)
+			}
+		})
+	}
+
+	if detailsShouldEnsureLoad(nil) {
+		t.Fatal("detailsShouldEnsureLoad(nil) = true, want false")
+	}
+}
+
+func TestDetailsShouldRefreshLoad(t *testing.T) {
+	tests := []struct {
+		name    string
+		state   detailsDatasetState
+		refresh bool
+	}{
+		{name: "fresh dataset has nothing to refresh", state: detailsDatasetState{}, refresh: false},
+		{name: "loading dataset does not refresh", state: detailsDatasetState{Loading: true}, refresh: false},
+		{name: "loaded dataset refreshes", state: detailsDatasetState{Loaded: true}, refresh: true},
+		{name: "errored dataset never auto-refreshes", state: detailsDatasetState{Error: "boom"}, refresh: false},
+		{name: "loaded and in-flight does not refresh", state: detailsDatasetState{Loaded: true, Loading: true}, refresh: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detailsShouldRefreshLoad(&tt.state); got != tt.refresh {
+				t.Fatalf("detailsShouldRefreshLoad(%#v) = %v, want %v", tt.state, got, tt.refresh)
+			}
+		})
+	}
+
+	if detailsShouldRefreshLoad(nil) {
+		t.Fatal("detailsShouldRefreshLoad(nil) = true, want false")
+	}
+}
+
 func TestSetActiveTab(t *testing.T) {
 	tests := []struct {
 		name string

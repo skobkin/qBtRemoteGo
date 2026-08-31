@@ -99,7 +99,7 @@ func (v *detailsPeerTabView) Refresh() {
 	case state.Loading && !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading peers...")}
 	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Failed to load peers:\n" + state.Error)}
+		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load peers:\n"+state.Error, v.app.retryActiveDetailsLoad)}
 	case !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Peers will load when this tab becomes active.")}
 	default:
@@ -142,7 +142,7 @@ func (v *detailsTrackersTabView) Refresh() {
 	case state.Loading && !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading trackers...")}
 	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Failed to load trackers:\n" + state.Error)}
+		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load trackers:\n"+state.Error, v.app.retryActiveDetailsLoad)}
 	case !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Trackers will load when this tab becomes active.")}
 	default:
@@ -183,7 +183,7 @@ func (v *detailsWebSeedsTabView) Refresh() {
 	case state.Loading && !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading HTTP sources...")}
 	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Failed to load HTTP sources:\n" + state.Error)}
+		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load HTTP sources:\n"+state.Error, v.app.retryActiveDetailsLoad)}
 	case !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("HTTP sources will load when this tab becomes active.")}
 	default:

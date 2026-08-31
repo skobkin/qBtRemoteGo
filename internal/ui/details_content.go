@@ -139,7 +139,7 @@ func (v *detailsContentTabView) Refresh() {
 	case state.Loading && !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading content...")}
 	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Failed to load content:\n" + state.Error)}
+		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load content:\n"+state.Error, v.app.retryActiveDetailsLoad)}
 	case !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Content will load when this tab becomes active.")}
 	default:

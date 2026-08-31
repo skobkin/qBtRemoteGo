@@ -172,17 +172,24 @@ func (a *application) ensureDetailsFocusForSelection() {
 	case detailsPanelModeBottomPane:
 		hash := a.selectedSingleHash()
 		if hash == "" {
-			a.detailsState.Visible = false
-			a.detailsState.FocusedHash = ""
-			a.refreshDetailsPresentation()
+			if a.detailsState.Visible || a.detailsState.FocusedHash != "" {
+				a.detailsState.Visible = false
+				a.detailsState.FocusedHash = ""
+				a.refreshDetailsPresentation()
+			}
 			return
 		}
 		if a.detailsState.FocusedHash != hash {
 			a.detailsState.resetForHash(hash)
+			a.detailsState.Visible = true
+			a.refreshDetailsPresentation()
+			a.ensureActiveDetailsLoaded()
+			return
 		}
-		a.detailsState.Visible = true
-		a.refreshDetailsPresentation()
-		a.ensureActiveDetailsLoaded()
+		if !a.detailsState.Visible {
+			a.detailsState.Visible = true
+			a.refreshDetailsPresentation()
+		}
 	case detailsPanelModeOverlayRight:
 		hash := a.activeDetailsHash()
 		if hash == "" {
@@ -235,6 +242,19 @@ func (a *application) refreshDetailsPresentation() {
 	}
 }
 
+// detailsShouldEnsureLoad reports whether a dataset still needs its first
+// load: never loaded and not currently in flight.
+func detailsShouldEnsureLoad(ds *detailsDatasetState) bool {
+	return ds != nil && !ds.Loaded && !ds.Loading
+}
+
+// detailsShouldRefreshLoad reports whether a loaded dataset may be refreshed.
+// Errored datasets are excluded so the poll loop never hammers a failing
+// endpoint; a failed load stays failed until the user retries explicitly.
+func detailsShouldRefreshLoad(ds *detailsDatasetState) bool {
+	return ds != nil && ds.Loaded && !ds.Loading
+}
+
 func (a *application) ensureActiveDetailsLoaded() {
 	if a.detailsState == nil {
 		return
@@ -249,27 +269,9 @@ func (a *application) ensureActiveDetailsLoaded() {
 	if !a.detailsState.Visible && a.currentDetailsMode() != detailsPanelModeBottomPane {
 		return
 	}
-	switch a.detailsState.ActiveTab {
-	case detailsTabGeneral:
-		if !a.detailsState.General.Loaded && !a.detailsState.General.Loading {
-			a.loadTorrentDetailsGeneral(hash)
-		}
-	case detailsTabContent:
-		if !a.detailsState.Content.Loaded && !a.detailsState.Content.Loading {
-			a.loadTorrentDetailsContent(hash)
-		}
-	case detailsTabPeers:
-		if !a.detailsState.Peers.Loaded && !a.detailsState.Peers.Loading {
-			a.loadTorrentDetailsPeers(hash, 0)
-		}
-	case detailsTabTrackers:
-		if !a.detailsState.Trackers.Loaded && !a.detailsState.Trackers.Loading {
-			a.loadTorrentDetailsTrackers(hash)
-		}
-	case detailsTabHTTPSources:
-		if !a.detailsState.WebSeeds.Loaded && !a.detailsState.WebSeeds.Loading {
-			a.loadTorrentDetailsWebSeeds(hash)
-		}
+	tab := a.detailsState.ActiveTab
+	if detailsShouldEnsureLoad(a.detailsState.activeDataset(tab)) {
+		a.loadActiveTabDataset(hash, tab)
 	}
 }
 
@@ -287,29 +289,41 @@ func (a *application) refreshActiveDetails() {
 	if !a.detailsState.Visible && a.currentDetailsMode() != detailsPanelModeBottomPane {
 		return
 	}
-	switch a.detailsState.ActiveTab {
+	tab := a.detailsState.ActiveTab
+	if detailsShouldRefreshLoad(a.detailsState.activeDataset(tab)) {
+		a.loadActiveTabDataset(hash, tab)
+	}
+}
+
+func (a *application) loadActiveTabDataset(hash string, tab detailsTabKey) {
+	switch tab {
 	case detailsTabGeneral:
-		if a.detailsState.General.Loading {
-			return
-		}
 		a.loadTorrentDetailsGeneral(hash)
 	case detailsTabContent:
-		if a.detailsState.Content.Loaded && !a.detailsState.Content.Loading {
-			a.loadTorrentDetailsContent(hash)
-		}
+		a.loadTorrentDetailsContent(hash)
 	case detailsTabPeers:
-		if a.detailsState.Peers.Loaded && !a.detailsState.Peers.Loading {
-			a.loadTorrentDetailsPeers(hash, 0)
-		}
+		a.loadTorrentDetailsPeers(hash, 0)
 	case detailsTabTrackers:
-		if a.detailsState.Trackers.Loaded && !a.detailsState.Trackers.Loading {
-			a.loadTorrentDetailsTrackers(hash)
-		}
+		a.loadTorrentDetailsTrackers(hash)
 	case detailsTabHTTPSources:
-		if a.detailsState.WebSeeds.Loaded && !a.detailsState.WebSeeds.Loading {
-			a.loadTorrentDetailsWebSeeds(hash)
-		}
+		a.loadTorrentDetailsWebSeeds(hash)
 	}
+}
+
+// retryActiveDetailsLoad clears a failed load on the active tab and fetches it
+// again; the explicit retry path for datasets left errored by the poll gating.
+func (a *application) retryActiveDetailsLoad() {
+	if a.detailsState == nil {
+		return
+	}
+	dataset := a.detailsState.activeDataset(a.detailsState.ActiveTab)
+	if dataset == nil || dataset.Loading {
+		return
+	}
+	dataset.Error = ""
+	dataset.Loaded = false
+	a.refreshDetailsPresentation()
+	a.ensureActiveDetailsLoaded()
 }
 
 // detailsLoadTimeout bounds a single details dataset fetch.

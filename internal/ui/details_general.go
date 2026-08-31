@@ -35,7 +35,7 @@ func (v *detailsGeneralTabView) Refresh() {
 	case state.Loading && !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading details...")}
 	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Failed to load details:\n" + state.Error)}
+		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load details:\n"+state.Error, v.app.retryActiveDetailsLoad)}
 	case !state.Loaded:
 		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Details will load when this tab becomes active.")}
 	default:
@@ -122,6 +122,15 @@ func detailsStatusState(text string) fyne.CanvasObject {
 	label := widget.NewLabel(text)
 	label.Wrapping = fyne.TextWrapWord
 	return container.NewCenter(container.NewPadded(label))
+}
+
+// detailsErrorState renders a failed details load with an explicit retry
+// affordance; failed datasets are never re-fetched automatically.
+func detailsErrorState(message string, onRetry func()) fyne.CanvasObject {
+	return container.NewVBox(
+		detailsStatusState(message),
+		container.NewCenter(widget.NewButton("Retry", onRetry)),
+	)
 }
 
 func detailsDuration(seconds int64) string {
