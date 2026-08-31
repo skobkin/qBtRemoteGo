@@ -115,35 +115,43 @@ func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
 }
 
 func (c *Client) TestConnection(ctx context.Context) error {
+	_, err := c.Version(ctx)
+
+	return err
+}
+
+// Version authenticates if needed and returns the qBittorrent server version
+// reported by app/version.
+func (c *Client) Version(ctx context.Context) (string, error) {
 	if err := c.ensureAuthenticated(ctx); err != nil {
-		return err
+		return "", err
 	}
 
 	req, err := c.newRequest(ctx, http.MethodGet, "app/version", nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := c.execute(req)
 	if err != nil {
-		return fmt.Errorf("request app/version: %w", err)
+		return "", fmt.Errorf("request app/version: %w", err)
 	}
 	defer closeAndLog(c.logger, resp.Body, "close app/version response body")
 
 	if resp.StatusCode != http.StatusOK {
 		body := readLimitedResponseText(resp.Body, 2048)
 		if c.apiKey != "" && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-			return fmt.Errorf(
+			return "", fmt.Errorf(
 				"app/version returned %s: %s. API-key authentication may have failed: the key might be invalid or no longer current "+
 					"(qBittorrent invalidates the previous key when it is rotated), the server might not support API keys "+
 					"(qBittorrent v5.2.0 or newer is required), or the server or an intermediate proxy might have denied the request",
 				resp.Status, body)
 		}
 
-		return fmt.Errorf("app/version returned %s: %s", resp.Status, body)
+		return "", fmt.Errorf("app/version returned %s: %s", resp.Status, body)
 	}
 
-	return nil
+	return readLimitedResponseText(resp.Body, 64), nil
 }
 
 func (c *Client) Torrents(ctx context.Context) ([]Torrent, error) {

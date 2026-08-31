@@ -49,6 +49,8 @@ type application struct {
 	transfer          qbt.TransferInfo
 	serverState       qbt.ServerState
 	serverStateKnown  bool
+	connectionState   connectionState
+	serverVersion     string
 	lastError         string
 	windowVisible     bool
 	trayAvailable     bool
@@ -120,7 +122,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	fyApp := app.NewWithID(appcore.ID)
 	fyApp.SetIcon(resources.AppIcon())
 
-	window := fyApp.NewWindow(mainWindowTitle())
+	window := fyApp.NewWindow(mainWindowTitle(connectionStateUnknown, ""))
 	window.Resize(fyne.NewSize(1120, 680))
 	window.SetIcon(resources.AppIcon())
 
@@ -485,6 +487,11 @@ func (a *application) openSettingsWindow() {
 				"log_to_file", updated.Logging.LogToFile,
 			)
 		}
+		// The connection settings may have changed (e.g. a different server URL),
+		// so the cached server version no longer applies; the next connected
+		// refresh probes it again.
+		a.serverVersion = ""
+		a.window.SetTitle(mainWindowTitle(a.connectionState, ""))
 		a.refreshVisibleTorrents()
 		win.Close()
 		a.handlePendingInvocationAfterConnectionSetup()
@@ -591,8 +598,29 @@ func needsConnectionSetup(cfg config.AppConfig) bool {
 	return strings.TrimSpace(cfg.Connection.URL) == ""
 }
 
-func mainWindowTitle() string {
-	return appcore.Name + " " + appcore.BuildVersion()
+// connectionState tracks what the last completed refresh revealed about the
+// qBittorrent connection; it drives the main window title.
+type connectionState int
+
+const (
+	// connectionStateUnknown means no refresh has completed yet.
+	connectionStateUnknown connectionState = iota
+	connectionStateConnected
+	connectionStateDisconnected
+)
+
+func mainWindowTitle(state connectionState, serverVersion string) string {
+	title := appcore.Name + " " + appcore.BuildVersion()
+	switch state {
+	case connectionStateDisconnected:
+		return title + " x disconnected"
+	case connectionStateConnected:
+		if version := strings.TrimSpace(serverVersion); version != "" {
+			return title + " -> qBittorrent " + version
+		}
+	}
+
+	return title
 }
 
 func mergeInvocationBatches(dst, src appcore.InvocationBatch) appcore.InvocationBatch {
@@ -1116,12 +1144,29 @@ func (a *application) refreshNow() {
 	transfer, transferErr := a.controller.FetchTransferInfo(ctx)
 	serverState, serverStateErr := a.controller.FetchServerState(ctx)
 
+	// The server version is probed only while connected and still unknown, so a
+	// healthy connection costs a single extra request; after a disconnect the
+	// version is forgotten here and probed again once the connection is back.
+	var serverVersion string
+	var serverVersionErr error
+	if err == nil && a.serverVersion == "" {
+		serverVersion, serverVersionErr = a.controller.FetchServerVersion(ctx)
+	}
+
 	fyne.Do(func() {
 		if err == nil {
 			a.allTorrents = torrents
 			a.lastError = ""
+			a.connectionState = connectionStateConnected
+			if serverVersionErr != nil {
+				a.logger.Debug("load server version", "error", serverVersionErr)
+			} else if version := strings.TrimSpace(serverVersion); version != "" {
+				a.serverVersion = version
+			}
 		} else {
 			a.lastError = err.Error()
+			a.connectionState = connectionStateDisconnected
+			a.serverVersion = ""
 		}
 		if transferErr == nil {
 			a.transfer = transfer
@@ -1133,6 +1178,9 @@ func (a *application) refreshNow() {
 			a.serverStateKnown = true
 		} else if a.lastError == "" {
 			a.lastError = serverStateErr.Error()
+		}
+		if title := mainWindowTitle(a.connectionState, a.serverVersion); title != a.window.Title() {
+			a.window.SetTitle(title)
 		}
 		a.refreshVisibleTorrents()
 		a.updateTray()

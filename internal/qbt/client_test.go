@@ -237,6 +237,39 @@ func TestLoginRejectsErrorStatus(t *testing.T) {
 	}
 }
 
+func TestVersionReturnsServerVersion(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/app/version":
+			_, _ = io.WriteString(w, "5.2.5")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	version, err := client.Version(context.Background())
+	if err != nil {
+		t.Fatalf("server version: %v", err)
+	}
+	if version != "5.2.5" {
+		t.Fatalf("unexpected version: %q", version)
+	}
+}
+
 const testAPIKey = "qbt_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestAPIKeySkipsLoginAndSendsBearer(t *testing.T) {

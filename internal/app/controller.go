@@ -229,6 +229,15 @@ func (c *Controller) FetchServerState(ctx context.Context) (qbt.ServerState, err
 	return client.ServerState(ctx)
 }
 
+func (c *Controller) FetchServerVersion(ctx context.Context) (string, error) {
+	client, err := c.client()
+	if err != nil {
+		return "", err
+	}
+
+	return client.Version(ctx)
+}
+
 func (c *Controller) FetchCategoriesAndTags(ctx context.Context) ([]string, []string, error) {
 	client, err := c.client()
 	if err != nil {

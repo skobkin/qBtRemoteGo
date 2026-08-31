@@ -641,6 +641,37 @@ func TestSetTorrentLocationHappyPath(t *testing.T) {
 	}
 }
 
+func TestFetchServerVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/app/version":
+			_, _ = io.WriteString(w, "5.1.2")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server.URL
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	version, err := controller.FetchServerVersion(context.Background())
+	if err != nil {
+		t.Fatalf("fetch server version: %v", err)
+	}
+	if version != "5.1.2" {
+		t.Fatalf("unexpected version: %q", version)
+	}
+}
+
 func newTestController(t *testing.T, cfg config.AppConfig, store credentials.Store) *Controller {
 	t.Helper()
 

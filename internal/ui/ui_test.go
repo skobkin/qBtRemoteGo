@@ -20,8 +20,47 @@ func TestMainWindowTitle(t *testing.T) {
 
 	appcore.Version = "0.5.0"
 
-	if got, want := mainWindowTitle(), "qBtRemoteGo 0.5.0"; got != want {
-		t.Fatalf("mainWindowTitle() = %q, want %q", got, want)
+	tests := []struct {
+		name          string
+		state         connectionState
+		serverVersion string
+		want          string
+	}{
+		{
+			name:  "unknown state before first refresh",
+			state: connectionStateUnknown,
+			want:  "qBtRemoteGo 0.5.0",
+		},
+		{
+			name:          "connected with server version",
+			state:         connectionStateConnected,
+			serverVersion: "5.2.5",
+			want:          "qBtRemoteGo 0.5.0 -> qBittorrent 5.2.5",
+		},
+		{
+			name:          "connected trims server version",
+			state:         connectionStateConnected,
+			serverVersion: " 5.2.5\n",
+			want:          "qBtRemoteGo 0.5.0 -> qBittorrent 5.2.5",
+		},
+		{
+			name:  "connected without server version",
+			state: connectionStateConnected,
+			want:  "qBtRemoteGo 0.5.0",
+		},
+		{
+			name:  "disconnected",
+			state: connectionStateDisconnected,
+			want:  "qBtRemoteGo 0.5.0 x disconnected",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mainWindowTitle(tt.state, tt.serverVersion); got != tt.want {
+				t.Fatalf("mainWindowTitle(%v, %q) = %q, want %q", tt.state, tt.serverVersion, got, tt.want)
+			}
+		})
 	}
 }
 
