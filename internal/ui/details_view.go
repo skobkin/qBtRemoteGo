@@ -12,9 +12,9 @@ type torrentDetailsView struct {
 	tabs     *container.AppTabs
 	general  *detailsGeneralTabView
 	content  *detailsContentTabView
-	peers    *detailsPeerTabView
-	trackers *detailsTrackersTabView
-	webSeeds *detailsWebSeedsTabView
+	peers    *detailsTableTabView
+	trackers *detailsTableTabView
+	webSeeds *detailsTableTabView
 	tabItems map[detailsTabKey]*container.TabItem
 }
 

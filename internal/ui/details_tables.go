@@ -105,138 +105,154 @@ func (v *detailsTableView) SetRows(rows [][]string) {
 	v.table.Refresh()
 }
 
-type detailsPeerTabView struct {
-	app   *application
-	root  *fyne.Container
-	table *detailsTableView
+// detailsTableMessages carries the per-tab status copy of a details table view.
+type detailsTableMessages struct {
+	loading      string
+	failedPrefix string
+	idle         string
 }
 
-type detailsTrackersTabView struct {
-	app   *application
-	root  *fyne.Container
-	table *detailsTableView
+// detailsTableTabView is the shared tab view behind the Peers, Trackers and
+// HTTP Sources tabs: one table plus one status/retry chrome, built once and
+// updated in place by Refresh.
+type detailsTableTabView struct {
+	app    *application
+	tab    detailsTabKey
+	root   *fyne.Container
+	table  *detailsTableView
+	status *widget.Label
+	retry  *widget.Button
+	wrap   *fyne.Container
+	msgs   detailsTableMessages
+	rows   func(state *torrentDetailsState) [][]string
 }
 
-type detailsWebSeedsTabView struct {
-	app   *application
-	root  *fyne.Container
-	table *detailsTableView
-}
-
-func newDetailsPeerTabView(app *application) *detailsPeerTabView {
-	return &detailsPeerTabView{
+func newDetailsTableTabView(
+	app *application,
+	tab detailsTabKey,
+	specs []detailsColumnSpec,
+	msgs detailsTableMessages,
+	rows func(state *torrentDetailsState) [][]string,
+) *detailsTableTabView {
+	v := &detailsTableTabView{
 		app:   app,
+		tab:   tab,
 		root:  container.NewStack(),
-		table: newDetailsTableView(detailsPeerColumnSpecs),
+		table: newDetailsTableView(specs),
+		msgs:  msgs,
+		rows:  rows,
 	}
+	v.status = widget.NewLabel("")
+	v.status.Wrapping = fyne.TextWrapWord
+	v.status.Truncation = fyne.TextTruncateEllipsis
+	v.retry = widget.NewButton("Retry", func() { v.app.retryActiveDetailsLoad() })
+	v.wrap = container.NewVBox(
+		container.NewCenter(container.NewPadded(v.status)),
+		container.NewCenter(v.retry),
+	)
+	v.root.Objects = []fyne.CanvasObject{v.table.Root(), v.wrap}
+	return v
 }
 
-func (v *detailsPeerTabView) Root() fyne.CanvasObject {
+func (v *detailsTableTabView) Root() fyne.CanvasObject {
 	return v.root
 }
 
-func (v *detailsPeerTabView) Refresh() {
-	state := v.app.detailsState.Peers
+func (v *detailsTableTabView) Refresh() {
+	state := v.app.detailsState
+	dataset := state.activeDataset(v.tab)
 	switch {
-	case state.Loading && !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading peers...")}
-	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load peers:\n"+state.Error, v.app.retryActiveDetailsLoad)}
-	case !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Peers will load when this tab becomes active.")}
+	case state == nil || dataset == nil || (dataset.Loading && !dataset.Loaded):
+		v.status.SetText(v.msgs.loading)
+		v.retry.Hide()
+		v.wrap.Show()
+	case strings.TrimSpace(dataset.Error) != "":
+		v.status.SetText(v.msgs.failedPrefix + "\n" + dataset.Error)
+		v.retry.Show()
+		v.wrap.Show()
+	case !dataset.Loaded:
+		v.status.SetText(v.msgs.idle)
+		v.retry.Hide()
+		v.wrap.Show()
 	default:
-		rows := make([][]string, 0, len(state.Peers))
-		for _, peer := range state.Peers {
-			rows = append(rows, []string{
-				peer.IP,
-				fmt.Sprintf("%d", peer.Port),
-				peer.Connection,
-				peer.Flags,
-				peer.Client,
-				fmt.Sprintf("%.1f%%", peer.Progress*100),
-				appcore.HumanSpeed(peer.DownloadSpeed),
-				appcore.HumanSpeed(peer.UploadSpeed),
-				appcore.HumanBytes(peer.TotalDownloaded),
-				appcore.HumanBytes(peer.TotalUploaded),
-			})
-		}
-		v.table.SetRows(rows)
-		v.root.Objects = []fyne.CanvasObject{v.table.Root()}
+		v.table.SetRows(v.rows(state))
+		v.wrap.Hide()
 	}
 	v.root.Refresh()
 }
 
-func newDetailsTrackersTabView(app *application) *detailsTrackersTabView {
-	return &detailsTrackersTabView{
-		app:   app,
-		root:  container.NewStack(),
-		table: newDetailsTableView(detailsTrackerColumnSpecs),
+func newDetailsPeerTabView(app *application) *detailsTableTabView {
+	return newDetailsTableTabView(app, detailsTabPeers, detailsPeerColumnSpecs,
+		detailsTableMessages{
+			loading:      "Loading peers...",
+			failedPrefix: "Failed to load peers:",
+			idle:         "Peers will load when this tab becomes active.",
+		},
+		peerRows)
+}
+
+func newDetailsTrackersTabView(app *application) *detailsTableTabView {
+	return newDetailsTableTabView(app, detailsTabTrackers, detailsTrackerColumnSpecs,
+		detailsTableMessages{
+			loading:      "Loading trackers...",
+			failedPrefix: "Failed to load trackers:",
+			idle:         "Trackers will load when this tab becomes active.",
+		},
+		trackerRows)
+}
+
+func newDetailsWebSeedsTabView(app *application) *detailsTableTabView {
+	return newDetailsTableTabView(app, detailsTabHTTPSources, detailsWebSeedColumnSpecs,
+		detailsTableMessages{
+			loading:      "Loading HTTP sources...",
+			failedPrefix: "Failed to load HTTP sources:",
+			idle:         "HTTP sources will load when this tab becomes active.",
+		},
+		webSeedRows)
+}
+
+func peerRows(state *torrentDetailsState) [][]string {
+	rows := make([][]string, 0, len(state.Peers.Peers))
+	for _, peer := range state.Peers.Peers {
+		rows = append(rows, []string{
+			peer.IP,
+			fmt.Sprintf("%d", peer.Port),
+			peer.Connection,
+			peer.Flags,
+			peer.Client,
+			fmt.Sprintf("%.1f%%", peer.Progress*100),
+			appcore.HumanSpeed(peer.DownloadSpeed),
+			appcore.HumanSpeed(peer.UploadSpeed),
+			appcore.HumanBytes(peer.TotalDownloaded),
+			appcore.HumanBytes(peer.TotalUploaded),
+		})
 	}
+	return rows
 }
 
-func (v *detailsTrackersTabView) Root() fyne.CanvasObject {
-	return v.root
-}
-
-func (v *detailsTrackersTabView) Refresh() {
-	state := v.app.detailsState.Trackers
-	switch {
-	case state.Loading && !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading trackers...")}
-	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load trackers:\n"+state.Error, v.app.retryActiveDetailsLoad)}
-	case !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Trackers will load when this tab becomes active.")}
-	default:
-		rows := make([][]string, 0, len(state.Trackers))
-		for _, tracker := range state.Trackers {
-			rows = append(rows, []string{
-				fmt.Sprintf("%d", tracker.Tier),
-				tracker.URL,
-				trackerStatusLabel(tracker.Status),
-				fmt.Sprintf("%d", tracker.Peers),
-				fmt.Sprintf("%d", tracker.Seeds),
-				fmt.Sprintf("%d", tracker.Leeches),
-				fmt.Sprintf("%d", tracker.Downloaded),
-				tracker.Message,
-			})
-		}
-		v.table.SetRows(rows)
-		v.root.Objects = []fyne.CanvasObject{v.table.Root()}
+func trackerRows(state *torrentDetailsState) [][]string {
+	rows := make([][]string, 0, len(state.Trackers.Trackers))
+	for _, tracker := range state.Trackers.Trackers {
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", tracker.Tier),
+			tracker.URL,
+			trackerStatusLabel(tracker.Status),
+			fmt.Sprintf("%d", tracker.Peers),
+			fmt.Sprintf("%d", tracker.Seeds),
+			fmt.Sprintf("%d", tracker.Leeches),
+			fmt.Sprintf("%d", tracker.Downloaded),
+			tracker.Message,
+		})
 	}
-	v.root.Refresh()
+	return rows
 }
 
-func newDetailsWebSeedsTabView(app *application) *detailsWebSeedsTabView {
-	return &detailsWebSeedsTabView{
-		app:   app,
-		root:  container.NewStack(),
-		table: newDetailsTableView(detailsWebSeedColumnSpecs),
+func webSeedRows(state *torrentDetailsState) [][]string {
+	rows := make([][]string, 0, len(state.WebSeeds.WebSeeds))
+	for _, webSeed := range state.WebSeeds.WebSeeds {
+		rows = append(rows, []string{webSeed.URL})
 	}
-}
-
-func (v *detailsWebSeedsTabView) Root() fyne.CanvasObject {
-	return v.root
-}
-
-func (v *detailsWebSeedsTabView) Refresh() {
-	state := v.app.detailsState.WebSeeds
-	switch {
-	case state.Loading && !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("Loading HTTP sources...")}
-	case strings.TrimSpace(state.Error) != "":
-		v.root.Objects = []fyne.CanvasObject{detailsErrorState("Failed to load HTTP sources:\n"+state.Error, v.app.retryActiveDetailsLoad)}
-	case !state.Loaded:
-		v.root.Objects = []fyne.CanvasObject{detailsStatusState("HTTP sources will load when this tab becomes active.")}
-	default:
-		rows := make([][]string, 0, len(state.WebSeeds))
-		for _, webSeed := range state.WebSeeds {
-			rows = append(rows, []string{webSeed.URL})
-		}
-		v.table.SetRows(rows)
-		v.root.Objects = []fyne.CanvasObject{v.table.Root()}
-	}
-	v.root.Refresh()
+	return rows
 }
 
 func trackerStatusLabel(status int) string {
