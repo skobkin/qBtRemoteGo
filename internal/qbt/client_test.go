@@ -138,7 +138,10 @@ func TestLoginAcceptsNoContentWithPortNamedSessionCookie(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v2/auth/login":
-			http.SetCookie(w, &http.Cookie{
+			// The session cookie must stay non-Secure: the test server is plain
+			// HTTP and the jar would not resend a Secure cookie, breaking the
+			// session check below.
+			http.SetCookie(w, &http.Cookie{ //nolint:gosec
 				Name:     "QBT_SID_8112",
 				Value:    "test-value",
 				Path:     "/",
