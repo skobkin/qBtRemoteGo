@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -321,22 +322,36 @@ func TestConnectionCredentialStorageText(t *testing.T) {
 }
 
 func TestConnectionCredentialWarningText(t *testing.T) {
+	const deprecation = authMethodPasswordDeprecationNotice
+
 	if got := connectionCredentialWarningText(config.AuthMethodPassword, config.CredentialStorageKeychain, credentials.Status{
 		Backend: "Secret Service",
 		State:   credentials.StateLocked,
 		Message: "keychain locked",
-	}, credentials.Credentials{}); got == "" {
-		t.Fatal("expected keychain warning")
+	}, credentials.Credentials{}); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "keychain locked") {
+		t.Fatalf("expected deprecation notice and keychain warning, got %q", got)
 	}
 
-	if got := connectionCredentialWarningText(config.AuthMethodPassword, config.CredentialStoragePlaintext, credentials.Status{}, credentials.Credentials{}); got == "" {
-		t.Fatal("expected plaintext warning")
+	if got := connectionCredentialWarningText(config.AuthMethodPassword, config.CredentialStoragePlaintext, credentials.Status{}, credentials.Credentials{}); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "plain text") {
+		t.Fatalf("expected deprecation notice and plaintext warning, got %q", got)
 	}
 
 	if got := connectionCredentialWarningText(config.AuthMethodPassword, config.CredentialStorageNone, credentials.Status{}, credentials.Credentials{
 		Username: "demo",
-	}); got == "" {
-		t.Fatal("expected session-only message")
+	}); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "in memory") {
+		t.Fatalf("expected deprecation notice and session-only message, got %q", got)
+	}
+
+	if got := connectionCredentialWarningText(config.AuthMethodPassword, config.CredentialStorageKeychain, credentials.Status{
+		State: credentials.StateAvailable,
+	}, credentials.Credentials{}); got != deprecation {
+		t.Fatalf("expected only the deprecation notice, got %q", got)
+	}
+
+	if got := connectionCredentialWarningText(config.AuthMethodAPIKey, config.CredentialStorageKeychain, credentials.Status{
+		State: credentials.StateAvailable,
+	}, credentials.Credentials{}); got != "" {
+		t.Fatalf("expected no warning for API key auth, got %q", got)
 	}
 
 	if got := connectionCredentialWarningText(config.AuthMethodAPIKey, config.CredentialStoragePlaintext, credentials.Status{}, credentials.Credentials{}); got != "Warning: The API key is stored in plain text in the local config file." {
@@ -357,7 +372,7 @@ func TestAuthMethodLabelRoundTrip(t *testing.T) {
 		label  string
 	}{
 		{name: "password", method: config.AuthMethodPassword, label: authMethodLabelPassword},
-		{name: "empty defaults to password", method: "", label: authMethodLabelPassword},
+		{name: "empty falls back to password", method: "", label: authMethodLabelPassword},
 		{name: "api key", method: config.AuthMethodAPIKey, label: authMethodLabelAPIKey},
 	}
 

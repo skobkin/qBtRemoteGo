@@ -756,15 +756,18 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 
 			return nil
 		}
+		method = c.reconcileAuthMethod(method, creds)
 		c.sessionCredentials = canonicalCredentials(method, creds)
 
 		return nil
 	case config.CredentialStoragePlaintext:
-		c.sessionCredentials = canonicalCredentials(method, credentials.Credentials{
+		creds := credentials.Credentials{
 			Username: c.config.Connection.Username,
 			Password: c.config.Connection.Password,
 			APIKey:   c.config.Connection.APIKey,
-		})
+		}
+		method = c.reconcileAuthMethod(method, creds)
+		c.sessionCredentials = canonicalCredentials(method, creds)
 
 		return nil
 	case config.CredentialStorageNone:
@@ -778,11 +781,13 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 			return nil
 		}
 
-		legacy := canonicalCredentials(method, credentials.Credentials{
+		legacy := credentials.Credentials{
 			Username: c.config.Connection.Username,
 			Password: c.config.Connection.Password,
 			APIKey:   c.config.Connection.APIKey,
-		})
+		}
+		method = c.reconcileAuthMethod(method, legacy)
+		legacy = canonicalCredentials(method, legacy)
 		c.sessionCredentials = legacy
 		if status.State != credentials.StateAvailable {
 			c.logger.Warn("legacy plaintext credentials remain because system keychain is unavailable", "backend", status.Backend, "state", status.State)
@@ -893,6 +898,35 @@ func canonicalCredentials(method config.AuthMethod, creds credentials.Credential
 	}
 
 	return credentials.Credentials{Username: creds.Username, Password: creds.Password}
+}
+
+// inferAuthMethod keeps configs saved before auth methods existed on password
+// auth: released builds stored only password credentials and no auth_method
+// field, so stored password credentials without an API key identify a legacy
+// password setup rather than the new api_key default. Saves never keep
+// credentials for an inactive method (see canonicalCredentials), so an
+// explicitly chosen api_key method cannot be overridden this way.
+func inferAuthMethod(method config.AuthMethod, creds credentials.Credentials) config.AuthMethod {
+	if method == config.AuthMethodAPIKey && creds.APIKey == "" && (creds.Username != "" || creds.Password != "") {
+		return config.AuthMethodPassword
+	}
+
+	return method
+}
+
+// reconcileAuthMethod applies legacy inference and records the effective method
+// on the in-memory config, so the rest of the controller acts on the method
+// that matches the credentials actually being loaded.
+func (c *Controller) reconcileAuthMethod(method config.AuthMethod, creds credentials.Credentials) config.AuthMethod {
+	inferred := inferAuthMethod(method, creds)
+	if inferred == method {
+		return method
+	}
+
+	c.config.Connection.AuthMethod = inferred
+	c.logger.Info("kept password auth for credentials stored before auth methods existed")
+
+	return inferred
 }
 
 func connectionClientConfig(cfg config.ConnectionConfig, creds credentials.Credentials) (qbt.ClientConfig, error) {

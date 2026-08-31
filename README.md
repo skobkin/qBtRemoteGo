@@ -26,12 +26,12 @@ Check the [Releases](https://git.skobk.in/skobkin/qBtRemoteGo/releases) section 
 
 ## Connection & authentication
 
-Two authentication methods, selected in *Settings → Connection*:
+Two authentication methods, selected in *Settings → Connection* (API key is the default):
 
-- **Username & password** — works with any qBittorrent version.
 - **API key** — qBittorrent v5.2.0+; generate it in qBittorrent (*Preferences → WebUI → API Key*)
   and paste it here. Sent as `Authorization: Bearer`, so it can't be combined with reverse-proxy
   HTTP Basic Auth.
+- **Username & password** (deprecated) — kept for older qBittorrent versions; prefer an API key.
 
 The app never revokes or rotates the key server-side. Only the active method's credentials are
 kept — switching methods means re-entering them. Passwords and keys are stored in the system

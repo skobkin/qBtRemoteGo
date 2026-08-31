@@ -117,11 +117,12 @@ func TestNormalizeAuthMethod(t *testing.T) {
 		method AuthMethod
 		want   AuthMethod
 	}{
-		{name: "empty defaults to password", method: "", want: AuthMethodPassword},
-		{name: "unknown falls back to password", method: "bogus", want: AuthMethodPassword},
-		{name: "case and space insensitive", method: " Api_Key ", want: AuthMethodAPIKey},
+		{name: "empty defaults to api key", method: "", want: AuthMethodAPIKey},
+		{name: "unknown falls back to api key", method: "bogus", want: AuthMethodAPIKey},
+		{name: "case and space insensitive api key", method: " Api_Key ", want: AuthMethodAPIKey},
 		{name: "api key preserved", method: AuthMethodAPIKey, want: AuthMethodAPIKey},
 		{name: "password preserved", method: AuthMethodPassword, want: AuthMethodPassword},
+		{name: "case and space insensitive password", method: " Password ", want: AuthMethodPassword},
 	}
 
 	for _, tc := range tests {
@@ -149,7 +150,7 @@ func TestNormalizeTrimsAPIKey(t *testing.T) {
 	}
 }
 
-func TestLoadLegacyConfigDefaultsToPasswordAuth(t *testing.T) {
+func TestLoadLegacyConfigDefaultsToAPIKeyAuth(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	data := []byte("{\n  \"connection\": {\n    \"url\": \"https://example.invalid/qbt\",\n    \"username\": \"demo\"\n  }\n}\n")
@@ -163,8 +164,11 @@ func TestLoadLegacyConfigDefaultsToPasswordAuth(t *testing.T) {
 		t.Fatalf("load config: %v", err)
 	}
 
-	if loaded.Connection.AuthMethod != AuthMethodPassword {
-		t.Fatalf("expected legacy config to default to password auth, got %q", loaded.Connection.AuthMethod)
+	// At the config layer a missing auth_method defaults to API-key auth; the
+	// controller keeps configs carrying password credentials on password auth
+	// (see the controller inference tests).
+	if loaded.Connection.AuthMethod != AuthMethodAPIKey {
+		t.Fatalf("expected legacy config to default to api key auth, got %q", loaded.Connection.AuthMethod)
 	}
 }
 

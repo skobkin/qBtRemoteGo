@@ -217,14 +217,17 @@ func normalizePaths(paths []string, limit int) []string {
 	return out
 }
 
-// normalizeAuthMethod defaults unknown and empty values to password auth so
-// consumers can always switch on a canonical, non-empty method.
+// normalizeAuthMethod defaults unknown and empty values to API-key auth so
+// consumers can always switch on a canonical, non-empty method. Configs saved
+// before auth methods existed (password credentials, no auth_method field) are
+// kept on password auth by the controller, which infers the method from the
+// stored credentials.
 func normalizeAuthMethod(method AuthMethod) AuthMethod {
-	if strings.ToLower(strings.TrimSpace(string(method))) == string(AuthMethodAPIKey) {
-		return AuthMethodAPIKey
+	if strings.ToLower(strings.TrimSpace(string(method))) == string(AuthMethodPassword) {
+		return AuthMethodPassword
 	}
 
-	return AuthMethodPassword
+	return AuthMethodAPIKey
 }
 
 func normalizeCredentialStorage(mode CredentialStorageMode) CredentialStorageMode {

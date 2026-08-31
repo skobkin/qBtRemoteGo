@@ -661,12 +661,12 @@ func (a *application) handlePendingInvocationAfterConnectionSetup() {
 }
 
 const (
-	authMethodLabelPassword = "Username & password"
+	authMethodLabelPassword = "Username & password (deprecated)"
 	authMethodLabelAPIKey   = "API key"
 )
 
 func authMethodLabels() []string {
-	return []string{authMethodLabelPassword, authMethodLabelAPIKey}
+	return []string{authMethodLabelAPIKey, authMethodLabelPassword}
 }
 
 func authMethodLabel(method config.AuthMethod) string {
@@ -713,7 +713,27 @@ func connectionCredentialStorageText(
 	}
 }
 
+const authMethodPasswordDeprecationNotice = "Username & password authentication is deprecated; consider switching to an API key (requires qBittorrent v5.2.0 or newer)."
+
 func connectionCredentialWarningText(
+	method config.AuthMethod,
+	mode config.CredentialStorageMode,
+	status credentials.Status,
+	session credentials.Credentials,
+) string {
+	warning := connectionStorageWarningText(method, mode, status, session)
+	if method != config.AuthMethodPassword {
+		return warning
+	}
+
+	if warning == "" {
+		return authMethodPasswordDeprecationNotice
+	}
+
+	return authMethodPasswordDeprecationNotice + " " + warning
+}
+
+func connectionStorageWarningText(
 	method config.AuthMethod,
 	mode config.CredentialStorageMode,
 	status credentials.Status,

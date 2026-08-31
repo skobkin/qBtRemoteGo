@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -143,6 +144,62 @@ func TestHumanETA(t *testing.T) {
 	}
 }
 
+func TestNewControllerInfersPasswordAuthFromLegacyConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	// Released builds write no auth_method field; password auth is the only
+	// method they have.
+	data := `{"connection":{"url":"https://example.invalid","username":"demo","password":"secret"}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+
+	controller, err := newController(path, slog.New(slog.NewTextHandler(io.Discard, nil)), credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	controller.platform = nil
+
+	if got := controller.Config().Connection.AuthMethod; got != config.AuthMethodPassword {
+		t.Fatalf("expected inferred password auth, got %q", got)
+	}
+	if got := controller.SessionCredentials(); got != (credentials.Credentials{Username: "demo", Password: "secret"}) {
+		t.Fatalf("unexpected session credentials: %#v", got)
+	}
+}
+
+func TestNewControllerInfersPasswordAuthFromKeychainPayload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	data := `{"connection":{"url":"https://example.invalid","credential_storage":"keychain"}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+
+	controller, err := newController(path, slog.New(slog.NewTextHandler(io.Discard, nil)), credentials.NewStoreForTests(
+		func(service, user string) (string, error) {
+			return `{"username":"demo","password":"secret"}`, nil
+		},
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	controller.platform = nil
+
+	if got := controller.Config().Connection.AuthMethod; got != config.AuthMethodPassword {
+		t.Fatalf("expected inferred password auth, got %q", got)
+	}
+	if got := controller.SessionCredentials(); got != (credentials.Credentials{Username: "demo", Password: "secret"}) {
+		t.Fatalf("unexpected session credentials: %#v", got)
+	}
+}
+
 func TestSetTorrentLocationRejectsBlankLocation(t *testing.T) {
 	controller := newTestController(t, config.Default(), credentials.NewStoreForTests(
 		func(service, user string) (string, error) { return "", nil },
@@ -224,7 +281,10 @@ func TestSaveSettingsRequiresDecisionWhenKeychainUnavailableAndCredentialsChange
 		func(service, user string) error { return nil },
 	))
 
-	result, err := controller.SaveSettings(context.Background(), controller.Config(), credentials.Credentials{
+	updated := controller.Config()
+	updated.Connection.AuthMethod = config.AuthMethodPassword
+
+	result, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
 		Username: "new-user",
 		Password: "new-pass",
 	}, CredentialFallbackUnspecified)
@@ -244,6 +304,7 @@ func TestSaveSettingsPlaintextFallback(t *testing.T) {
 	))
 
 	updated := controller.Config()
+	updated.Connection.AuthMethod = config.AuthMethodPassword
 	updated.Logging.Level = "debug"
 
 	result, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
@@ -269,6 +330,7 @@ func TestSaveSettingsPlaintextFallback(t *testing.T) {
 
 func TestSaveSettingsSessionOnlyKeepsKeychainModeDuringTemporaryOutage(t *testing.T) {
 	cfg := config.Default()
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
 	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
 
 	controller := newTestController(t, cfg, credentials.NewStoreForTests(
@@ -371,6 +433,7 @@ func TestSaveSettingsPasswordDropsAPIKey(t *testing.T) {
 	controller := newTestController(t, config.Default(), store)
 
 	updated := controller.Config()
+	updated.Connection.AuthMethod = config.AuthMethodPassword
 
 	if _, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
 		Username: "demo",
@@ -511,6 +574,7 @@ func TestControllerIgnoresAPIKeyInPasswordMode(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Connection.URL = server.URL
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
 	cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
 	cfg.Connection.Username = "demo"
 	cfg.Connection.Password = "secret"
@@ -533,6 +597,7 @@ func TestControllerIgnoresAPIKeyInPasswordMode(t *testing.T) {
 
 func TestNewControllerCanonicalizesKeychainCredentials(t *testing.T) {
 	cfg := config.Default()
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
 	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
 
 	store := credentials.NewStoreForTests(
@@ -608,6 +673,7 @@ func TestSetTorrentLocationHappyPath(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Connection.URL = server.URL
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -656,6 +722,7 @@ func TestFetchServerVersion(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Connection.URL = server.URL
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
 
 	controller := newTestController(t, cfg, credentials.NewStoreForTests(
 		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
