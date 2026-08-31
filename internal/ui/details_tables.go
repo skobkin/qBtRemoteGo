@@ -11,43 +11,85 @@ import (
 	appcore "github.com/skobkin/qbtremotego/internal/app"
 )
 
-type detailsTableView struct {
-	root    *fyne.Container
-	table   *widget.Table
-	headers []string
-	rows    [][]string
+// detailsColumnSpec fixes one details table column: header text and a width
+// chosen so overflow ellipsizes inside the cell instead of collapsing columns.
+type detailsColumnSpec struct {
+	label string
+	width float32
 }
 
-func newDetailsTableView(headers []string) *detailsTableView {
+var (
+	detailsPeerColumnSpecs = []detailsColumnSpec{
+		{label: "IP", width: 130},
+		{label: "Port", width: 70},
+		{label: "Connection", width: 90},
+		{label: "Flags", width: 70},
+		{label: "Client", width: 190},
+		{label: "Progress", width: 80},
+		{label: "Down", width: 90},
+		{label: "Up", width: 90},
+		{label: "Downloaded", width: 105},
+		{label: "Uploaded", width: 105},
+	}
+
+	detailsTrackerColumnSpecs = []detailsColumnSpec{
+		{label: "Tier", width: 60},
+		{label: "URL", width: 280},
+		{label: "Status", width: 110},
+		{label: "Peers", width: 70},
+		{label: "Seeds", width: 70},
+		{label: "Leeches", width: 70},
+		{label: "Downloaded", width: 95},
+		{label: "Message", width: 240},
+	}
+
+	detailsWebSeedColumnSpecs = []detailsColumnSpec{
+		{label: "URL", width: 420},
+	}
+)
+
+type detailsTableView struct {
+	root  *fyne.Container
+	table *widget.Table
+	specs []detailsColumnSpec
+	rows  [][]string
+}
+
+func newDetailsTableView(specs []detailsColumnSpec) *detailsTableView {
 	v := &detailsTableView{
-		root:    container.NewStack(),
-		headers: headers,
+		root:  container.NewStack(),
+		specs: specs,
 	}
 	v.table = widget.NewTable(
 		func() (int, int) {
-			return len(v.rows), len(v.headers)
+			return len(v.rows), len(v.specs)
 		},
 		func() fyne.CanvasObject {
 			label := widget.NewLabel("")
 			label.Wrapping = fyne.TextWrapOff
+			label.Truncation = fyne.TextTruncateEllipsis
 			return label
 		},
 		func(id widget.TableCellID, object fyne.CanvasObject) {
-			if id.Row < 0 || id.Row >= len(v.rows) || id.Col < 0 || id.Col >= len(v.headers) {
+			if id.Row < 0 || id.Row >= len(v.rows) || id.Col < 0 || id.Col >= len(v.specs) {
 				return
 			}
 			object.(*widget.Label).SetText(v.rows[id.Row][id.Col])
 		},
 	)
+	for index, spec := range specs {
+		v.table.SetColumnWidth(index, spec.width)
+	}
 	v.table.ShowHeaderRow = true
 	v.table.CreateHeader = func() fyne.CanvasObject {
 		label := widget.NewLabel("")
 		label.TextStyle = fyne.TextStyle{Bold: true}
+		label.Truncation = fyne.TextTruncateEllipsis
 		return label
 	}
 	v.table.UpdateHeader = func(id widget.TableCellID, object fyne.CanvasObject) {
-		if id.Row == -1 && id.Col >= 0 && id.Col < len(v.headers) {
-			object.(*widget.Label).SetText(v.headers[id.Col])
+		if id.Row == -1 && id.Col >= 0 && id.Col < len(v.specs) {
+			object.(*widget.Label).SetText(v.specs[id.Col].label)
 		}
 	}
 	v.root.Objects = []fyne.CanvasObject{v.table}
@@ -85,7 +127,7 @@ func newDetailsPeerTabView(app *application) *detailsPeerTabView {
 	return &detailsPeerTabView{
 		app:   app,
 		root:  container.NewStack(),
-		table: newDetailsTableView([]string{"IP", "Port", "Connection", "Flags", "Client", "Progress", "Down", "Up", "Downloaded", "Uploaded"}),
+		table: newDetailsTableView(detailsPeerColumnSpecs),
 	}
 }
 
@@ -128,7 +170,7 @@ func newDetailsTrackersTabView(app *application) *detailsTrackersTabView {
 	return &detailsTrackersTabView{
 		app:   app,
 		root:  container.NewStack(),
-		table: newDetailsTableView([]string{"Tier", "URL", "Status", "Peers", "Seeds", "Leeches", "Downloaded", "Message"}),
+		table: newDetailsTableView(detailsTrackerColumnSpecs),
 	}
 }
 
@@ -169,7 +211,7 @@ func newDetailsWebSeedsTabView(app *application) *detailsWebSeedsTabView {
 	return &detailsWebSeedsTabView{
 		app:   app,
 		root:  container.NewStack(),
-		table: newDetailsTableView([]string{"URL"}),
+		table: newDetailsTableView(detailsWebSeedColumnSpecs),
 	}
 }
 
