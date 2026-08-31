@@ -120,7 +120,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	fyApp := app.NewWithID(appcore.ID)
 	fyApp.SetIcon(resources.AppIcon())
 
-	window := fyApp.NewWindow(appcore.Name)
+	window := fyApp.NewWindow(mainWindowTitle())
 	window.Resize(fyne.NewSize(1120, 680))
 	window.SetIcon(resources.AppIcon())
 
@@ -589,6 +589,10 @@ func (a *application) openSettingsWindow() {
 
 func needsConnectionSetup(cfg config.AppConfig) bool {
 	return strings.TrimSpace(cfg.Connection.URL) == ""
+}
+
+func mainWindowTitle() string {
+	return appcore.Name + " " + appcore.BuildVersion()
 }
 
 func mergeInvocationBatches(dst, src appcore.InvocationBatch) appcore.InvocationBatch {

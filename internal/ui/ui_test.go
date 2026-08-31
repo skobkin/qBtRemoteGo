@@ -12,6 +12,19 @@ import (
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
+func TestMainWindowTitle(t *testing.T) {
+	original := appcore.Version
+	t.Cleanup(func() {
+		appcore.Version = original
+	})
+
+	appcore.Version = "0.5.0"
+
+	if got, want := mainWindowTitle(), "qBtRemoteGo 0.5.0"; got != want {
+		t.Fatalf("mainWindowTitle() = %q, want %q", got, want)
+	}
+}
+
 func TestStatusTextUsesEmojiMarkers(t *testing.T) {
 	app := &application{
 		allTorrents:     []qbt.Torrent{{Hash: "a"}, {Hash: "b"}},
