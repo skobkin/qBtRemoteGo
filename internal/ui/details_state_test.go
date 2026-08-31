@@ -3,8 +3,74 @@ package ui
 import (
 	"testing"
 
+	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
+
+func TestDetailsModeFromConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		enabled    bool
+		storedMode string
+		want       detailsPanelMode
+	}{
+		{name: "disabled means off", enabled: false, storedMode: "overlay_right", want: detailsPanelModeOff},
+		{name: "enabled overlay", enabled: true, storedMode: "overlay_right", want: detailsPanelModeOverlayRight},
+		{name: "enabled bottom pane", enabled: true, storedMode: "bottom_pane", want: detailsPanelModeBottomPane},
+		{name: "enabled with stored off falls back to pane", enabled: true, storedMode: "off", want: detailsPanelModeBottomPane},
+		{name: "enabled with unknown value falls back to pane", enabled: true, storedMode: "nonsense", want: detailsPanelModeBottomPane},
+		{name: "enabled with empty value falls back to pane", enabled: true, storedMode: "", want: detailsPanelModeBottomPane},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.UIConfig{DetailsPanelEnabled: tt.enabled, DetailsPanelMode: tt.storedMode}
+			if got := detailsModeFromConfig(cfg); got != tt.want {
+				t.Fatalf("detailsModeFromConfig(enabled=%v, mode=%q) = %q, want %q", tt.enabled, tt.storedMode, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetailsModeSelectLabelRoundTrip(t *testing.T) {
+	tests := []struct {
+		mode  detailsPanelMode
+		label string
+	}{
+		{mode: detailsPanelModeOverlayRight, label: "Right overlay"},
+		{mode: detailsPanelModeBottomPane, label: "Bottom pane"},
+		{mode: detailsPanelModeOff, label: "Bottom pane"},
+		{mode: detailsPanelMode("junk"), label: "Bottom pane"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.label+"/"+string(tt.mode), func(t *testing.T) {
+			if got := detailsModeSelectLabel(tt.mode); got != tt.label {
+				t.Fatalf("detailsModeSelectLabel(%q) = %q, want %q", tt.mode, got, tt.label)
+			}
+			if got := detailsModeFromLabel(tt.label); got == detailsPanelModeOff {
+				t.Fatalf("detailsModeFromLabel(%q) returned off; labels must be concrete", tt.label)
+			}
+		})
+	}
+
+	t.Run("label round trip is stable", func(t *testing.T) {
+		for _, mode := range []detailsPanelMode{detailsPanelModeOverlayRight, detailsPanelModeBottomPane} {
+			if got := detailsModeFromLabel(detailsModeSelectLabel(mode)); got != mode {
+				t.Fatalf("round trip of %q produced %q", mode, got)
+			}
+		}
+	})
+
+	t.Run("unknown label falls back to pane", func(t *testing.T) {
+		if got := detailsModeFromLabel("Disabled"); got != detailsPanelModeBottomPane {
+			t.Fatalf("detailsModeFromLabel(Disabled) = %q, want bottom pane", got)
+		}
+		if got := detailsModeFromLabel(""); got != detailsPanelModeBottomPane {
+			t.Fatalf("detailsModeFromLabel(empty) = %q, want bottom pane", got)
+		}
+	})
+}
 
 func TestResetForHash(t *testing.T) {
 	state := &torrentDetailsState{

@@ -375,15 +375,8 @@ func (a *application) openSettingsWindow() {
 	startMinimized.SetChecked(cfg.UI.StartMinimizedToTray)
 	detailsEnabled := widget.NewCheck("", nil)
 	detailsEnabled.SetChecked(cfg.UI.DetailsPanelEnabled)
-	detailsMode := widget.NewSelect([]string{"Disabled", "Right overlay", "Bottom pane"}, nil)
-	switch detailsModeFromConfig(cfg.UI) {
-	case detailsPanelModeOverlayRight:
-		detailsMode.SetSelected("Right overlay")
-	case detailsPanelModeBottomPane:
-		detailsMode.SetSelected("Bottom pane")
-	default:
-		detailsMode.SetSelected("Disabled")
-	}
+	detailsMode := widget.NewSelect([]string{"Right overlay", "Bottom pane"}, nil)
+	detailsMode.SetSelected(detailsModeSelectLabel(detailsModeFromConfig(cfg.UI)))
 	sortBy := widget.NewSelect(sortColumnLabels(), nil)
 	sortBy.SetSelected(sortColumnLabel(cfg.UI.SortColumn))
 	sortDescending := widget.NewCheck("", nil)
@@ -544,14 +537,9 @@ func (a *application) openSettingsWindow() {
 		updated.UI.BackgroundPollSeconds = backgroundSeconds
 		updated.UI.StartMinimizedToTray = startMinimized.Checked
 		updated.UI.DetailsPanelEnabled = detailsEnabled.Checked
-		switch detailsMode.Selected {
-		case "Right overlay":
-			updated.UI.DetailsPanelMode = string(detailsPanelModeOverlayRight)
-		case "Bottom pane":
-			updated.UI.DetailsPanelMode = string(detailsPanelModeBottomPane)
-		default:
-			updated.UI.DetailsPanelMode = string(detailsPanelModeOff)
-		}
+		// The enable checkbox is the sole on/off control; the select always
+		// stores a concrete mode so it survives disabled periods.
+		updated.UI.DetailsPanelMode = string(detailsModeFromLabel(detailsMode.Selected))
 		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
 		updated.UI.SortDescending = sortDescending.Checked
 		updated.Logging.Level = logLevel.Selected

@@ -135,13 +135,35 @@ func detailsModeFromConfig(cfg config.UIConfig) detailsPanelMode {
 	if !cfg.DetailsPanelEnabled {
 		return detailsPanelModeOff
 	}
+	// An enabled panel always has a concrete mode; a stale "off" or unknown
+	// stored value falls back to the default pane instead of disabling it.
 	switch strings.ToLower(strings.TrimSpace(cfg.DetailsPanelMode)) {
 	case string(detailsPanelModeOverlayRight):
 		return detailsPanelModeOverlayRight
-	case string(detailsPanelModeBottomPane):
-		return detailsPanelModeBottomPane
 	default:
-		return detailsPanelModeOff
+		return detailsPanelModeBottomPane
+	}
+}
+
+// detailsModeSelectLabel maps a stored panel mode to its settings UI label;
+// anything unrecognized shows the default pane option.
+func detailsModeSelectLabel(mode detailsPanelMode) string {
+	switch strings.ToLower(strings.TrimSpace(string(mode))) {
+	case string(detailsPanelModeOverlayRight):
+		return "Right overlay"
+	default:
+		return "Bottom pane"
+	}
+}
+
+// detailsModeFromLabel is the inverse of detailsModeSelectLabel; an empty or
+// unknown selection means the default pane.
+func detailsModeFromLabel(label string) detailsPanelMode {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "right overlay":
+		return detailsPanelModeOverlayRight
+	default:
+		return detailsPanelModeBottomPane
 	}
 }
 
