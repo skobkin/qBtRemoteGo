@@ -391,27 +391,13 @@ func (a *application) openSettingsWindow() {
 	skipTLSItem := widget.NewFormItem("Skip certificate validation", skipTLS)
 	storageItem := widget.NewFormItem("Credential storage", credentialSummary)
 
-	connectionForm := widget.NewForm(urlItem, authMethodItem, usernameItem, passwordItem, skipTLSItem, storageItem)
-
-	// The select is wired only after the form exists: SetSelected fires
-	// OnChanged immediately, which swaps the credential rows in the form.
-	updateAuthFields := func() {
-		method := authMethodKey(authMethod.Selected)
+	authFormItems := func(method config.AuthMethod) []*widget.FormItem {
 		if method == config.AuthMethodAPIKey {
-			connectionForm.Items = []*widget.FormItem{urlItem, authMethodItem, apiKeyItem, skipTLSItem, storageItem}
-		} else {
-			connectionForm.Items = []*widget.FormItem{urlItem, authMethodItem, usernameItem, passwordItem, skipTLSItem, storageItem}
+			return []*widget.FormItem{urlItem, authMethodItem, apiKeyItem, skipTLSItem, storageItem}
 		}
-		connectionForm.Refresh()
-		credentialWarning.SetText(connectionCredentialWarningText(
-			method,
-			cfg.Connection.CredentialStorage,
-			a.controller.CredentialStatus(),
-			a.controller.SessionCredentials(),
-		))
+		return []*widget.FormItem{urlItem, authMethodItem, usernameItem, passwordItem, skipTLSItem, storageItem}
 	}
-	authMethod.OnChanged = func(string) { updateAuthFields() }
-	authMethod.SetSelected(authMethodLabel(cfg.Connection.AuthMethod))
+	connectionForm := widget.NewForm(authFormItems(cfg.Connection.AuthMethod)...)
 
 	uiForm := widget.NewForm(
 		widget.NewFormItem("Number of paths to remember", rememberEntry),
@@ -459,6 +445,26 @@ func (a *application) openSettingsWindow() {
 			})
 		}()
 	})
+
+	// Connection tab rows are swapped by replacing the whole form: reassigning
+	// Form.Items misrenders on Fyne v2.7 because the renderer keeps the original
+	// row widgets and only updates label texts positionally.
+	connectionTabContent := container.NewVBox(connectionForm, credentialWarning, testButton, testStatus)
+	updateAuthFields := func() {
+		method := authMethodKey(authMethod.Selected)
+		connectionTabContent.Objects[0] = widget.NewForm(authFormItems(method)...)
+		connectionTabContent.Refresh()
+		credentialWarning.SetText(connectionCredentialWarningText(
+			method,
+			cfg.Connection.CredentialStorage,
+			a.controller.CredentialStatus(),
+			a.controller.SessionCredentials(),
+		))
+	}
+	// Wire the select only after the tab content exists: SetSelected fires
+	// OnChanged immediately, rebuilding the form for the initial method.
+	authMethod.OnChanged = func(string) { updateAuthFields() }
+	authMethod.SetSelected(authMethodLabel(cfg.Connection.AuthMethod))
 
 	finishSave := func(updated config.AppConfig) {
 		if cfg.Logging.Level != updated.Logging.Level || cfg.Logging.LogToFile != updated.Logging.LogToFile {
@@ -563,12 +569,7 @@ func (a *application) openSettingsWindow() {
 	})
 
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Connection", container.NewPadded(container.NewVBox(
-			connectionForm,
-			credentialWarning,
-			testButton,
-			testStatus,
-		))),
+		container.NewTabItem("Connection", container.NewPadded(connectionTabContent)),
 		container.NewTabItem("UI", container.NewPadded(uiForm)),
 		container.NewTabItem("Integration", container.NewPadded(container.NewVBox(integrationContent...))),
 	)

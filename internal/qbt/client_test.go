@@ -334,6 +334,11 @@ func TestNewClientRejectsMalformedAPIKey(t *testing.T) {
 			want:   "",
 		},
 		{
+			name:   "digits and mixed case are valid",
+			apiKey: "qbt_" + strings.Repeat("zZ9", 9) + "x",
+			want:   "",
+		},
+		{
 			name:   "surrounding whitespace is trimmed",
 			apiKey: "  " + testAPIKey + "\n",
 			want:   "",
