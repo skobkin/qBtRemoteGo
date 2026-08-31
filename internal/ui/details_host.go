@@ -11,14 +11,15 @@ import (
 )
 
 type torrentDetailsHost struct {
-	app    *application
-	root   *fyne.Container
-	table  fyne.CanvasObject
-	view   *torrentDetailsView
-	split  *container.Split
-	panel  *detailsPanelChrome
-	drawer *detailsDrawer
-	mode   detailsPanelMode
+	app          *application
+	root         *fyne.Container
+	table        fyne.CanvasObject
+	view         *torrentDetailsView
+	split        *container.Split
+	panel        *detailsPanelChrome
+	drawer       *detailsDrawer
+	overlayStack *fyne.Container
+	mode         detailsPanelMode
 }
 
 func newTorrentDetailsHost(app *application, table fyne.CanvasObject) *torrentDetailsHost {
@@ -41,12 +42,27 @@ func (h *torrentDetailsHost) Refresh() {
 	}
 	mode := h.app.currentDetailsMode()
 	if h.view == nil || h.mode != mode {
+		// On a mode change the drawer only reopens via an explicit open: a
+		// stale Visible flag would pop the overlay without user intent.
+		if h.mode != "" && mode != detailsPanelModeBottomPane &&
+			h.app.detailsState != nil && h.app.detailsState.Visible {
+			h.app.detailsState.Visible = false
+		}
 		h.view = newTorrentDetailsView(h.app)
 		h.panel = newDetailsPanelChrome(h.view.Root())
 		h.drawer = newDetailsDrawer(h.app, h.panel)
+		h.overlayStack = container.NewStack(h.table, h.drawer)
 		h.split = container.NewVSplit(h.table, h.panel)
 		h.split.SetOffset(0.62)
 		h.mode = mode
+	}
+
+	if mode == detailsPanelModeOff {
+		if len(h.root.Objects) != 1 || h.root.Objects[0] != h.table {
+			h.root.Objects = []fyne.CanvasObject{h.table}
+			h.root.Refresh()
+		}
+		return
 	}
 
 	h.view.Refresh()
@@ -55,10 +71,8 @@ func (h *torrentDetailsHost) Refresh() {
 		h.root.Objects = []fyne.CanvasObject{h.split}
 		h.panel.Show()
 	case detailsPanelModeOverlayRight:
-		h.root.Objects = []fyne.CanvasObject{container.NewStack(h.table, h.drawer)}
+		h.root.Objects = []fyne.CanvasObject{h.overlayStack}
 		h.panel.Show()
-	default:
-		h.root.Objects = []fyne.CanvasObject{h.table}
 	}
 
 	h.drawer.SetVisible(h.app.detailsState != nil && h.app.detailsState.Visible && mode == detailsPanelModeOverlayRight)
