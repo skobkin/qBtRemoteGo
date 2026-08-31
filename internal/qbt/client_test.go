@@ -908,14 +908,32 @@ func TestTorrentDetailsEndpointsDecodeResponses(t *testing.T) {
 		case "/api/v2/auth/login":
 			_, _ = io.WriteString(w, "Ok.")
 		case "/api/v2/torrents/properties":
+			if got := r.URL.Query().Get("hash"); got != "abc" {
+				t.Fatalf("unexpected properties hash param: %q", got)
+			}
 			_, _ = io.WriteString(w, `{"name":"Demo","hash":"abc","infohash_v1":"v1","infohash_v2":"v2","time_elapsed":3600,"share_ratio":1.5,"private":true,"progress":0.25}`)
 		case "/api/v2/torrents/files":
+			if got := r.URL.Query().Get("hash"); got != "abc" {
+				t.Fatalf("unexpected files hash param: %q", got)
+			}
 			_, _ = io.WriteString(w, `[{"index":0,"name":"dir/file.bin","size":100,"progress":0.5,"priority":1,"availability":0.75,"piece_range":[0,3]}]`)
 		case "/api/v2/torrents/trackers":
+			if got := r.URL.Query().Get("hash"); got != "abc" {
+				t.Fatalf("unexpected trackers hash param: %q", got)
+			}
 			_, _ = io.WriteString(w, `[{"url":"udp://tracker","tier":0,"status":2,"msg":"","num_peers":10,"num_seeds":5,"num_leeches":3,"num_downloaded":7}]`)
 		case "/api/v2/torrents/webseeds":
+			if got := r.URL.Query().Get("hash"); got != "abc" {
+				t.Fatalf("unexpected webseeds hash param: %q", got)
+			}
 			_, _ = io.WriteString(w, `[{"url":"https://seed.example/file"}]`)
 		case "/api/v2/sync/torrentPeers":
+			if got := r.URL.Query().Get("hash"); got != "abc" {
+				t.Fatalf("unexpected peers hash param: %q", got)
+			}
+			if got := r.URL.Query().Get("rid"); got != "0" {
+				t.Fatalf("unexpected peers rid param: %q", got)
+			}
 			_, _ = io.WriteString(w, `{"rid":1,"full_update":true,"show_flags":false,"peers":{"1.2.3.4:6881":{"ip":"1.2.3.4","port":6881,"client":"qBittorrent","progress":0.7,"dl_speed":100,"up_speed":200,"downloaded":300,"uploaded":400,"connection":"uTP","flags":"D","flags_desc":"Downloading","relevance":1}}}`)
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)

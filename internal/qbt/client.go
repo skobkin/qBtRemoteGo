@@ -155,17 +155,8 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 }
 
 func (c *Client) Torrents(ctx context.Context) ([]Torrent, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "torrents/info", nil)
-	if err != nil {
-		return nil, err
-	}
-
 	var torrents []Torrent
-	if err := c.doJSON(req, &torrents); err != nil {
+	if err := c.getJSON(ctx, "torrents/info", nil, &torrents); err != nil {
 		return nil, err
 	}
 	for i := range torrents {
@@ -176,17 +167,8 @@ func (c *Client) Torrents(ctx context.Context) ([]Torrent, error) {
 }
 
 func (c *Client) TransferInfo(ctx context.Context) (TransferInfo, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return TransferInfo{}, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "transfer/info", nil)
-	if err != nil {
-		return TransferInfo{}, err
-	}
-
 	var transfer TransferInfo
-	if err := c.doJSON(req, &transfer); err != nil {
+	if err := c.getJSON(ctx, "transfer/info", nil, &transfer); err != nil {
 		return TransferInfo{}, err
 	}
 
@@ -194,20 +176,11 @@ func (c *Client) TransferInfo(ctx context.Context) (TransferInfo, error) {
 }
 
 func (c *Client) ServerState(ctx context.Context) (ServerState, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return ServerState{}, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "sync/maindata", nil)
-	if err != nil {
-		return ServerState{}, err
-	}
-	query := req.URL.Query()
+	query := url.Values{}
 	query.Set("rid", "0")
-	req.URL.RawQuery = query.Encode()
 
 	var data MainData
-	if err := c.doJSON(req, &data); err != nil {
+	if err := c.getJSON(ctx, "sync/maindata", query, &data); err != nil {
 		return ServerState{}, err
 	}
 
@@ -215,20 +188,8 @@ func (c *Client) ServerState(ctx context.Context) (ServerState, error) {
 }
 
 func (c *Client) TorrentProperties(ctx context.Context, hash string) (TorrentProperties, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return TorrentProperties{}, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "torrents/properties", nil)
-	if err != nil {
-		return TorrentProperties{}, err
-	}
-	query := req.URL.Query()
-	query.Set("hash", strings.TrimSpace(hash))
-	req.URL.RawQuery = query.Encode()
-
 	var properties TorrentProperties
-	if err := c.doJSON(req, &properties); err != nil {
+	if err := c.getJSON(ctx, "torrents/properties", hashQuery(hash), &properties); err != nil {
 		return TorrentProperties{}, err
 	}
 
@@ -236,20 +197,8 @@ func (c *Client) TorrentProperties(ctx context.Context, hash string) (TorrentPro
 }
 
 func (c *Client) TorrentFiles(ctx context.Context, hash string) ([]TorrentFile, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "torrents/files", nil)
-	if err != nil {
-		return nil, err
-	}
-	query := req.URL.Query()
-	query.Set("hash", strings.TrimSpace(hash))
-	req.URL.RawQuery = query.Encode()
-
 	var files []TorrentFile
-	if err := c.doJSON(req, &files); err != nil {
+	if err := c.getJSON(ctx, "torrents/files", hashQuery(hash), &files); err != nil {
 		return nil, err
 	}
 
@@ -257,20 +206,8 @@ func (c *Client) TorrentFiles(ctx context.Context, hash string) ([]TorrentFile, 
 }
 
 func (c *Client) TorrentTrackers(ctx context.Context, hash string) ([]TorrentTracker, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "torrents/trackers", nil)
-	if err != nil {
-		return nil, err
-	}
-	query := req.URL.Query()
-	query.Set("hash", strings.TrimSpace(hash))
-	req.URL.RawQuery = query.Encode()
-
 	var trackers []TorrentTracker
-	if err := c.doJSON(req, &trackers); err != nil {
+	if err := c.getJSON(ctx, "torrents/trackers", hashQuery(hash), &trackers); err != nil {
 		return nil, err
 	}
 
@@ -278,20 +215,8 @@ func (c *Client) TorrentTrackers(ctx context.Context, hash string) ([]TorrentTra
 }
 
 func (c *Client) TorrentWebSeeds(ctx context.Context, hash string) ([]TorrentWebSeed, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "torrents/webseeds", nil)
-	if err != nil {
-		return nil, err
-	}
-	query := req.URL.Query()
-	query.Set("hash", strings.TrimSpace(hash))
-	req.URL.RawQuery = query.Encode()
-
 	var webSeeds []TorrentWebSeed
-	if err := c.doJSON(req, &webSeeds); err != nil {
+	if err := c.getJSON(ctx, "torrents/webseeds", hashQuery(hash), &webSeeds); err != nil {
 		return nil, err
 	}
 
@@ -299,21 +224,11 @@ func (c *Client) TorrentWebSeeds(ctx context.Context, hash string) ([]TorrentWeb
 }
 
 func (c *Client) TorrentPeers(ctx context.Context, hash string, rid int) (TorrentPeersSync, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return TorrentPeersSync{}, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "sync/torrentPeers", nil)
-	if err != nil {
-		return TorrentPeersSync{}, err
-	}
-	query := req.URL.Query()
-	query.Set("hash", strings.TrimSpace(hash))
+	query := hashQuery(hash)
 	query.Set("rid", strconv.Itoa(rid))
-	req.URL.RawQuery = query.Encode()
 
 	var peers TorrentPeersSync
-	if err := c.doJSON(req, &peers); err != nil {
+	if err := c.getJSON(ctx, "sync/torrentPeers", query, &peers); err != nil {
 		return TorrentPeersSync{}, err
 	}
 
@@ -321,17 +236,8 @@ func (c *Client) TorrentPeers(ctx context.Context, hash string, rid int) (Torren
 }
 
 func (c *Client) Categories(ctx context.Context) ([]string, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "torrents/categories", nil)
-	if err != nil {
-		return nil, err
-	}
-
 	var raw map[string]json.RawMessage
-	if err := c.doJSON(req, &raw); err != nil {
+	if err := c.getJSON(ctx, "torrents/categories", nil, &raw); err != nil {
 		return nil, err
 	}
 
@@ -345,17 +251,8 @@ func (c *Client) Categories(ctx context.Context) ([]string, error) {
 }
 
 func (c *Client) Tags(ctx context.Context) ([]string, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-
-	req, err := c.newRequest(ctx, http.MethodGet, "torrents/tags", nil)
-	if err != nil {
-		return nil, err
-	}
-
 	var tags []string
-	if err := c.doJSON(req, &tags); err != nil {
+	if err := c.getJSON(ctx, "torrents/tags", nil, &tags); err != nil {
 		return nil, err
 	}
 	slices.Sort(tags)
@@ -530,27 +427,17 @@ func (c *Client) Delete(ctx context.Context, hashes []string, deleteFiles bool) 
 }
 
 func (c *Client) DirectorySuggestions(ctx context.Context, path string) ([]string, error) {
-	if err := c.ensureAuthenticated(ctx); err != nil {
-		return nil, err
-	}
-
 	parent, prefix := splitRemotePath(path)
 	if parent == "" {
 		return nil, nil
 	}
 
-	values := url.Values{}
-	values.Set("dirPath", parent)
-	values.Set("mode", "dirs")
-
-	req, err := c.newRequest(ctx, http.MethodGet, "app/getDirectoryContent", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.URL.RawQuery = values.Encode()
+	query := url.Values{}
+	query.Set("dirPath", parent)
+	query.Set("mode", "dirs")
 
 	var raw []string
-	if err := c.doJSON(req, &raw); err != nil {
+	if err := c.getJSON(ctx, "app/getDirectoryContent", query, &raw); err != nil {
 		return nil, err
 	}
 
@@ -746,6 +633,31 @@ func (c *Client) doJSON(req *http.Request, target any) error {
 	}
 
 	return nil
+}
+
+// getJSON performs an authenticated GET against an API endpoint and decodes the
+// JSON response into target; the shared request path for all read endpoints.
+func (c *Client) getJSON(ctx context.Context, endpoint string, query url.Values, target any) error {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return err
+	}
+
+	req, err := c.newRequest(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	if len(query) > 0 {
+		req.URL.RawQuery = query.Encode()
+	}
+
+	return c.doJSON(req, target)
+}
+
+func hashQuery(hash string) url.Values {
+	query := url.Values{}
+	query.Set("hash", strings.TrimSpace(hash))
+
+	return query
 }
 
 func (c *Client) execute(req *http.Request) (*http.Response, error) {
