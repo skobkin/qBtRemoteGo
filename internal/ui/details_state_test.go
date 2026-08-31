@@ -60,6 +60,47 @@ func TestResetForHashNilReceiver(t *testing.T) {
 	state.resetForHash("abc")
 }
 
+func TestActiveDataset(t *testing.T) {
+	state := newTorrentDetailsState()
+
+	tests := []struct {
+		name  string
+		tab   detailsTabKey
+		check func() *detailsDatasetState
+	}{
+		{name: "general", tab: detailsTabGeneral, check: func() *detailsDatasetState { return &state.General.detailsDatasetState }},
+		{name: "content", tab: detailsTabContent, check: func() *detailsDatasetState { return &state.Content.detailsDatasetState }},
+		{name: "peers", tab: detailsTabPeers, check: func() *detailsDatasetState { return &state.Peers.detailsDatasetState }},
+		{name: "trackers", tab: detailsTabTrackers, check: func() *detailsDatasetState { return &state.Trackers.detailsDatasetState }},
+		{name: "http sources", tab: detailsTabHTTPSources, check: func() *detailsDatasetState { return &state.WebSeeds.detailsDatasetState }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := state.activeDataset(tt.tab)
+			if got == nil {
+				t.Fatalf("activeDataset(%q) returned nil", tt.tab)
+			}
+			if got != tt.check() {
+				t.Fatalf("activeDataset(%q) returned a different pointer than the tab's embedded state", tt.tab)
+			}
+		})
+	}
+
+	t.Run("unknown tab returns nil", func(t *testing.T) {
+		if got := state.activeDataset(detailsTabKey("nope")); got != nil {
+			t.Fatalf("expected nil for unknown tab, got %#v", got)
+		}
+	})
+
+	t.Run("nil receiver returns nil", func(t *testing.T) {
+		var nilState *torrentDetailsState
+		if got := nilState.activeDataset(detailsTabGeneral); got != nil {
+			t.Fatalf("expected nil for nil receiver, got %#v", got)
+		}
+	})
+}
+
 func TestSetActiveTab(t *testing.T) {
 	tests := []struct {
 		name string

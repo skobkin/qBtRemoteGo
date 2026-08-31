@@ -84,6 +84,28 @@ func newTorrentDetailsState() *torrentDetailsState {
 	}
 }
 
+// activeDataset returns the load-state embedded in the given tab's dataset, or
+// nil for an unknown tab.
+func (s *torrentDetailsState) activeDataset(tab detailsTabKey) *detailsDatasetState {
+	if s == nil {
+		return nil
+	}
+	switch tab {
+	case detailsTabGeneral:
+		return &s.General.detailsDatasetState
+	case detailsTabContent:
+		return &s.Content.detailsDatasetState
+	case detailsTabPeers:
+		return &s.Peers.detailsDatasetState
+	case detailsTabTrackers:
+		return &s.Trackers.detailsDatasetState
+	case detailsTabHTTPSources:
+		return &s.WebSeeds.detailsDatasetState
+	default:
+		return nil
+	}
+}
+
 func (s *torrentDetailsState) resetForHash(hash string) {
 	if s == nil {
 		return
@@ -290,50 +312,47 @@ func (a *application) refreshActiveDetails() {
 	}
 }
 
-func (a *application) loadTorrentDetailsGeneral(hash string) {
-	a.detailsState.General.Loading = true
-	a.refreshDetailsPresentation()
-	go func(expected string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		data, err := a.controller.FetchTorrentProperties(ctx, expected)
-		fyne.Do(func() {
-			if a.activeDetailsHash() != expected || a.detailsState == nil {
-				return
-			}
-			a.detailsState.General.Loading = false
-			a.detailsState.General.Loaded = err == nil
-			if err != nil {
-				a.detailsState.General.Error = err.Error()
-			} else {
-				a.detailsState.General.Error = ""
-				a.detailsState.General.Data = data
-			}
-			a.refreshDetailsPresentation()
-		})
-	}(hash)
-}
+// detailsLoadTimeout bounds a single details dataset fetch.
+const detailsLoadTimeout = 20 * time.Second
 
-func (a *application) loadTorrentDetailsContent(hash string) {
-	a.detailsState.Content.Loading = true
+// loadDetailsDataset performs the shared details fetch flow for one tab: flag
+// the dataset as loading, fetch it off the UI thread, and store the result on
+// the UI thread unless the focused torrent changed in the meantime. apply
+// receives the fetched data only on success and must only write tab-specific
+// fields; the embedded detailsDatasetState is managed here.
+func loadDetailsDataset[T any](
+	a *application,
+	hash string,
+	tab detailsTabKey,
+	fetch func(ctx context.Context, hash string) (T, error),
+	apply func(s *torrentDetailsState, data T),
+) {
+	dataset := a.detailsState.activeDataset(tab)
+	if dataset == nil {
+		return
+	}
+	dataset.Loading = true
 	a.refreshDetailsPresentation()
 	go func(expected string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), detailsLoadTimeout)
 		defer cancel()
-		files, err := a.controller.FetchTorrentFiles(ctx, expected)
+		data, err := fetch(ctx, expected)
 		fyne.Do(func() {
-			if a.activeDetailsHash() != expected || a.detailsState == nil {
+			if a.detailsState == nil || a.activeDetailsHash() != expected {
 				return
 			}
-			a.detailsState.Content.Loading = false
-			a.detailsState.Content.Loaded = err == nil
+			dataset := a.detailsState.activeDataset(tab)
+			if dataset == nil {
+				return
+			}
+			dataset.Loading = false
+			dataset.Loaded = err == nil
 			if err != nil {
-				a.detailsState.Content.Error = err.Error()
+				dataset.Error = err.Error()
 			} else {
-				a.detailsState.Content.Error = ""
-				a.detailsState.Content.Files = files
-				if a.detailsState.Content.Expanded == nil {
-					a.detailsState.Content.Expanded = map[string]bool{}
+				dataset.Error = ""
+				if apply != nil {
+					apply(a.detailsState, data)
 				}
 			}
 			a.refreshDetailsPresentation()
@@ -341,77 +360,58 @@ func (a *application) loadTorrentDetailsContent(hash string) {
 	}(hash)
 }
 
-func (a *application) loadTorrentDetailsPeers(hash string, rid int) {
-	a.detailsState.Peers.Loading = true
-	a.refreshDetailsPresentation()
-	go func(expected string, currentRID int) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		data, err := a.controller.FetchTorrentPeers(ctx, expected, currentRID)
-		fyne.Do(func() {
-			if a.activeDetailsHash() != expected || a.detailsState == nil {
-				return
-			}
-			a.detailsState.Peers.Loading = false
-			a.detailsState.Peers.Loaded = err == nil
-			if err != nil {
-				a.detailsState.Peers.Error = err.Error()
-			} else {
-				a.detailsState.Peers.Error = ""
-				a.detailsState.Peers.RID = data.RID
-				a.detailsState.Peers.Peers = sortedPeers(data.Peers)
-			}
-			a.refreshDetailsPresentation()
+func (a *application) loadTorrentDetailsGeneral(hash string) {
+	loadDetailsDataset(a, hash, detailsTabGeneral,
+		func(ctx context.Context, hash string) (qbt.TorrentProperties, error) {
+			return a.controller.FetchTorrentProperties(ctx, hash)
+		},
+		func(s *torrentDetailsState, data qbt.TorrentProperties) {
+			s.General.Data = data
 		})
-	}(hash, rid)
+}
+
+func (a *application) loadTorrentDetailsContent(hash string) {
+	loadDetailsDataset(a, hash, detailsTabContent,
+		func(ctx context.Context, hash string) ([]qbt.TorrentFile, error) {
+			return a.controller.FetchTorrentFiles(ctx, hash)
+		},
+		func(s *torrentDetailsState, files []qbt.TorrentFile) {
+			s.Content.Files = files
+			if s.Content.Expanded == nil {
+				s.Content.Expanded = map[string]bool{}
+			}
+		})
+}
+
+func (a *application) loadTorrentDetailsPeers(hash string, rid int) {
+	loadDetailsDataset(a, hash, detailsTabPeers,
+		func(ctx context.Context, hash string) (qbt.TorrentPeersSync, error) {
+			return a.controller.FetchTorrentPeers(ctx, hash, rid)
+		},
+		func(s *torrentDetailsState, data qbt.TorrentPeersSync) {
+			s.Peers.RID = data.RID
+			s.Peers.Peers = sortedPeers(data.Peers)
+		})
 }
 
 func (a *application) loadTorrentDetailsTrackers(hash string) {
-	a.detailsState.Trackers.Loading = true
-	a.refreshDetailsPresentation()
-	go func(expected string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		data, err := a.controller.FetchTorrentTrackers(ctx, expected)
-		fyne.Do(func() {
-			if a.activeDetailsHash() != expected || a.detailsState == nil {
-				return
-			}
-			a.detailsState.Trackers.Loading = false
-			a.detailsState.Trackers.Loaded = err == nil
-			if err != nil {
-				a.detailsState.Trackers.Error = err.Error()
-			} else {
-				a.detailsState.Trackers.Error = ""
-				a.detailsState.Trackers.Trackers = data
-			}
-			a.refreshDetailsPresentation()
+	loadDetailsDataset(a, hash, detailsTabTrackers,
+		func(ctx context.Context, hash string) ([]qbt.TorrentTracker, error) {
+			return a.controller.FetchTorrentTrackers(ctx, hash)
+		},
+		func(s *torrentDetailsState, data []qbt.TorrentTracker) {
+			s.Trackers.Trackers = data
 		})
-	}(hash)
 }
 
 func (a *application) loadTorrentDetailsWebSeeds(hash string) {
-	a.detailsState.WebSeeds.Loading = true
-	a.refreshDetailsPresentation()
-	go func(expected string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		data, err := a.controller.FetchTorrentWebSeeds(ctx, expected)
-		fyne.Do(func() {
-			if a.activeDetailsHash() != expected || a.detailsState == nil {
-				return
-			}
-			a.detailsState.WebSeeds.Loading = false
-			a.detailsState.WebSeeds.Loaded = err == nil
-			if err != nil {
-				a.detailsState.WebSeeds.Error = err.Error()
-			} else {
-				a.detailsState.WebSeeds.Error = ""
-				a.detailsState.WebSeeds.WebSeeds = data
-			}
-			a.refreshDetailsPresentation()
+	loadDetailsDataset(a, hash, detailsTabHTTPSources,
+		func(ctx context.Context, hash string) ([]qbt.TorrentWebSeed, error) {
+			return a.controller.FetchTorrentWebSeeds(ctx, hash)
+		},
+		func(s *torrentDetailsState, data []qbt.TorrentWebSeed) {
+			s.WebSeeds.WebSeeds = data
 		})
-	}(hash)
 }
 
 func sortedPeers(in map[string]qbt.TorrentPeer) []qbt.TorrentPeer {
