@@ -59,17 +59,17 @@ func (v *detailsGeneralTabView) buildContent() fyne.CanvasObject {
 	)
 
 	transfer := detailsSection("Transfer", []detailsField{
-		{Label: "Time Active", Value: detailsDuration(data.TimeElapsed)},
+		{Label: "Time Active", Value: appcore.HumanDuration(data.TimeElapsed)},
 		{Label: "ETA", Value: detailsETA(data.ETASeconds)},
-		{Label: "Connections", Value: fmt.Sprintf("%d (%d max)", data.Connections, data.ConnectionLimit)},
+		{Label: "Connections", Value: detailsCountLimit(data.Connections, data.ConnectionLimit)},
 		{Label: "Downloaded", Value: detailsSessionBytes(data.TotalDownloaded, data.SessionDownloaded)},
 		{Label: "Uploaded", Value: detailsSessionBytes(data.TotalUploaded, data.SessionUploaded)},
 		{Label: "Seeds", Value: fmt.Sprintf("%d (%d total)", data.Seeds, data.SeedsTotal)},
 		{Label: "Download Speed", Value: detailsSpeedWithAverage(data.DownloadSpeed, data.AverageDownloadSpeed)},
 		{Label: "Upload Speed", Value: detailsSpeedWithAverage(data.UploadSpeed, data.AverageUploadSpeed)},
 		{Label: "Peers", Value: fmt.Sprintf("%d (%d total)", data.Peers, data.PeersTotal)},
-		{Label: "Download Limit", Value: detailsLimit(data.DownloadLimit)},
-		{Label: "Upload Limit", Value: detailsLimit(data.UploadLimit)},
+		{Label: "Download Limit", Value: appcore.HumanSpeedLimit(data.DownloadLimit)},
+		{Label: "Upload Limit", Value: appcore.HumanSpeedLimit(data.UploadLimit)},
 		{Label: "Wasted", Value: appcore.HumanBytes(data.TotalWasted)},
 		{Label: "Share Ratio", Value: detailsRatio(data.ShareRatio)},
 		{Label: "Reannounce In", Value: detailsETA(data.ReannounceSeconds)},
@@ -83,7 +83,7 @@ func (v *detailsGeneralTabView) buildContent() fyne.CanvasObject {
 		{Label: "Pieces", Value: fmt.Sprintf("%d x %s (have %d)", data.PiecesNum, appcore.HumanBytes(data.PieceSize), data.PiecesHave)},
 		{Label: "Created By", Value: detailsTextOrDash(data.CreatedBy)},
 		{Label: "Added On", Value: detailsUnix(data.AdditionDateUnix, "")},
-		{Label: "Completed On", Value: detailsUnix(data.CompletionDateUnix, "")},
+		{Label: "Completed On", Value: detailsUnix(data.CompletionDateUnix, "Never")},
 		{Label: "Created On", Value: detailsUnix(data.CreationDateUnix, "")},
 		{Label: "Private", Value: detailsPrivateFlag(data.Private)},
 		{Label: "Info Hash v1", Value: detailsTextOrDash(data.InfoHashV1)},
@@ -133,13 +133,6 @@ func detailsErrorState(message string, onRetry func()) fyne.CanvasObject {
 	)
 }
 
-func detailsDuration(seconds int64) string {
-	if seconds < 0 {
-		return "∞"
-	}
-	return appcore.HumanETA(seconds)
-}
-
 func detailsETA(seconds int64) string {
 	if seconds < 0 {
 		return "∞"
@@ -162,11 +155,14 @@ func detailsSpeedWithAverage(current int64, avg int64) string {
 	return fmt.Sprintf("%s (%s avg.)", appcore.HumanSpeed(current), avgText)
 }
 
-func detailsLimit(value int64) string {
-	if value < 0 {
-		return "∞"
+// detailsCountLimit renders a live count with its configured maximum; a
+// non-positive maximum means unlimited, matching the speed-limit sentinel.
+func detailsCountLimit(count int, limit int) string {
+	maxText := "∞"
+	if limit > 0 {
+		maxText = fmt.Sprintf("%d", limit)
 	}
-	return appcore.HumanSpeed(value)
+	return fmt.Sprintf("%d (%s max)", count, maxText)
 }
 
 func detailsRatio(value float64) string {
@@ -176,11 +172,13 @@ func detailsRatio(value float64) string {
 	return fmt.Sprintf("%.2f", value)
 }
 
+// detailsAvailability renders the availability ratio as a percentage, matching
+// the content tree's Availability column.
 func detailsAvailability(value float64) string {
 	if value < 0 {
 		return "?"
 	}
-	return fmt.Sprintf("%.2f", value)
+	return fmt.Sprintf("%.1f%%", value*100)
 }
 
 func detailsUnix(unix int64, fallback string) string {

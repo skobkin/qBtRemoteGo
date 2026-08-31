@@ -635,6 +635,23 @@ func HumanETA(seconds int64) string {
 	}
 }
 
+// HumanDuration formats a plain elapsed duration in seconds; negative values
+// mean unlimited (e.g. seeding without a time limit).
+func HumanDuration(seconds int64) string {
+	switch {
+	case seconds < 0:
+		return "∞"
+	case seconds < 60:
+		return fmt.Sprintf("%ds", seconds)
+	case seconds < 3600:
+		return fmt.Sprintf("%dm", seconds/60)
+	case seconds < 86400:
+		return fmt.Sprintf("%dh %dm", seconds/3600, (seconds%3600)/60)
+	default:
+		return fmt.Sprintf("%dd %dh", seconds/86400, (seconds%86400)/3600)
+	}
+}
+
 func HumanAdded(t time.Time) string {
 	if t.IsZero() {
 		return ""

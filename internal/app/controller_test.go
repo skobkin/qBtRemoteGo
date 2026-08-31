@@ -145,6 +145,25 @@ func TestHumanETA(t *testing.T) {
 	}
 }
 
+func TestHumanDuration(t *testing.T) {
+	cases := map[int64]string{
+		-1:     "∞",
+		0:      "0s",
+		59:     "59s",
+		60:     "1m",
+		125:    "2m",
+		3660:   "1h 1m",
+		90000:  "1d 1h",
+		172800: "2d 0h",
+	}
+
+	for seconds, want := range cases {
+		if got := HumanDuration(seconds); got != want {
+			t.Fatalf("unexpected duration for %d: got %q want %q", seconds, got, want)
+		}
+	}
+}
+
 func TestNewControllerInfersPasswordAuthFromLegacyConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
