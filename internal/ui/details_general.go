@@ -112,7 +112,7 @@ func (s *detailsGeneralSection) update(data qbt.TorrentProperties) {
 
 var detailsTransferSpecs = []detailsFieldSpec{
 	{label: "Time Active", format: func(d qbt.TorrentProperties) string { return appcore.HumanDuration(d.TimeElapsed) }},
-	{label: "ETA", format: func(d qbt.TorrentProperties) string { return detailsETA(d.ETASeconds) }},
+	{label: "ETA", format: func(d qbt.TorrentProperties) string { return appcore.HumanETA(d.ETASeconds) }},
 	{label: "Connections", format: func(d qbt.TorrentProperties) string { return detailsCountLimit(d.Connections, d.ConnectionLimit) }},
 	{label: "Downloaded", format: func(d qbt.TorrentProperties) string {
 		return detailsSessionBytes(d.TotalDownloaded, d.SessionDownloaded)
@@ -130,7 +130,7 @@ var detailsTransferSpecs = []detailsFieldSpec{
 	{label: "Upload Limit", format: func(d qbt.TorrentProperties) string { return appcore.HumanSpeedLimit(d.UploadLimit) }},
 	{label: "Wasted", format: func(d qbt.TorrentProperties) string { return appcore.HumanBytes(d.TotalWasted) }},
 	{label: "Share Ratio", format: func(d qbt.TorrentProperties) string { return detailsRatio(d.ShareRatio) }},
-	{label: "Reannounce In", format: func(d qbt.TorrentProperties) string { return detailsETA(d.ReannounceSeconds) }},
+	{label: "Reannounce In", format: func(d qbt.TorrentProperties) string { return detailsReannounce(d.ReannounceSeconds) }},
 	{label: "Last Seen Complete", format: func(d qbt.TorrentProperties) string { return detailsUnix(d.LastSeenCompleteUnix, "Never") }},
 	{label: "Popularity", format: func(d qbt.TorrentProperties) string { return detailsRatio(d.Popularity) }},
 	{label: "Availability", format: func(d qbt.TorrentProperties) string { return detailsAvailability(d.Availability) }},
@@ -152,14 +152,13 @@ var detailsInfoSpecs = []detailsFieldSpec{
 	{label: "Comment", format: func(d qbt.TorrentProperties) string { return detailsTextOrDash(d.Comment) }},
 }
 
-func detailsETA(seconds int64) string {
+// detailsReannounce renders the time until the next tracker announce. A
+// negative value means no tracker is announcing, so the row stays blank.
+func detailsReannounce(seconds int64) string {
 	if seconds < 0 {
-		return "∞"
-	}
-	if seconds == 0 {
 		return ""
 	}
-	return appcore.HumanETA(seconds)
+	return appcore.HumanDuration(seconds)
 }
 
 func detailsSessionBytes(total int64, session int64) string {

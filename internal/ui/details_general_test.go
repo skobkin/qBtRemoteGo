@@ -46,6 +46,28 @@ func TestDetailsAvailability(t *testing.T) {
 	}
 }
 
+func TestDetailsReannounce(t *testing.T) {
+	tests := []struct {
+		name    string
+		seconds int64
+		want    string
+	}{
+		{name: "no tracker stays blank", seconds: -1, want: ""},
+		{name: "due now", seconds: 0, want: "0s"},
+		{name: "seconds", seconds: 45, want: "45s"},
+		{name: "minutes", seconds: 125, want: "2m"},
+		{name: "hours and minutes", seconds: 3660, want: "1h 1m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detailsReannounce(tt.seconds); got != tt.want {
+				t.Fatalf("detailsReannounce(%d) = %q, want %q", tt.seconds, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDetailsUnixFallback(t *testing.T) {
 	if got := detailsUnix(0, "Never"); got != "Never" {
 		t.Fatalf("detailsUnix(0) = %q, want %q", got, "Never")
