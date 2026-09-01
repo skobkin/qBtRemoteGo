@@ -432,7 +432,7 @@ func (r *detailsContentRow) SetRow(row *contentVisibleRow) {
 	r.priority.SetText(contentPriorityLabel(node.priority))
 	r.remaining.SetText(appcore.HumanBytes(node.remaining))
 	r.availability.SetText(contentAvailabilityLabel(node))
-	if node.isDir {
+	if node.isDir && !row.filtering {
 		nodePath := node.path
 		r.expander.onTapped = func() {
 			r.app.toggleContentNode(nodePath)
@@ -440,6 +440,10 @@ func (r *detailsContentRow) SetRow(row *contentVisibleRow) {
 		r.expander.SetExpanded(contentRowExpanded(node, row.filtering, r.app.detailsState.Content.Expanded))
 		r.expander.Show()
 	} else {
+		// While filtering, directories are forced open, so a toggle would be
+		// invisible yet still rewrite the saved expansion state; drop the
+		// handler along with the chevron.
+		r.expander.onTapped = nil
 		r.expander.Hide()
 	}
 	// Recycled rows are resized by the list before UpdateCell runs, which
