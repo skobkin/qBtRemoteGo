@@ -282,7 +282,10 @@ func detailsShouldRefreshLoad(ds *detailsDatasetState) bool {
 	return ds != nil && ds.Loaded && !ds.Loading
 }
 
-func (a *application) ensureActiveDetailsLoaded() {
+// loadActiveDetailsIf starts a fetch for the active tab when its dataset
+// satisfies the given load predicate; the shared guard for the ensure (hash or
+// tab change, explicit retry) and poll refresh paths.
+func (a *application) loadActiveDetailsIf(shouldLoad func(*detailsDatasetState) bool) {
 	if a.detailsState == nil {
 		return
 	}
@@ -297,29 +300,17 @@ func (a *application) ensureActiveDetailsLoaded() {
 		return
 	}
 	tab := a.detailsState.ActiveTab
-	if detailsShouldEnsureLoad(a.detailsState.activeDataset(tab)) {
+	if shouldLoad(a.detailsState.activeDataset(tab)) {
 		a.loadActiveTabDataset(hash, tab)
 	}
 }
 
+func (a *application) ensureActiveDetailsLoaded() {
+	a.loadActiveDetailsIf(detailsShouldEnsureLoad)
+}
+
 func (a *application) refreshActiveDetails() {
-	if a.detailsState == nil {
-		return
-	}
-	hash := a.activeDetailsHash()
-	if hash == "" {
-		return
-	}
-	if a.currentDetailsMode() == detailsPanelModeOff {
-		return
-	}
-	if !a.detailsState.Visible && a.currentDetailsMode() != detailsPanelModeBottomPane {
-		return
-	}
-	tab := a.detailsState.ActiveTab
-	if detailsShouldRefreshLoad(a.detailsState.activeDataset(tab)) {
-		a.loadActiveTabDataset(hash, tab)
-	}
+	a.loadActiveDetailsIf(detailsShouldRefreshLoad)
 }
 
 func (a *application) loadActiveTabDataset(hash string, tab detailsTabKey) {
@@ -372,6 +363,7 @@ func loadDetailsDataset[T any](
 	if dataset == nil {
 		return
 	}
+	expectedDataset := dataset
 	dataset.Loading = true
 	a.refreshDetailsPresentation()
 	go func(expected string) {
@@ -383,7 +375,12 @@ func loadDetailsDataset[T any](
 				return
 			}
 			dataset := a.detailsState.activeDataset(tab)
-			if dataset == nil {
+			// A matching hash is not enough: reselecting the same torrent
+			// replaces the dataset structs via resetForHash, so a superseded
+			// fetch from before the reselect must not settle the replacement
+			// (it would clear Loading while the current fetch is still in
+			// flight and flash a stale snapshot).
+			if dataset == nil || dataset != expectedDataset {
 				return
 			}
 			dataset.Loading = false
