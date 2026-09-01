@@ -75,6 +75,8 @@ type application struct {
 
 	trayState trayState
 
+	rowTaps rowTapSequencer
+
 	filterTimer *time.Timer
 }
 
@@ -136,6 +138,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		logManager:    logManager,
 		selection:     map[string]bool{},
 		detailsState:  newTorrentDetailsState(),
+		rowTaps:       rowTapSequencer{interval: torrentDoubleTapInterval},
 		windowVisible: true,
 		statusLabel:   widget.NewLabel(""),
 	}

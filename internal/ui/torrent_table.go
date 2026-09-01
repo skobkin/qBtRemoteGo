@@ -25,6 +25,41 @@ const (
 	rowEmphasisCellInset float32 = 4
 )
 
+// torrentDoubleTapInterval is the maximum gap between two clicks on the same
+// row for them to count as a double-click opening the details.
+const torrentDoubleTapInterval = 400 * time.Millisecond
+
+// rowTapSequencer detects double-clicks from plain tap events. Fyne's
+// DoubleTapped delays the first tap by its own double-click window, which made
+// selection feel laggy and dropped taps; instead every tap selects instantly
+// and a second tap on the same row within the interval opens the details.
+// The sequencer lives on the application, not the row: List recycles rows and
+// the first tap refreshes the list.
+type rowTapSequencer struct {
+	interval time.Duration
+	lastAt   time.Time
+	lastHash string
+}
+
+// record registers a tap on the given row and reports whether it completed a
+// double-click. Triggering resets the sequence, so a third tap starts a new
+// one instead of opening the details twice.
+func (s *rowTapSequencer) record(hash string, now time.Time) bool {
+	if s.interval <= 0 {
+		s.interval = torrentDoubleTapInterval
+	}
+	if s.lastHash == hash && now.Sub(s.lastAt) <= s.interval {
+		s.lastAt = time.Time{}
+		s.lastHash = ""
+
+		return true
+	}
+	s.lastAt = now
+	s.lastHash = hash
+
+	return false
+}
+
 type torrentColumnSpec struct {
 	key          string
 	label        string
@@ -403,13 +438,14 @@ func (r *torrentListRow) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (r *torrentListRow) Tapped(*fyne.PointEvent) {
-	r.app.applyTorrentSelection(r.hash, r.modifier)
-}
+	if r.app.rowTaps.record(r.hash, time.Now()) {
+		r.app.selectOnlyTorrent(r.hash)
+		r.app.refreshTorrentSelection()
+		r.app.openTorrentDetails(r.hash)
 
-func (r *torrentListRow) DoubleTapped(*fyne.PointEvent) {
-	r.app.selectOnlyTorrent(r.hash)
-	r.app.refreshTorrentSelection()
-	r.app.openTorrentDetails(r.hash)
+		return
+	}
+	r.app.applyTorrentSelection(r.hash, r.modifier)
 }
 
 func (r *torrentListRow) TappedSecondary(event *fyne.PointEvent) {
