@@ -18,11 +18,15 @@ import (
 )
 
 type Controller struct {
-	configPath         string
+	configPath      string
+	platform        *platform.Manager
+	credentialStore credentials.Store
+
+	// stateMu guards the state shared between the UI thread (which mutates
+	// settings) and the poll / details fetch goroutines (which read it).
+	stateMu            sync.RWMutex
 	config             config.AppConfig
 	logger             *slog.Logger
-	platform           *platform.Manager
-	credentialStore    credentials.Store
 	sessionCredentials credentials.Credentials
 	credentialStatus   credentials.Status
 
@@ -91,20 +95,60 @@ func newController(configPath string, logger *slog.Logger, store credentials.Sto
 }
 
 func (c *Controller) Config() config.AppConfig {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
 	return c.config
 }
 
+// currentLogger returns the active logger; the UI thread swaps it when log
+// settings change while fetch goroutines keep using it.
+func (c *Controller) currentLogger() *slog.Logger {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
+	return c.logger
+}
+
 func (c *Controller) SetLogger(logger *slog.Logger) {
+	c.stateMu.Lock()
 	c.logger = logger
+	c.stateMu.Unlock()
+
+	// The cached client captured the previous logger, so drop it and let the
+	// next call rebuild with the new one.
+	c.clientMu.Lock()
+	c.cachedClient = nil
+	c.cachedClientConfig = qbt.ClientConfig{}
+	c.clientMu.Unlock()
+
 	c.platform = platform.NewManager(logger)
 }
 
 func (c *Controller) SessionCredentials() credentials.Credentials {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
 	return c.sessionCredentials
 }
 
 func (c *Controller) CredentialStatus() credentials.Status {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+
 	return c.credentialStatus
+}
+
+func (c *Controller) setSessionCredentials(creds credentials.Credentials) {
+	c.stateMu.Lock()
+	c.sessionCredentials = creds
+	c.stateMu.Unlock()
+}
+
+func (c *Controller) setCredentialStatus(status credentials.Status) {
+	c.stateMu.Lock()
+	c.credentialStatus = status
+	c.stateMu.Unlock()
 }
 
 func (c *Controller) SaveSettings(
@@ -119,25 +163,26 @@ func (c *Controller) SaveSettings(
 	// reach the keychain, the config file, or the session.
 	creds = canonicalCredentials(cfg.Connection.AuthMethod, creds)
 
-	cfg.Connection.Username = c.config.Connection.Username
-	cfg.Connection.Password = c.config.Connection.Password
-	cfg.Connection.APIKey = c.config.Connection.APIKey
-	cfg.Connection.CredentialStorage = c.config.Connection.CredentialStorage
+	current := c.Config()
+	cfg.Connection.Username = current.Connection.Username
+	cfg.Connection.Password = current.Connection.Password
+	cfg.Connection.APIKey = current.Connection.APIKey
+	cfg.Connection.CredentialStorage = current.Connection.CredentialStorage
 
 	trimmedCreds := credentials.Credentials{
 		Username: strings.TrimSpace(creds.Username),
 		Password: creds.Password,
 		APIKey:   strings.TrimSpace(creds.APIKey),
 	}
-	credsChanged := trimmedCreds != c.sessionCredentials
+	credsChanged := trimmedCreds != c.SessionCredentials()
 	status := c.credentialStore.Status(ctx)
-	c.credentialStatus = status
+	c.setCredentialStatus(status)
 
-	persistedMode := c.config.Connection.CredentialStorage
+	persistedMode := current.Connection.CredentialStorage
 	if status.State == credentials.StateAvailable {
 		if err := c.credentialStore.Set(ctx, trimmedCreds); err != nil {
 			status = c.statusFromError(err)
-			c.credentialStatus = status
+			c.setCredentialStatus(status)
 			if credsChanged && fallback == CredentialFallbackUnspecified {
 				return SaveSettingsResult{
 					CredentialStatus: status,
@@ -156,8 +201,8 @@ func (c *Controller) SaveSettings(
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
-		c.sessionCredentials = trimmedCreds
-		c.credentialStatus = status
+		c.setSessionCredentials(trimmedCreds)
+		c.setCredentialStatus(status)
 
 		return SaveSettingsResult{CredentialStatus: status}, err
 	}
@@ -167,7 +212,7 @@ func (c *Controller) SaveSettings(
 		if err != nil {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
-		c.credentialStatus = status
+		c.setCredentialStatus(status)
 
 		return SaveSettingsResult{CredentialStatus: status}, nil
 	}
@@ -193,7 +238,7 @@ func (c *Controller) SaveLocalUI(cfg config.AppConfig) error {
 }
 
 func (c *Controller) SyncIntegrations() []error {
-	return c.platform.Sync(c.config.Integration)
+	return c.platform.Sync(c.Config().Integration)
 }
 
 func (c *Controller) TestConnection(ctx context.Context, cfg config.ConnectionConfig, creds credentials.Credentials) error {
@@ -201,7 +246,7 @@ func (c *Controller) TestConnection(ctx context.Context, cfg config.ConnectionCo
 	if err != nil {
 		return err
 	}
-	client, err := qbt.NewClient(qcfg, c.logger.With("remote", strings.TrimSpace(cfg.URL)))
+	client, err := qbt.NewClient(qcfg, c.currentLogger().With("remote", strings.TrimSpace(cfg.URL)))
 	if err != nil {
 		return err
 	}
@@ -333,16 +378,20 @@ func (c *Controller) AddTorrent(ctx context.Context, data AddDialogData) error {
 	return nil
 }
 
+// rememberSavePath runs inside bulk-action goroutines, so it must go through
+// the locked accessors instead of touching c.config directly.
 func (c *Controller) rememberSavePath(path string, trigger string) {
-	cfg := c.config
+	cfg := c.Config()
 	config.AddRecentPath(&cfg, path)
-	if slices.Equal(cfg.UI.RecentSavePaths, c.config.UI.RecentSavePaths) {
+	if slices.Equal(cfg.UI.RecentSavePaths, c.Config().UI.RecentSavePaths) {
 		return
 	}
 	if err := config.Save(c.configPath, cfg); err != nil {
-		c.logger.Warn("save config after recent path update", "trigger", trigger, "error", err)
+		c.currentLogger().Warn("save config after recent path update", "trigger", trigger, "error", err)
 	} else {
+		c.stateMu.Lock()
 		c.config = cfg
+		c.stateMu.Unlock()
 	}
 }
 
@@ -425,7 +474,7 @@ func (c *Controller) DeleteTorrents(ctx context.Context, hashes []string, delete
 }
 
 func (c *Controller) SuggestDirectories(ctx context.Context, path string) ([]string, error) {
-	if !c.config.UI.PathAutocomplete {
+	if !c.Config().UI.PathAutocomplete {
 		return nil, nil
 	}
 	client, err := c.client()
@@ -799,7 +848,9 @@ func (c *Controller) persistConfig(cfg config.AppConfig, syncIntegrations bool) 
 		return false, err
 	}
 
+	c.stateMu.Lock()
 	c.config = cfg
+	c.stateMu.Unlock()
 	if !syncIntegrations || c.platform == nil {
 		return true, nil
 	}
@@ -901,8 +952,9 @@ func (c *Controller) saveWithFallback(
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
 		if err != nil {
-			c.sessionCredentials = creds
-			c.credentialStatus = status
+			c.setSessionCredentials(creds)
+			c.setCredentialStatus(status)
+
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
 	case CredentialFallbackSessionOnly:
@@ -920,16 +972,17 @@ func (c *Controller) saveWithFallback(
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
 		if err != nil {
-			c.sessionCredentials = creds
-			c.credentialStatus = status
+			c.setSessionCredentials(creds)
+			c.setCredentialStatus(status)
+
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
 	default:
 		return SaveSettingsResult{CredentialStatus: status}, fmt.Errorf("unsupported credential fallback: %q", fallback)
 	}
 
-	c.sessionCredentials = creds
-	c.credentialStatus = status
+	c.setSessionCredentials(creds)
+	c.setCredentialStatus(status)
 
 	return SaveSettingsResult{CredentialStatus: status}, nil
 }
@@ -1018,9 +1071,14 @@ func connectionClientConfig(cfg config.ConnectionConfig, creds credentials.Crede
 
 // client returns a cached qBittorrent client for the current connection
 // configuration, rebuilding it whenever the connection settings or session
-// credentials change (the config struct doubles as the cache key).
+// credentials change (the config struct doubles as the cache key). The key is
+// read under stateMu so a settings save on the UI thread cannot be observed
+// half-applied by a fetch goroutine assembling the key.
 func (c *Controller) client() (*qbt.Client, error) {
+	c.stateMu.RLock()
 	qcfg, err := connectionClientConfig(c.config.Connection, c.sessionCredentials)
+	logger := c.logger
+	c.stateMu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -1031,7 +1089,7 @@ func (c *Controller) client() (*qbt.Client, error) {
 		return c.cachedClient, nil
 	}
 
-	client, err := qbt.NewClient(qcfg, c.logger)
+	client, err := qbt.NewClient(qcfg, logger)
 	if err != nil {
 		return nil, err
 	}
