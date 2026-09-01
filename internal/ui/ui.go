@@ -77,7 +77,8 @@ type application struct {
 
 	rowTaps rowTapSequencer
 
-	filterTimer *time.Timer
+	filterTimer        *time.Timer
+	contentFilterTimer *time.Timer
 }
 
 type trayState struct {

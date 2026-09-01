@@ -468,6 +468,11 @@ func sortedPeers(in map[string]qbt.TorrentPeer) []qbt.TorrentPeer {
 	return out
 }
 
+// contentFilterDebounce delays the content filter re-render so a rebuild of
+// the whole tree does not run on every keystroke; the value itself is stored
+// immediately. Mirrors the torrent list filter.
+const contentFilterDebounce = 200 * time.Millisecond
+
 func (a *application) setContentFilter(value string) {
 	if a.detailsState == nil {
 		return
@@ -478,7 +483,12 @@ func (a *application) setContentFilter(value string) {
 		return
 	}
 	a.detailsState.Content.Filter = value
-	a.refreshDetailsPresentation()
+	if a.contentFilterTimer != nil {
+		a.contentFilterTimer.Stop()
+	}
+	a.contentFilterTimer = time.AfterFunc(contentFilterDebounce, func() {
+		fyne.Do(a.refreshDetailsPresentation)
+	})
 }
 
 func (a *application) toggleContentNode(path string) {
