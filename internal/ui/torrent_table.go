@@ -102,26 +102,27 @@ type torrentHeaderRow struct {
 
 type torrentListRow struct {
 	widget.BaseWidget
-	app        *application
-	background *canvas.Rectangle
-	hoverBG    *canvas.Rectangle
-	root       *fyne.Container
-	content    *fyne.Container
-	name       *hoverLabel
-	size       *hoverLabel
-	progress   *widget.ProgressBar
-	statusBG   *canvas.Rectangle
-	statusTx   *widget.Label
-	statusCt   *fyne.Container
-	down       *hoverLabel
-	up         *hoverLabel
-	eta        *hoverLabel
-	added      *hoverLabel
-	separator  *widget.Separator
-	hash       string
-	modifier   fyne.KeyModifier
-	hovered    bool
-	hoverTimer *time.Timer
+	app           *application
+	background    *canvas.Rectangle
+	hoverBG       *canvas.Rectangle
+	root          *fyne.Container
+	content       *fyne.Container
+	name          *hoverLabel
+	size          *hoverLabel
+	progress      *widget.ProgressBar
+	statusBG      *canvas.Rectangle
+	statusTx      *widget.Label
+	statusCt      *fyne.Container
+	down          *hoverLabel
+	up            *hoverLabel
+	eta           *hoverLabel
+	added         *hoverLabel
+	separator     *widget.Separator
+	hash          string
+	modifier      fyne.KeyModifier
+	hovered       bool
+	hoverTimer    *time.Timer
+	hoverOutDelay time.Duration
 }
 
 type columnResizeHandle struct {
@@ -356,9 +357,10 @@ func (r *torrentHeaderRow) CreateRenderer() fyne.WidgetRenderer {
 
 func newTorrentListRow(app *application) *torrentListRow {
 	row := &torrentListRow{
-		app:        app,
-		background: canvas.NewRectangle(theme.Color(theme.ColorNameSelection)),
-		hoverBG:    canvas.NewRectangle(theme.Color(theme.ColorNameHover)),
+		app:           app,
+		background:    canvas.NewRectangle(theme.Color(theme.ColorNameSelection)),
+		hoverBG:       canvas.NewRectangle(theme.Color(theme.ColorNameHover)),
+		hoverOutDelay: rowHoverOutDelay,
 	}
 	row.name = newHoverLabel(app.tooltipManager, tooltipShowDelay, row)
 	row.size = newHoverLabel(app.tooltipManager, 0, row)
@@ -731,25 +733,32 @@ func (r *torrentListRow) hoverIn() {
 	r.hoverBG.Refresh()
 }
 
-// hoverOut schedules the hover background to be hidden after a short delay.
+// rowHoverOutDelay is how long hoverOut waits before hiding the background.
 // The delay lets the cursor traverse gaps between cells (e.g. the status /
 // progress areas) without flashing the highlight off and back on.
+const rowHoverOutDelay = 50 * time.Millisecond
+
+// hoverOut schedules the hover background to be hidden after a short delay.
 func (r *torrentListRow) hoverOut() {
 	if r.hoverTimer != nil {
 		r.hoverTimer.Stop()
 	}
-	r.hoverTimer = time.AfterFunc(50*time.Millisecond, func() {
-		fyne.Do(func() {
-			if !r.hovered {
-				r.hoverTimer = nil
-				return
-			}
-			r.hovered = false
-			r.hoverBG.Hide()
-			r.hoverBG.Refresh()
-			r.hoverTimer = nil
-		})
+	r.hoverTimer = time.AfterFunc(r.hoverOutDelay, func() {
+		fyne.Do(r.finishHoverOut)
 	})
+}
+
+// finishHoverOut performs the delayed part of hoverOut on the UI thread.
+func (r *torrentListRow) finishHoverOut() {
+	if !r.hovered {
+		r.hoverTimer = nil
+
+		return
+	}
+	r.hovered = false
+	r.hoverBG.Hide()
+	r.hoverBG.Refresh()
+	r.hoverTimer = nil
 }
 
 func newHoverLabel(manager *hoverTooltipManager, showDelay time.Duration, row *torrentListRow) *hoverLabel {

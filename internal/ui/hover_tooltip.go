@@ -44,7 +44,10 @@ type hoverTooltipOwner struct {
 	hovered bool
 	hide    *time.Timer
 	show    *time.Timer
-	manager *hoverTooltipManager
+	// hideDelay defaults to tooltipHideDelay; tests override it to keep the
+	// real timer from firing and drive finishHide directly instead.
+	hideDelay time.Duration
+	manager   *hoverTooltipManager
 }
 
 func (o *hoverTooltipOwner) showTooltip(owner fyne.CanvasObject, content fyne.CanvasObject) {
@@ -71,13 +74,18 @@ func (o *hoverTooltipOwner) scheduleShow(owner fyne.CanvasObject, content fyne.C
 
 	o.show = time.AfterFunc(after, func() {
 		fyne.Do(func() {
-			if o == nil || o.show == nil {
-				return
-			}
-			o.show = nil
-			o.showTooltip(owner, content)
+			o.finishShow(owner, content)
 		})
 	})
+}
+
+// finishShow performs the delayed part of scheduleShow on the UI thread.
+func (o *hoverTooltipOwner) finishShow(owner fyne.CanvasObject, content fyne.CanvasObject) {
+	if o == nil || o.show == nil {
+		return
+	}
+	o.show = nil
+	o.showTooltip(owner, content)
 }
 
 func (o *hoverTooltipOwner) cancelShow() {
@@ -97,14 +105,22 @@ func (o *hoverTooltipOwner) scheduleHide(owner fyne.CanvasObject) {
 	o.cancelShow()
 	o.hovered = false
 	o.cancelHide()
-	o.hide = time.AfterFunc(tooltipHideDelay, func() {
+	if o.hideDelay <= 0 {
+		o.hideDelay = tooltipHideDelay
+	}
+	o.hide = time.AfterFunc(o.hideDelay, func() {
 		fyne.Do(func() {
-			if o.hovered {
-				return
-			}
-			o.hideTooltip(owner)
+			o.finishHide(owner)
 		})
 	})
+}
+
+// finishHide performs the delayed part of scheduleHide on the UI thread.
+func (o *hoverTooltipOwner) finishHide(owner fyne.CanvasObject) {
+	if o == nil || o.hovered {
+		return
+	}
+	o.hideTooltip(owner)
 }
 
 func (o *hoverTooltipOwner) hideTooltip(owner fyne.CanvasObject) {

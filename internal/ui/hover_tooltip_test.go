@@ -66,10 +66,14 @@ func TestHoverTooltipOwnerScheduleHideHonorsReentry(t *testing.T) {
 	owner.Resize(owner.MinSize())
 	owner.Move(fyne.NewPos(20, 20))
 
-	state := hoverTooltipOwner{manager: manager}
+	// The fyne test driver runs fyne.Do callbacks inline on the timer
+	// goroutine, so a live hide timer would mutate widget state concurrently
+	// with the assertions. Disable the timer and drive finishHide directly.
+	state := hoverTooltipOwner{manager: manager, hideDelay: time.Hour}
+	tip := widget.NewLabel("tip")
 
 	fyne.DoAndWait(func() {
-		state.showTooltip(owner, widget.NewLabel("tip"))
+		state.showTooltip(owner, tip)
 	})
 	if len(layer.layer.Objects) != 1 {
 		t.Fatalf("expected tooltip to be visible, got %d objects", len(layer.layer.Objects))
@@ -78,12 +82,16 @@ func TestHoverTooltipOwnerScheduleHideHonorsReentry(t *testing.T) {
 	fyne.DoAndWait(func() {
 		state.scheduleHide(owner)
 	})
-	time.Sleep(tooltipHideDelay / 2)
+	if len(layer.layer.Objects) != 1 {
+		t.Fatalf("tooltip should stay visible while the hide delay is pending, got %d objects", len(layer.layer.Objects))
+	}
+
 	fyne.DoAndWait(func() {
-		state.showTooltip(owner, widget.NewLabel("tip"))
+		state.showTooltip(owner, tip)
 	})
-	time.Sleep(tooltipHideDelay + 50*time.Millisecond)
-	fyne.DoAndWait(func() {})
+	fyne.DoAndWait(func() {
+		state.finishHide(owner)
+	})
 
 	if len(layer.layer.Objects) != 1 {
 		t.Fatalf("tooltip should stay visible after hover reentry, got %d objects", len(layer.layer.Objects))
@@ -92,8 +100,9 @@ func TestHoverTooltipOwnerScheduleHideHonorsReentry(t *testing.T) {
 	fyne.DoAndWait(func() {
 		state.scheduleHide(owner)
 	})
-	time.Sleep(tooltipHideDelay + 50*time.Millisecond)
-	fyne.DoAndWait(func() {})
+	fyne.DoAndWait(func() {
+		state.finishHide(owner)
+	})
 
 	if len(layer.layer.Objects) != 0 {
 		t.Fatalf("expected tooltip to hide after delay, got %d objects", len(layer.layer.Objects))
@@ -245,16 +254,21 @@ func TestHoverTooltipOwnerScheduleShowFiresAfterDelay(t *testing.T) {
 	owner.Move(fyne.NewPos(20, 20))
 
 	state := hoverTooltipOwner{manager: manager}
+	tip := widget.NewLabel("tip")
 
+	// The fyne test driver runs fyne.Do callbacks inline on the timer
+	// goroutine, so use a delay the real timer cannot reach and drive
+	// finishShow directly (see hoverTooltipOwner.hideDelay).
 	fyne.DoAndWait(func() {
-		state.scheduleShow(owner, widget.NewLabel("tip"), tooltipShowDelay)
+		state.scheduleShow(owner, tip, time.Hour)
 	})
 	if len(layer.layer.Objects) != 0 {
 		t.Fatalf("tooltip should not be visible immediately after schedule, got %d objects", len(layer.layer.Objects))
 	}
 
-	time.Sleep(tooltipShowDelay + 50*time.Millisecond)
-	fyne.DoAndWait(func() {})
+	fyne.DoAndWait(func() {
+		state.finishShow(owner, tip)
+	})
 
 	if len(layer.layer.Objects) != 1 {
 		t.Fatalf("expected tooltip to be visible after delay, got %d objects", len(layer.layer.Objects))
@@ -306,14 +320,18 @@ func TestHoverTooltipOwnerScheduleHideCancelsPendingShow(t *testing.T) {
 	owner.Resize(owner.MinSize())
 	owner.Move(fyne.NewPos(20, 20))
 
-	state := hoverTooltipOwner{manager: manager}
+	// The fyne test driver runs fyne.Do callbacks inline on the timer
+	// goroutine, so disable the real hide timer and drive finishHide directly
+	// (see hoverTooltipOwner.hideDelay).
+	state := hoverTooltipOwner{manager: manager, hideDelay: time.Hour}
 
 	fyne.DoAndWait(func() {
 		state.scheduleShow(owner, widget.NewLabel("tip"), tooltipShowDelay)
 		state.scheduleHide(owner)
 	})
-	time.Sleep(tooltipShowDelay + tooltipHideDelay + 50*time.Millisecond)
-	fyne.DoAndWait(func() {})
+	fyne.DoAndWait(func() {
+		state.finishHide(owner)
+	})
 
 	if len(layer.layer.Objects) != 0 {
 		t.Fatalf("tooltip should not appear after hide cancels pending show, got %d objects", len(layer.layer.Objects))
@@ -384,7 +402,10 @@ func TestHoverLabelMouseInDelayedShowAppearsAfterDelay(t *testing.T) {
 	layer.Resize(fyne.NewSize(320, 240))
 	manager := newHoverTooltipManager(layer)
 
-	owner := newHoverLabel(manager, tooltipShowDelay, nil)
+	// The fyne test driver runs fyne.Do callbacks inline on the timer
+	// goroutine, so use a show delay the real timer cannot reach and drive
+	// finishShow directly (see hoverTooltipOwner.hideDelay).
+	owner := newHoverLabel(manager, time.Hour, nil)
 	owner.Resize(fyne.NewSize(80, 20))
 	owner.Move(fyne.NewPos(20, 20))
 	win := test.NewWindow(container.NewWithoutLayout(owner, layer))
@@ -399,8 +420,9 @@ func TestHoverLabelMouseInDelayedShowAppearsAfterDelay(t *testing.T) {
 		t.Fatalf("tooltip should not be visible immediately after MouseIn with delay, got %d objects", len(layer.layer.Objects))
 	}
 
-	time.Sleep(tooltipShowDelay + 50*time.Millisecond)
-	fyne.DoAndWait(func() {})
+	fyne.DoAndWait(func() {
+		owner.finishShow(owner, widget.NewLabel("tip"))
+	})
 
 	if len(layer.layer.Objects) != 1 {
 		t.Fatalf("expected tooltip to appear after showDelay, got %d objects", len(layer.layer.Objects))
@@ -444,6 +466,10 @@ func TestRowHoverOutHidesBackgroundAfterDelay(t *testing.T) {
 
 	app := newTestApplication(t)
 	row := newTorrentListRow(app)
+	// The fyne test driver runs fyne.Do callbacks inline on the timer
+	// goroutine, so a live 50 ms timer would write widget state concurrently
+	// with the assertions. Disable the timer and drive the delayed hide here.
+	row.hoverOutDelay = time.Hour
 	win := test.NewWindow(row)
 	defer win.Close()
 	win.Resize(fyne.NewSize(row.MinSize().Width, row.MinSize().Height))
@@ -462,8 +488,7 @@ func TestRowHoverOutHidesBackgroundAfterDelay(t *testing.T) {
 		t.Fatalf("hover background should remain visible immediately after hoverOut (delay pending)")
 	}
 
-	time.Sleep(100 * time.Millisecond)
-	fyne.DoAndWait(func() {})
+	fyne.DoAndWait(row.finishHoverOut)
 
 	if row.hoverBG.Visible() {
 		t.Fatalf("hover background should be hidden after hoverOut delay elapsed")
