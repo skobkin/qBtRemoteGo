@@ -379,7 +379,10 @@ func (a *application) openSettingsWindow() {
 	detailsEnabled := widget.NewCheck("", nil)
 	detailsEnabled.SetChecked(cfg.UI.DetailsPanelEnabled)
 	detailsMode := widget.NewSelect([]string{"Right overlay", "Bottom pane"}, nil)
-	detailsMode.SetSelected(detailsModeSelectLabel(detailsModeFromConfig(cfg.UI)))
+	// Seed from the stored mode, not the effective one: detailsModeFromConfig
+	// maps a disabled panel to "off", and seeding that would silently rewrite
+	// the stored overlay choice to the default pane on the next save.
+	detailsMode.SetSelected(detailsModeSelectLabel(detailsPanelMode(cfg.UI.DetailsPanelMode)))
 	sortBy := widget.NewSelect(sortColumnLabels(), nil)
 	sortBy.SetSelected(sortColumnLabel(cfg.UI.SortColumn))
 	sortDescending := widget.NewCheck("", nil)
