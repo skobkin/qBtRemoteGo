@@ -902,6 +902,103 @@ func TestClientReauthenticatesAfterSessionExpiry(t *testing.T) {
 	}
 }
 
+func TestPlainEndpointsReauthenticateAfterSessionExpiry(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		action func(context.Context, *Client) error
+	}{
+		{
+			name: "app/version",
+			path: "/api/v2/app/version",
+			action: func(ctx context.Context, client *Client) error {
+				_, err := client.Version(ctx)
+
+				return err
+			},
+		},
+		{
+			name: "app/defaultSavePath",
+			path: "/api/v2/app/defaultSavePath",
+			action: func(ctx context.Context, client *Client) error {
+				_, err := client.DefaultSavePath(ctx)
+
+				return err
+			},
+		},
+		{
+			name: "torrents/add",
+			path: "/api/v2/torrents/add",
+			action: func(ctx context.Context, client *Client) error {
+				return client.AddTorrent(ctx, AddRequest{
+					SourceType:  SourceMagnet,
+					MagnetLinks: []string{"magnet:?xt=urn:btih:abc"},
+				})
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var logins atomic.Int32
+			var expired atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v2/auth/login":
+					logins.Add(1)
+					// The session cookie must stay non-Secure: the test server is
+					// plain HTTP and the jar would not resend a Secure cookie.
+					http.SetCookie(w, &http.Cookie{Name: "SID", Value: "session"}) //nolint:gosec
+					_, _ = io.WriteString(w, "Ok.")
+				case tc.path:
+					if expired.Load() {
+						w.WriteHeader(http.StatusForbidden)
+						_, _ = io.WriteString(w, "expired session")
+
+						return
+					}
+					_, _ = io.WriteString(w, "/srv/downloads")
+				default:
+					t.Fatalf("unexpected path: %s", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			client, err := NewClient(ClientConfig{
+				URL:      server.URL,
+				Username: "user",
+				Password: "pass",
+			}, slog.Default())
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+
+			ctx := context.Background()
+			if err := tc.action(ctx, client); err != nil {
+				t.Fatalf("initial request: %v", err)
+			}
+
+			// The session expired: the endpoint must fail once, drop the cached
+			// session, and succeed after a fresh login on the next call.
+			expired.Store(true)
+			if err := tc.action(ctx, client); err == nil {
+				t.Fatal("expected expired session to fail the request")
+			}
+
+			expired.Store(false)
+			if err := tc.action(ctx, client); err != nil {
+				t.Fatalf("request after re-login: %v", err)
+			}
+
+			if got := logins.Load(); got != 2 {
+				t.Fatalf("expected a fresh login after session expiry, got %d logins", got)
+			}
+		})
+	}
+}
+
 func TestTorrentDetailsEndpointsDecodeResponses(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

@@ -140,6 +140,7 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body := readLimitedResponseText(resp.Body, 2048)
+		c.invalidateSessionOnAuthFailure(resp.StatusCode)
 		if c.apiKey != "" && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
 			return "", fmt.Errorf(
 				"app/version returned %s: %s. API-key authentication may have failed: the key might be invalid or no longer current "+
@@ -277,6 +278,7 @@ func (c *Client) DefaultSavePath(ctx context.Context) (string, error) {
 	defer closeAndLog(c.logger, resp.Body, "close app/defaultSavePath response body")
 
 	if resp.StatusCode != http.StatusOK {
+		c.invalidateSessionOnAuthFailure(resp.StatusCode)
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 
 		return "", fmt.Errorf("app/defaultSavePath returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
@@ -313,6 +315,7 @@ func (c *Client) AddTorrent(ctx context.Context, req AddRequest) error {
 	defer closeAndLog(c.logger, resp.Body, "close torrents/add response body")
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		c.invalidateSessionOnAuthFailure(resp.StatusCode)
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
 		return fmt.Errorf("torrents/add returned %s: %s", resp.Status, strings.TrimSpace(string(bodyBytes)))
