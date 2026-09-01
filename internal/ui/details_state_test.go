@@ -1,7 +1,11 @@
 package ui
 
 import (
+	"context"
 	"testing"
+	"time"
+
+	"fyne.io/fyne/v2/test"
 
 	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/qbt"
@@ -241,5 +245,86 @@ func TestSetActiveTab(t *testing.T) {
 				t.Fatalf("setActiveTab(%q) = %q, want %q", tt.tab, state.ActiveTab, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadDetailsDatasetSettlesCurrentFetch(t *testing.T) {
+	test.NewTempApp(t)
+
+	app := &application{detailsState: newTorrentDetailsState()}
+	const hash = "abc123"
+	app.detailsState.resetForHash(hash)
+
+	applied := make(chan struct{})
+	loadDetailsDataset(app, hash, detailsTabGeneral,
+		func(_ context.Context, _ string) (qbt.TorrentProperties, error) {
+			return qbt.TorrentProperties{Name: "fresh"}, nil
+		},
+		func(s *torrentDetailsState, data qbt.TorrentProperties) {
+			s.General.Data = data
+			close(applied)
+		})
+
+	select {
+	case <-applied:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a current fetch never settled its dataset")
+	}
+
+	dataset := app.detailsState.activeDataset(detailsTabGeneral)
+	if dataset == nil || !dataset.Loaded || dataset.Loading || dataset.Error != "" {
+		t.Fatalf("dataset was not settled after a successful fetch: %#v", dataset)
+	}
+	if app.detailsState.General.Data.Name != "fresh" {
+		t.Fatalf("unexpected applied data: %#v", app.detailsState.General.Data)
+	}
+}
+
+func TestLoadDetailsDatasetIgnoresFetchSupersededByReselect(t *testing.T) {
+	test.NewTempApp(t)
+
+	app := &application{detailsState: newTorrentDetailsState()}
+	const hash = "abc123"
+	app.detailsState.resetForHash(hash)
+
+	fetchStarted := make(chan struct{})
+	release := make(chan error)
+	applied := make(chan struct{})
+	fetch := func(_ context.Context, h string) (qbt.TorrentProperties, error) {
+		if h != hash {
+			t.Errorf("fetch called with hash %q, want %q", h, hash)
+		}
+		close(fetchStarted)
+		return qbt.TorrentProperties{Name: "stale"}, <-release
+	}
+	apply := func(s *torrentDetailsState, data qbt.TorrentProperties) {
+		s.General.Data = data
+		close(applied)
+	}
+
+	loadDetailsDataset(app, hash, detailsTabGeneral, fetch, apply)
+	<-fetchStarted
+
+	// Reselecting the same torrent resets the datasets without changing the
+	// hash, so only the dataset replacement itself may stop the in-flight
+	// fetch from settling what is now a different struct.
+	app.detailsState.resetForHash(hash)
+
+	close(release)
+
+	// The superseded callback may still be in flight; give it a moment to
+	// (wrongly) land before asserting that it did not.
+	select {
+	case <-applied:
+		t.Fatal("a fetch superseded by a reselect settled the replacement dataset")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	dataset := app.detailsState.activeDataset(detailsTabGeneral)
+	if dataset == nil || dataset.Loading || dataset.Loaded || dataset.Error != "" {
+		t.Fatalf("replacement dataset was touched by the stale fetch: %#v", dataset)
+	}
+	if app.detailsState.General.Data.Name != "" {
+		t.Fatalf("stale data landed in the replacement dataset: %q", app.detailsState.General.Data.Name)
 	}
 }

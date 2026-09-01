@@ -67,11 +67,16 @@ type torrentDetailsState struct {
 	Visible     bool
 	FocusedHash string
 	ActiveTab   detailsTabKey
-	General     detailsGeneralState
-	Content     detailsContentState
-	Peers       detailsPeersState
-	Trackers    detailsTrackersState
-	WebSeeds    detailsWebSeedsState
+	// resetGeneration increments every time resetForHash replaces the dataset
+	// structs. The tab datasets are embedded value structs, so their addresses
+	// survive a reset; in-flight fetches can only detect the replacement by
+	// comparing this counter.
+	resetGeneration uint64
+	General         detailsGeneralState
+	Content         detailsContentState
+	Peers           detailsPeersState
+	Trackers        detailsTrackersState
+	WebSeeds        detailsWebSeedsState
 }
 
 func newTorrentDetailsState() *torrentDetailsState {
@@ -111,6 +116,7 @@ func (s *torrentDetailsState) resetForHash(hash string) {
 	}
 	s.FocusedHash = strings.TrimSpace(hash)
 	s.ActiveTab = detailsTabGeneral
+	s.resetGeneration++
 	s.General = detailsGeneralState{}
 	s.Content = detailsContentState{Expanded: map[string]bool{}}
 	s.Peers = detailsPeersState{}
@@ -348,9 +354,10 @@ const detailsLoadTimeout = 20 * time.Second
 
 // loadDetailsDataset performs the shared details fetch flow for one tab: flag
 // the dataset as loading, fetch it off the UI thread, and store the result on
-// the UI thread unless the focused torrent changed in the meantime. apply
-// receives the fetched data only on success and must only write tab-specific
-// fields; the embedded detailsDatasetState is managed here.
+// the UI thread unless the focused torrent changed or the datasets were reset
+// in the meantime. apply receives the fetched data only on success and must
+// only write tab-specific fields; the embedded detailsDatasetState is managed
+// here.
 func loadDetailsDataset[T any](
 	a *application,
 	hash string,
@@ -358,11 +365,12 @@ func loadDetailsDataset[T any](
 	fetch func(ctx context.Context, hash string) (T, error),
 	apply func(s *torrentDetailsState, data T),
 ) {
-	dataset := a.detailsState.activeDataset(tab)
+	state := a.detailsState
+	dataset := state.activeDataset(tab)
 	if dataset == nil {
 		return
 	}
-	expectedDataset := dataset
+	startedGeneration := state.resetGeneration
 	dataset.Loading = true
 	a.refreshDetailsPresentation()
 	go func(expected string) {
@@ -370,16 +378,20 @@ func loadDetailsDataset[T any](
 		defer cancel()
 		data, err := fetch(ctx, expected)
 		fyne.Do(func() {
-			if a.detailsState == nil || a.activeDetailsHash() != expected {
+			// A matching hash is not enough: a reset replaces the dataset
+			// structs (bumping resetGeneration) and can even keep the hash,
+			// and the whole state can be swapped for a fresh one, so a
+			// superseded fetch must not settle the replacement — it would
+			// clear Loading while the current fetch is still in flight and
+			// flash a stale snapshot.
+			if a.detailsState != state || a.detailsState.resetGeneration != startedGeneration {
+				return
+			}
+			if a.activeDetailsHash() != expected {
 				return
 			}
 			dataset := a.detailsState.activeDataset(tab)
-			// A matching hash is not enough: reselecting the same torrent
-			// replaces the dataset structs via resetForHash, so a superseded
-			// fetch from before the reselect must not settle the replacement
-			// (it would clear Loading while the current fetch is still in
-			// flight and flash a stale snapshot).
-			if dataset == nil || dataset != expectedDataset {
+			if dataset == nil {
 				return
 			}
 			dataset.Loading = false
