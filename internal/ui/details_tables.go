@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -105,13 +104,6 @@ func (v *detailsTableView) SetRows(rows [][]string) {
 	v.table.Refresh()
 }
 
-// detailsTableMessages carries the per-tab status copy of a details table view.
-type detailsTableMessages struct {
-	loading      string
-	failedPrefix string
-	idle         string
-}
-
 // detailsTableTabView is the shared tab view behind the Peers, Trackers and
 // HTTP Sources tabs: one table plus one status/retry chrome, built once and
 // updated in place by Refresh.
@@ -120,10 +112,8 @@ type detailsTableTabView struct {
 	tab    detailsTabKey
 	root   *fyne.Container
 	table  *detailsTableView
-	status *widget.Label
-	retry  *widget.Button
-	wrap   *fyne.Container
-	msgs   detailsTableMessages
+	status *detailsStatusChrome
+	msgs   detailsStatusMessages
 	rows   func(state *torrentDetailsState) [][]string
 }
 
@@ -131,26 +121,19 @@ func newDetailsTableTabView(
 	app *application,
 	tab detailsTabKey,
 	specs []detailsColumnSpec,
-	msgs detailsTableMessages,
+	msgs detailsStatusMessages,
 	rows func(state *torrentDetailsState) [][]string,
 ) *detailsTableTabView {
 	v := &detailsTableTabView{
-		app:   app,
-		tab:   tab,
-		root:  container.NewStack(),
-		table: newDetailsTableView(specs),
-		msgs:  msgs,
-		rows:  rows,
+		app:    app,
+		tab:    tab,
+		root:   container.NewStack(),
+		table:  newDetailsTableView(specs),
+		status: newDetailsStatusChrome(app),
+		msgs:   msgs,
+		rows:   rows,
 	}
-	v.status = widget.NewLabel("")
-	v.status.Wrapping = fyne.TextWrapWord
-	v.status.Truncation = fyne.TextTruncateEllipsis
-	v.retry = widget.NewButton("Retry", func() { v.app.retryActiveDetailsLoad() })
-	v.wrap = container.NewVBox(
-		container.NewCenter(container.NewPadded(v.status)),
-		container.NewCenter(v.retry),
-	)
-	v.root.Objects = []fyne.CanvasObject{v.table.Root(), v.wrap}
+
 	return v
 }
 
@@ -161,29 +144,18 @@ func (v *detailsTableTabView) Root() fyne.CanvasObject {
 func (v *detailsTableTabView) Refresh() {
 	state := v.app.detailsState
 	dataset := state.activeDataset(v.tab)
-	switch {
-	case state == nil || dataset == nil || (dataset.Loading && !dataset.Loaded):
-		v.status.SetText(v.msgs.loading)
-		v.retry.Hide()
-		v.wrap.Show()
-	case strings.TrimSpace(dataset.Error) != "":
-		v.status.SetText(v.msgs.failedPrefix + "\n" + dataset.Error)
-		v.retry.Show()
-		v.wrap.Show()
-	case !dataset.Loaded:
-		v.status.SetText(v.msgs.idle)
-		v.retry.Hide()
-		v.wrap.Show()
-	default:
-		v.table.SetRows(v.rows(state))
-		v.wrap.Hide()
+	if v.status.present(v.root, v.table.Root(), v.msgs, dataset) {
+		v.root.Refresh()
+
+		return
 	}
+	v.table.SetRows(v.rows(state))
 	v.root.Refresh()
 }
 
 func newDetailsPeerTabView(app *application) *detailsTableTabView {
 	return newDetailsTableTabView(app, detailsTabPeers, detailsPeerColumnSpecs,
-		detailsTableMessages{
+		detailsStatusMessages{
 			loading:      "Loading peers...",
 			failedPrefix: "Failed to load peers:",
 			idle:         "Peers will load when this tab becomes active.",
@@ -193,7 +165,7 @@ func newDetailsPeerTabView(app *application) *detailsTableTabView {
 
 func newDetailsTrackersTabView(app *application) *detailsTableTabView {
 	return newDetailsTableTabView(app, detailsTabTrackers, detailsTrackerColumnSpecs,
-		detailsTableMessages{
+		detailsStatusMessages{
 			loading:      "Loading trackers...",
 			failedPrefix: "Failed to load trackers:",
 			idle:         "Trackers will load when this tab becomes active.",
@@ -203,7 +175,7 @@ func newDetailsTrackersTabView(app *application) *detailsTableTabView {
 
 func newDetailsWebSeedsTabView(app *application) *detailsTableTabView {
 	return newDetailsTableTabView(app, detailsTabHTTPSources, detailsWebSeedColumnSpecs,
-		detailsTableMessages{
+		detailsStatusMessages{
 			loading:      "Loading HTTP sources...",
 			failedPrefix: "Failed to load HTTP sources:",
 			idle:         "HTTP sources will load when this tab becomes active.",

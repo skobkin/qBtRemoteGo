@@ -24,15 +24,19 @@ type detailsGeneralTabView struct {
 	progressPct *widget.Label
 	transfer    *detailsGeneralSection
 	info        *detailsGeneralSection
-	status      *widget.Label
-	retry       *widget.Button
-	statusWrap  *fyne.Container
+	status      *detailsStatusChrome
+	msgs        detailsStatusMessages
 }
 
 func newDetailsGeneralTabView(app *application) *detailsGeneralTabView {
 	v := &detailsGeneralTabView{
 		app:  app,
 		root: container.NewStack(),
+		msgs: detailsStatusMessages{
+			loading:      "Loading details...",
+			failedPrefix: "Failed to load details:",
+			idle:         "Details will load when this tab becomes active.",
+		},
 	}
 	v.progress = widget.NewProgressBar()
 	v.progressPct = widget.NewLabel("")
@@ -48,15 +52,7 @@ func newDetailsGeneralTabView(app *application) *detailsGeneralTabView {
 		layout.NewSpacer(),
 	)))
 	v.content = container.NewStack(v.scroll)
-	v.status = widget.NewLabel("")
-	v.status.Wrapping = fyne.TextWrapWord
-	v.status.Truncation = fyne.TextTruncateEllipsis
-	v.retry = widget.NewButton("Retry", func() { v.app.retryActiveDetailsLoad() })
-	v.statusWrap = container.NewVBox(
-		container.NewCenter(container.NewPadded(v.status)),
-		container.NewCenter(v.retry),
-	)
-	v.root.Objects = []fyne.CanvasObject{v.content, v.statusWrap}
+	v.status = newDetailsStatusChrome(app)
 	return v
 }
 
@@ -65,29 +61,17 @@ func (v *detailsGeneralTabView) Root() fyne.CanvasObject {
 }
 
 func (v *detailsGeneralTabView) Refresh() {
-	state := v.app.detailsState
-	dataset := state.activeDataset(detailsTabGeneral)
-	switch {
-	case state == nil || dataset == nil || (dataset.Loading && !dataset.Loaded):
-		v.status.SetText("Loading details...")
-		v.retry.Hide()
-		v.statusWrap.Show()
-	case strings.TrimSpace(dataset.Error) != "":
-		v.status.SetText("Failed to load details:\n" + dataset.Error)
-		v.retry.Show()
-		v.statusWrap.Show()
-	case !dataset.Loaded:
-		v.status.SetText("Details will load when this tab becomes active.")
-		v.retry.Hide()
-		v.statusWrap.Show()
-	default:
-		data := state.General.Data
-		v.progress.SetValue(data.Progress)
-		v.progressPct.SetText(fmt.Sprintf("%.1f%%", data.Progress*100))
-		v.transfer.update(data)
-		v.info.update(data)
-		v.statusWrap.Hide()
+	dataset := v.app.detailsState.activeDataset(detailsTabGeneral)
+	if v.status.present(v.root, v.content, v.msgs, dataset) {
+		v.root.Refresh()
+
+		return
 	}
+	data := v.app.detailsState.General.Data
+	v.progress.SetValue(data.Progress)
+	v.progressPct.SetText(fmt.Sprintf("%.1f%%", data.Progress*100))
+	v.transfer.update(data)
+	v.info.update(data)
 	v.root.Refresh()
 }
 

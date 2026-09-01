@@ -24,18 +24,17 @@ const (
 )
 
 type detailsContentTabView struct {
-	app        *application
-	root       *fyne.Container
-	content    *fyne.Container
-	filter     *widget.Entry
-	status     *widget.Label
-	retry      *widget.Button
-	statusWrap *fyne.Container
-	header     *detailsContentHeader
-	list       *widget.List
-	scroll     *container.Scroll
-	rows       []*contentVisibleRow
-	tree       *contentTree
+	app     *application
+	root    *fyne.Container
+	content *fyne.Container
+	filter  *widget.Entry
+	status  *detailsStatusChrome
+	msgs    detailsStatusMessages
+	header  *detailsContentHeader
+	list    *widget.List
+	scroll  *container.Scroll
+	rows    []*contentVisibleRow
+	tree    *contentTree
 }
 
 type contentColumnSpec struct {
@@ -132,15 +131,12 @@ func newDetailsContentTabView(app *application) *detailsContentTabView {
 	// Chrome is built once; Refresh only updates text and visibility so the
 	// filter entry and scroll position survive poll ticks.
 	v.content = container.NewBorder(v.filter, nil, nil, nil, v.scroll)
-	v.status = widget.NewLabel("")
-	v.status.Wrapping = fyne.TextWrapWord
-	v.status.Truncation = fyne.TextTruncateEllipsis
-	v.retry = widget.NewButton("Retry", func() { v.app.retryActiveDetailsLoad() })
-	v.statusWrap = container.NewVBox(
-		container.NewCenter(container.NewPadded(v.status)),
-		container.NewCenter(v.retry),
-	)
-	v.root.Objects = []fyne.CanvasObject{v.content, v.statusWrap}
+	v.status = newDetailsStatusChrome(app)
+	v.msgs = detailsStatusMessages{
+		loading:      "Loading content...",
+		failedPrefix: "Failed to load content:",
+		idle:         "Content will load when this tab becomes active.",
+	}
 	return v
 }
 
@@ -156,25 +152,14 @@ func (v *detailsContentTabView) Refresh() {
 		// by setContentFilter's equality short-circuit.
 		v.filter.SetText(state.Content.Filter)
 	}
-	switch {
-	case state == nil || dataset == nil || (dataset.Loading && !dataset.Loaded):
-		v.status.SetText("Loading content...")
-		v.retry.Hide()
-		v.statusWrap.Show()
-	case strings.TrimSpace(dataset.Error) != "":
-		v.status.SetText("Failed to load content:\n" + dataset.Error)
-		v.retry.Show()
-		v.statusWrap.Show()
-	case !dataset.Loaded:
-		v.status.SetText("Content will load when this tab becomes active.")
-		v.retry.Hide()
-		v.statusWrap.Show()
-	default:
-		v.tree = buildContentTree(state.Content.Files)
-		v.rows = v.tree.visibleRows(strings.TrimSpace(state.Content.Filter), state.Content.Expanded)
-		v.list.Refresh()
-		v.statusWrap.Hide()
+	if v.status.present(v.root, v.content, v.msgs, dataset) {
+		v.root.Refresh()
+
+		return
 	}
+	v.tree = buildContentTree(state.Content.Files)
+	v.rows = v.tree.visibleRows(strings.TrimSpace(state.Content.Filter), state.Content.Expanded)
+	v.list.Refresh()
 	v.root.Refresh()
 }
 

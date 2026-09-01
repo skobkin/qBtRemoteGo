@@ -16,6 +16,7 @@ type torrentDetailsView struct {
 	trackers *detailsTableTabView
 	webSeeds *detailsTableTabView
 	tabItems map[detailsTabKey]*container.TabItem
+	empty    fyne.CanvasObject
 }
 
 func newTorrentDetailsView(app *application) *torrentDetailsView {
@@ -118,12 +119,19 @@ func (v *torrentDetailsView) refreshTab(tab detailsTabKey) {
 	}
 }
 
+// emptyState returns the no-selection placeholder, built once. The panel mode
+// is its only input besides selection state, and the host rebuilds this view
+// whenever the mode changes, so caching is safe.
 func (v *torrentDetailsView) emptyState() fyne.CanvasObject {
-	text := "Select a single torrent to view details."
-	if v.app.currentDetailsMode() == detailsPanelModeOverlayRight {
-		text = "Double-click a torrent to open details."
+	if v.empty == nil {
+		text := "Select a single torrent to view details."
+		if v.app.currentDetailsMode() == detailsPanelModeOverlayRight {
+			text = "Double-click a torrent to open details."
+		}
+		label := widget.NewLabel(text)
+		label.Wrapping = fyne.TextWrapWord
+		v.empty = container.NewCenter(container.NewPadded(label))
 	}
-	label := widget.NewLabel(text)
-	label.Wrapping = fyne.TextWrapWord
-	return container.NewCenter(container.NewPadded(label))
+
+	return v.empty
 }
