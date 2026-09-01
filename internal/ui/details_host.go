@@ -76,6 +76,7 @@ func (h *torrentDetailsHost) Refresh() {
 	}
 
 	h.drawer.SetVisible(h.app.detailsState != nil && h.app.detailsState.Visible && mode == detailsPanelModeOverlayRight)
+	h.panel.applyTheme()
 	h.root.Refresh()
 }
 
@@ -85,7 +86,9 @@ func (h *torrentDetailsHost) Refresh() {
 // interactive children still receive their events first.
 type detailsPanelChrome struct {
 	widget.BaseWidget
-	root *fyne.Container
+	bg     *canvas.Rectangle
+	border *canvas.Rectangle
+	root   *fyne.Container
 }
 
 func newDetailsPanelChrome(content fyne.CanvasObject) *detailsPanelChrome {
@@ -94,10 +97,27 @@ func newDetailsPanelChrome(content fyne.CanvasObject) *detailsPanelChrome {
 	border.StrokeColor = theme.Color(theme.ColorNameSeparator)
 	border.StrokeWidth = 1
 	panel := &detailsPanelChrome{
-		root: container.NewStack(bg, border, content),
+		bg:     bg,
+		border: border,
+		root:   container.NewStack(bg, border, content),
 	}
 	panel.ExtendBaseWidget(panel)
 	return panel
+}
+
+// applyTheme re-resolves the panel's colors from the current theme so a
+// runtime theme switch does not leave the panel in the palette it was built
+// with; the torrent rows re-resolve theirs on every refresh too.
+func (p *detailsPanelChrome) applyTheme() {
+	bgColor := theme.Color(theme.ColorNameInputBackground)
+	strokeColor := theme.Color(theme.ColorNameSeparator)
+	if p.bg.FillColor == bgColor && p.border.StrokeColor == strokeColor {
+		return
+	}
+	p.bg.FillColor = bgColor
+	p.border.StrokeColor = strokeColor
+	p.bg.Refresh()
+	p.border.Refresh()
 }
 
 func (p *detailsPanelChrome) CreateRenderer() fyne.WidgetRenderer {
