@@ -259,6 +259,14 @@ func (e *pathAutocompleteEntry) isCurrentGeneration(generation uint64) bool {
 	return !e.closed && e.generation == generation
 }
 
+// currentGeneration reports the generation the next debounced fetch will run
+// with; tests use it to drive runRemoteFetch instead of live timers.
+func (e *pathAutocompleteEntry) currentGeneration() uint64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.generation
+}
+
 func (e *pathAutocompleteEntry) setSuggestions(items []string) {
 	e.suggestions = append([]string(nil), items...)
 	e.selected = -1
