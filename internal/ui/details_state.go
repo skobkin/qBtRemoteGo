@@ -258,9 +258,14 @@ func (a *application) setDetailsTab(tab detailsTabKey) {
 	a.ensureActiveDetailsLoaded()
 }
 
+// refreshDetailsPresentation queues the details host refresh on the UI event
+// loop. Input events and painting share one loop iteration in Fyne while
+// queued work runs between iterations, so the interaction that triggered the
+// change (tab click, selection) paints before the panel content rebuilds
+// instead of waiting for it.
 func (a *application) refreshDetailsPresentation() {
 	if a.detailsHost != nil {
-		a.detailsHost.Refresh()
+		fyne.Do(a.detailsHost.Refresh)
 	}
 }
 
