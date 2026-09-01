@@ -42,15 +42,22 @@ type rowTapSequencer struct {
 }
 
 // record registers a tap on the given row and reports whether it completed a
-// double-click. Triggering resets the sequence, so a third tap starts a new
-// one instead of opening the details twice.
-func (s *rowTapSequencer) record(hash string, now time.Time) bool {
+// double-click. Modified taps (ctrl/shift/super) never complete one — they
+// toggle or extend the selection — and reset a pending plain double-click so a
+// modifier click between two plain taps cannot fuse them. Triggering resets
+// the sequence, so a third tap starts a new one instead of opening the
+// details twice.
+func (s *rowTapSequencer) record(hash string, now time.Time, modifier fyne.KeyModifier) bool {
+	if modifier != 0 {
+		s.reset()
+
+		return false
+	}
 	if s.interval <= 0 {
 		s.interval = torrentDoubleTapInterval
 	}
 	if s.lastHash == hash && now.Sub(s.lastAt) <= s.interval {
-		s.lastAt = time.Time{}
-		s.lastHash = ""
+		s.reset()
 
 		return true
 	}
@@ -58,6 +65,11 @@ func (s *rowTapSequencer) record(hash string, now time.Time) bool {
 	s.lastHash = hash
 
 	return false
+}
+
+func (s *rowTapSequencer) reset() {
+	s.lastAt = time.Time{}
+	s.lastHash = ""
 }
 
 type torrentColumnSpec struct {
@@ -438,7 +450,7 @@ func (r *torrentListRow) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (r *torrentListRow) Tapped(*fyne.PointEvent) {
-	if r.app.rowTaps.record(r.hash, time.Now()) {
+	if r.app.rowTaps.record(r.hash, time.Now(), r.modifier) {
 		r.app.selectOnlyTorrent(r.hash)
 		r.app.refreshTorrentSelection()
 		r.app.openTorrentDetails(r.hash)
