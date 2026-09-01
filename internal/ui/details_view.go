@@ -66,6 +66,9 @@ func (v *torrentDetailsView) Root() fyne.CanvasObject {
 	return v.root
 }
 
+// Refresh syncs the presentation to the current details state. Only the
+// active tab's view is updated: Fyne keeps hidden tab contents out of the
+// canvas, so they are refreshed when selected again instead of on every tick.
 func (v *torrentDetailsView) Refresh() {
 	hash := ""
 	if v.app.detailsState != nil {
@@ -77,13 +80,10 @@ func (v *torrentDetailsView) Refresh() {
 		return
 	}
 
-	v.general.Refresh()
-	v.content.Refresh()
-	v.peers.Refresh()
-	v.trackers.Refresh()
-	v.webSeeds.Refresh()
+	tab := v.activeTab()
+	v.refreshTab(tab)
 
-	selected := v.tabItems[v.app.detailsState.ActiveTab]
+	selected := v.tabItems[tab]
 	if selected == nil {
 		selected = v.tabItems[detailsTabGeneral]
 	}
@@ -92,6 +92,30 @@ func (v *torrentDetailsView) Refresh() {
 	}
 	v.root.Objects = []fyne.CanvasObject{v.tabs}
 	v.root.Refresh()
+}
+
+// activeTab returns the tab key to present; unknown values fall back to
+// General, mirroring setActiveTab's normalization.
+func (v *torrentDetailsView) activeTab() detailsTabKey {
+	if v.app.detailsState == nil {
+		return detailsTabGeneral
+	}
+	return v.app.detailsState.ActiveTab
+}
+
+func (v *torrentDetailsView) refreshTab(tab detailsTabKey) {
+	switch tab {
+	case detailsTabGeneral:
+		v.general.Refresh()
+	case detailsTabContent:
+		v.content.Refresh()
+	case detailsTabPeers:
+		v.peers.Refresh()
+	case detailsTabTrackers:
+		v.trackers.Refresh()
+	case detailsTabHTTPSources:
+		v.webSeeds.Refresh()
+	}
 }
 
 func (v *torrentDetailsView) emptyState() fyne.CanvasObject {
