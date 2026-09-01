@@ -92,6 +92,24 @@ func TestContentVisibleRowsFilterIncludesAncestors(t *testing.T) {
 	}
 }
 
+func TestContentVisibleRowsFilterPrunesSubtrees(t *testing.T) {
+	tree := buildContentTree([]qbt.TorrentFile{
+		{Name: "data/sub/needle.bin", Size: 10, Progress: 1, Priority: contentPriorityNormal},
+		{Name: "data/other.bin", Size: 20, Progress: 1, Priority: contentPriorityNormal},
+	})
+
+	rows := tree.visibleRows("needle", map[string]bool{})
+	want := []string{"data", "sub", "needle.bin"}
+	if len(rows) != len(want) {
+		t.Fatalf("unexpected row count: %d", len(rows))
+	}
+	for index, name := range want {
+		if rows[index].node.name != name {
+			t.Fatalf("row %d: got %q, want %q", index, rows[index].node.name, name)
+		}
+	}
+}
+
 func TestContentRowExpanded(t *testing.T) {
 	dir := &contentNode{path: "dir", isDir: true}
 	file := &contentNode{path: "file.bin", isDir: false}

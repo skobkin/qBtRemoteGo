@@ -58,9 +58,11 @@ type contentTree struct {
 }
 
 type contentNode struct {
-	id           string
-	name         string
-	path         string
+	id   string
+	name string
+	path string
+	// lowerPath is path lowercased once at build time for filter matching.
+	lowerPath    string
 	isDir        bool
 	parent       *contentNode
 	children     []*contentNode
@@ -176,13 +178,14 @@ func buildContentTree(files []qbt.TorrentFile) *contentTree {
 			child := findContentChild(parent, part, last)
 			if child == nil {
 				child = &contentNode{
-					id:       currentPath,
-					name:     part,
-					path:     currentPath,
-					isDir:    !last,
-					parent:   parent,
-					priority: contentPriorityMixed,
-					hasAvail: last && file.Availability >= 0,
+					id:        currentPath,
+					name:      part,
+					path:      currentPath,
+					lowerPath: strings.ToLower(currentPath),
+					isDir:     !last,
+					parent:    parent,
+					priority:  contentPriorityMixed,
+					hasAvail:  last && file.Availability >= 0,
 				}
 				parent.children = append(parent.children, child)
 			}
@@ -291,30 +294,35 @@ func (t *contentTree) visibleRows(filter string, expanded map[string]bool) []*co
 	return out
 }
 
-func (t *contentTree) walkVisible(node *contentNode, depth int, filter string, expanded map[string]bool, out *[]*contentVisibleRow) bool {
+func (t *contentTree) walkVisible(node *contentNode, depth int, filter string, expanded map[string]bool, out *[]*contentVisibleRow) {
 	if node == nil {
-		return false
+		return
 	}
-	matches := filter == "" || strings.Contains(strings.ToLower(node.path), filter)
-	childMatch := false
-	if node.isDir {
-		for _, child := range node.children {
-			if t.walkVisible(child, depth+1, filter, expanded, &[]*contentVisibleRow{}) {
-				childMatch = true
-				break
+	// lowerPath is precomputed at build time; probing whether a subtree
+	// matches happens at most once per pruned node via subtreeMatches instead
+	// of re-walking the whole subtree on every refresh.
+	if filter == "" || strings.Contains(node.lowerPath, filter) || subtreeMatches(node, filter) {
+		*out = append(*out, &contentVisibleRow{node: node, depth: depth, filtering: filter != ""})
+		if contentRowExpanded(node, filter != "", expanded) {
+			for _, child := range node.children {
+				t.walkVisible(child, depth+1, filter, expanded, out)
 			}
 		}
 	}
-	if filter != "" && !matches && !childMatch {
-		return false
+}
+
+// subtreeMatches reports whether node or any of its descendants matches the
+// filter.
+func subtreeMatches(node *contentNode, filter string) bool {
+	if strings.Contains(node.lowerPath, filter) {
+		return true
 	}
-	*out = append(*out, &contentVisibleRow{node: node, depth: depth, filtering: filter != ""})
-	if contentRowExpanded(node, filter != "", expanded) {
-		for _, child := range node.children {
-			t.walkVisible(child, depth+1, filter, expanded, out)
+	for _, child := range node.children {
+		if subtreeMatches(child, filter) {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // contentRowExpanded reports whether a directory row's children are shown.
