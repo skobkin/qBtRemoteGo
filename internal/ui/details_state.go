@@ -50,7 +50,6 @@ type detailsContentState struct {
 
 type detailsPeersState struct {
 	detailsDatasetState
-	RID   int
 	Peers []qbt.TorrentPeer
 }
 
@@ -320,7 +319,7 @@ func (a *application) loadActiveTabDataset(hash string, tab detailsTabKey) {
 	case detailsTabContent:
 		a.loadTorrentDetailsContent(hash)
 	case detailsTabPeers:
-		a.loadTorrentDetailsPeers(hash, 0)
+		a.loadTorrentDetailsPeers(hash)
 	case detailsTabTrackers:
 		a.loadTorrentDetailsTrackers(hash)
 	case detailsTabHTTPSources:
@@ -421,13 +420,15 @@ func (a *application) loadTorrentDetailsContent(hash string) {
 		})
 }
 
-func (a *application) loadTorrentDetailsPeers(hash string, rid int) {
+// loadTorrentDetailsPeers always requests a full sync (rid=0): the incremental
+// peer protocol (rid=N + dropped/taken keys) is not implemented, so the stored
+// snapshot is replaced wholesale on every refresh.
+func (a *application) loadTorrentDetailsPeers(hash string) {
 	loadDetailsDataset(a, hash, detailsTabPeers,
 		func(ctx context.Context, hash string) (qbt.TorrentPeersSync, error) {
-			return a.controller.FetchTorrentPeers(ctx, hash, rid)
+			return a.controller.FetchTorrentPeers(ctx, hash, 0)
 		},
 		func(s *torrentDetailsState, data qbt.TorrentPeersSync) {
-			s.Peers.RID = data.RID
 			s.Peers.Peers = sortedPeers(data.Peers)
 		})
 }

@@ -85,7 +85,7 @@ func TestResetForHash(t *testing.T) {
 				"dir": true,
 			},
 		},
-		Peers:    detailsPeersState{RID: 3, Peers: []qbt.TorrentPeer{{IP: "1.2.3.4"}}},
+		Peers:    detailsPeersState{Peers: []qbt.TorrentPeer{{IP: "1.2.3.4"}}},
 		Trackers: detailsTrackersState{Trackers: []qbt.TorrentTracker{{URL: "udp://tracker"}}},
 		WebSeeds: detailsWebSeedsState{WebSeeds: []qbt.TorrentWebSeed{{URL: "https://seed.example"}}},
 	}
@@ -110,7 +110,7 @@ func TestResetForHash(t *testing.T) {
 	if state.Content.Expanded == nil || len(state.Content.Expanded) != 0 {
 		t.Fatalf("expected a fresh empty expansion map, got %#v", state.Content.Expanded)
 	}
-	if state.Peers.RID != 0 || len(state.Peers.Peers) != 0 {
+	if len(state.Peers.Peers) != 0 {
 		t.Fatalf("expected peers dataset to reset, got %#v", state.Peers)
 	}
 	if len(state.Trackers.Trackers) != 0 {
