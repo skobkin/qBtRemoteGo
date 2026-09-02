@@ -82,17 +82,29 @@ func (c *Controller) credentialsRetryPending() bool {
 	return c.credentialRetryActive
 }
 
-// keychainLoadPending reports whether the config says credentials were stored
-// in the keychain but none were loaded at startup, i.e. a background retry
-// could still find them. Without the stored-credentials marker a "not found"
-// means nothing was ever stored and there is nothing to retry.
+// CredentialRetryActive is the exported view of credentialsRetryPending: it
+// reports whether the background loop is currently re-reading the keychain for
+// stored credentials. The UI uses it to present stored-but-unloaded
+// credentials as "still retrying" rather than failed.
+func (c *Controller) CredentialRetryActive() bool {
+	return c.credentialsRetryPending()
+}
+
+// keychainLoadPending reports whether a background retry could still load
+// keychain credentials into the still-empty session, i.e. the keychain has not
+// concluded that nothing is stored. The stored-credentials marker makes "not
+// found" mean "stored but not loaded yet"; configs saved before the marker
+// existed carry no marker, so for them every non-available keychain state — a
+// locked wallet, a timed-out or otherwise failing read — must keep retrying.
+// Only a reachable keychain holding nothing (available + not found) rules a
+// retry out.
 func (c *Controller) keychainLoadPending() bool {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
 
 	return c.config.Connection.CredentialStorage == config.CredentialStorageKeychain &&
-		c.config.Connection.KeychainHasCredentials &&
-		c.sessionCredentials == credentials.Credentials{}
+		c.sessionCredentials == (credentials.Credentials{}) &&
+		c.credentialStatus.State != credentials.StateAvailable
 }
 
 // startCredentialRetryLoop launches the background loop that re-reads the

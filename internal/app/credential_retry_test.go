@@ -228,3 +228,122 @@ func TestClientKeepsPlainErrorWhenNothingStored(t *testing.T) {
 		t.Fatalf("expected the plain nothing-stored error, got %v", err)
 	}
 }
+
+// Configs saved before the stored-credentials marker existed carry
+// CredentialStorageKeychain without the marker, so a failed startup read must
+// still start the background retry for them — the wallet may simply not be
+// ready yet.
+func TestLegacyKeychainConfigWithoutMarkerStartsRetry(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantMsg string
+	}{
+		{name: "locked keychain", err: errors.New("collection is locked")},
+		{name: "timed out keychain", err: errKeychainTimeout},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+			// KeychainHasCredentials stays false: the marker did not exist when
+			// released builds wrote this config.
+			store := credentials.NewStoreForTests(
+				func(service, user string) (string, error) { return "", tc.err },
+				nil,
+				nil,
+			)
+			controller := newTestController(t, cfg, store)
+
+			if !controller.credentialsRetryPending() {
+				t.Fatal("expected a background retry for a marker-less keychain config")
+			}
+			if !controller.CredentialRetryActive() {
+				t.Fatal("expected the exported retry state to report active")
+			}
+			if state := controller.CredentialStatus().State; state == credentials.StateAvailable {
+				t.Fatalf("expected a non-available status for %v, got %q", tc.err, state)
+			}
+		})
+	}
+}
+
+// A reachable keychain that holds nothing maps to the available state, so a
+// marker-less config must not start a retry: the plain nothing-stored error is
+// the correct answer for it.
+func TestMarkerlessKeychainWithoutStoredCredentialsDoesNotRetry(t *testing.T) {
+	cfg := config.Default()
+	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+	controller := newTestController(t, cfg, newNotStoredStore())
+
+	if controller.credentialsRetryPending() {
+		t.Fatal("did not expect a retry when the keychain holds nothing")
+	}
+	if got := controller.CredentialStatus().State; got != credentials.StateAvailable {
+		t.Fatalf("unexpected status state: %q", got)
+	}
+}
+
+func TestKeychainLoadPendingPredicate(t *testing.T) {
+	controller := newTestController(t, config.Default(), newNotStoredStore())
+
+	tests := []struct {
+		name     string
+		mode     config.CredentialStorageMode
+		marker   bool
+		session  credentials.Credentials
+		state    credentials.State
+		wantPend bool
+	}{
+		{
+			name:     "stored marker with unavailable state stays pending",
+			mode:     config.CredentialStorageKeychain,
+			marker:   true,
+			state:    credentials.StateUnavailable,
+			wantPend: true,
+		},
+		{
+			name:     "marker-less locked state stays pending",
+			mode:     config.CredentialStorageKeychain,
+			marker:   false,
+			state:    credentials.StateLocked,
+			wantPend: true,
+		},
+		{
+			name:   "marker-less available state is not pending",
+			mode:   config.CredentialStorageKeychain,
+			marker: false,
+			state:  credentials.StateAvailable,
+		},
+		{
+			name:    "loaded credentials stop the pending state",
+			mode:    config.CredentialStorageKeychain,
+			marker:  true,
+			session: credentials.Credentials{APIKey: testAPIKey},
+			state:   credentials.StateUnavailable,
+		},
+		{
+			name:     "non-keychain storage is never pending",
+			mode:     config.CredentialStoragePlaintext,
+			marker:   true,
+			state:    credentials.StateUnavailable,
+			wantPend: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			controller.stateMu.Lock()
+			controller.config.Connection.CredentialStorage = tc.mode
+			controller.config.Connection.KeychainHasCredentials = tc.marker
+			controller.sessionCredentials = tc.session
+			controller.credentialStatus = credentials.Status{Backend: "Secret Service", State: tc.state}
+			controller.stateMu.Unlock()
+
+			if got := controller.keychainLoadPending(); got != tc.wantPend {
+				t.Fatalf("keychainLoadPending() = %v, want %v", got, tc.wantPend)
+			}
+		})
+	}
+}
