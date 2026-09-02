@@ -348,9 +348,10 @@ func (a *application) openSettingsWindow() {
 	authMethod := widget.NewSelect(authMethodLabels(), nil)
 	session := a.controller.SessionCredentials()
 	credStatus := a.controller.CredentialStatus()
+	retryActive := a.controller.CredentialRetryActive()
 	// While the background retry is still loading stored keychain credentials,
 	// the empty API-key field must not read as "nothing stored".
-	apiKeyPending := keychainLoadPending(cfg.Connection, credStatus, session)
+	apiKeyPending := keychainLoadPending(cfg.Connection, credStatus, session, retryActive)
 	usernameEntry := widget.NewEntry()
 	usernameEntry.SetText(session.Username)
 	passwordEntry := widget.NewPasswordEntry()
@@ -365,8 +366,8 @@ func (a *application) openSettingsWindow() {
 	skipTLS := widget.NewCheck("", nil)
 	skipTLS.SetChecked(cfg.Connection.SkipCertificateCheck)
 	testStatus := widget.NewLabel("")
-	credentialSummary := widget.NewLabel(connectionCredentialStorageText(cfg.Connection, credStatus, session))
-	credentialWarning := widget.NewLabel(connectionCredentialWarningText(cfg.Connection, credStatus, session))
+	credentialSummary := widget.NewLabel(connectionCredentialStorageText(cfg.Connection, credStatus, session, retryActive))
+	credentialWarning := widget.NewLabel(connectionCredentialWarningText(cfg.Connection, credStatus, session, retryActive))
 	credentialWarning.Wrapping = fyne.TextWrapWord
 
 	rememberEntry := widget.NewEntry()
@@ -488,6 +489,7 @@ func (a *application) openSettingsWindow() {
 			},
 			a.controller.CredentialStatus(),
 			a.controller.SessionCredentials(),
+			a.controller.CredentialRetryActive(),
 		))
 	}
 	// Wire the select only after the tab content exists: SetSelected fires
@@ -718,30 +720,52 @@ func authMethodKey(label string) config.AuthMethod {
 	return config.AuthMethodPassword
 }
 
-// keychainLoadPending reports whether the config says credentials are stored in
-// the system keychain but none were loaded into the session and the keychain
+// keychainLoadUnresolved reports whether the config says credentials are stored
+// in the system keychain but none were loaded into the session and the keychain
 // state is not "available" — the boot race, where the wallet had not finished
-// unlocking. Settings must present this as "stored, retrying" instead of an
-// empty form that reads as "nothing stored".
-func keychainLoadPending(conn config.ConnectionConfig, status credentials.Status, session credentials.Credentials) bool {
+// unlocking. Without the stored marker a "not found" reads as available
+// (nothing stored), so it does not count.
+func keychainLoadUnresolved(conn config.ConnectionConfig, status credentials.Status, session credentials.Credentials) bool {
 	return conn.CredentialStorage == config.CredentialStorageKeychain &&
 		conn.KeychainHasCredentials &&
 		session == credentials.Credentials{} &&
 		status.State != credentials.StateAvailable
 }
 
+// keychainLoadPending narrows the unresolved shape to a running background
+// retry. Once the retry has ended — an unreadable payload, an unsupported
+// keychain, or the attempt cap — the same shape is a terminal failure and is
+// presented through its status message instead of "retrying".
+func keychainLoadPending(
+	conn config.ConnectionConfig,
+	status credentials.Status,
+	session credentials.Credentials,
+	retryActive bool,
+) bool {
+	return keychainLoadUnresolved(conn, status, session) && retryActive
+}
+
 func connectionCredentialStorageText(
 	conn config.ConnectionConfig,
 	status credentials.Status,
 	session credentials.Credentials,
+	retryActive bool,
 ) string {
 	switch conn.CredentialStorage {
 	case config.CredentialStorageKeychain:
-		if keychainLoadPending(conn, status, session) {
-			if backend := strings.TrimSpace(status.Backend); backend != "" {
-				return "System keychain (" + backend + ") — not loaded yet, retrying"
+		if keychainLoadUnresolved(conn, status, session) {
+			// A terminal failure keeps the plain summary: the warning line
+			// below carries the actionable status message.
+			if retryActive {
+				if backend := strings.TrimSpace(status.Backend); backend != "" {
+					return "System keychain (" + backend + ") — not loaded yet, retrying"
+				}
+				return "System keychain — not loaded yet, retrying"
 			}
-			return "System keychain — not loaded yet, retrying"
+			if backend := strings.TrimSpace(status.Backend); backend != "" {
+				return "System keychain (" + backend + ")"
+			}
+			return "System keychain"
 		}
 		if status.Backend != "" {
 			return "System keychain (" + status.Backend + ")"
@@ -773,8 +797,9 @@ func connectionCredentialWarningText(
 	conn config.ConnectionConfig,
 	status credentials.Status,
 	session credentials.Credentials,
+	retryActive bool,
 ) string {
-	warning := connectionStorageWarningText(conn, status, session)
+	warning := connectionStorageWarningText(conn, status, session, retryActive)
 	if conn.AuthMethod != config.AuthMethodPassword {
 		return warning
 	}
@@ -790,11 +815,19 @@ func connectionStorageWarningText(
 	conn config.ConnectionConfig,
 	status credentials.Status,
 	session credentials.Credentials,
+	retryActive bool,
 ) string {
 	switch conn.CredentialStorage {
 	case config.CredentialStorageKeychain:
-		if keychainLoadPending(conn, status, session) {
-			return keychainPendingLoadWarning
+		if keychainLoadUnresolved(conn, status, session) {
+			if retryActive {
+				return keychainPendingLoadWarning
+			}
+			// Terminal failure: no retry is running, so the stored status
+			// message (unreadable payload, exhausted attempts) is the warning.
+			if message := strings.TrimSpace(status.Message); message != "" {
+				return message
+			}
 		}
 		if status.State == credentials.StateAvailable {
 			return ""
@@ -1190,17 +1223,31 @@ func keychainWaitingText(status credentials.Status) string {
 }
 
 // noteFetchError records a fetch failure for the status bar. A typed
-// CredentialUnavailableError is not a connection failure: it becomes the
-// waiting hint and clears any stale connection error, while ordinary errors
-// keep the first failure until a refresh succeeds.
+// CredentialUnavailableError is not a connection failure: while the background
+// retry is running it becomes the waiting hint and clears any stale connection
+// error, and a terminal keychain failure supersedes everything with its
+// actionable message. Ordinary errors keep the first failure until a refresh
+// succeeds.
 func (a *application) noteFetchError(err error) {
 	if err == nil {
 		return
 	}
 	var waitErr *appcore.CredentialUnavailableError
 	if errors.As(err, &waitErr) {
-		a.credentialWait = keychainWaitingText(waitErr.Status)
-		a.lastError = ""
+		if waitErr.Waiting {
+			a.credentialWait = keychainWaitingText(waitErr.Status)
+			a.lastError = ""
+
+			return
+		}
+		// Terminal: no retry is coming, so the actionable message replaces any
+		// stale waiting hint or connection error.
+		message := strings.TrimSpace(waitErr.Status.Message)
+		if message == "" {
+			message = waitErr.Error()
+		}
+		a.credentialWait = ""
+		a.lastError = message
 
 		return
 	}

@@ -136,13 +136,31 @@ func TestNoteFetchErrorClassification(t *testing.T) {
 		app.noteFetchError(&appcore.CredentialUnavailableError{Status: credentials.Status{
 			Backend: "Secret Service",
 			State:   credentials.StateUnavailable,
-		}})
+		}, Waiting: true})
 
 		if app.credentialWait != "Waiting for system keychain (Secret Service)…" {
 			t.Fatalf("unexpected waiting hint: %q", app.credentialWait)
 		}
 		if app.lastError != "" {
 			t.Fatalf("expected the stale error to be cleared, got %q", app.lastError)
+		}
+	})
+
+	t.Run("terminal keychain failure supersedes the hint and the error", func(t *testing.T) {
+		stale := "Waiting for system keychain…"
+		app := &application{credentialWait: stale, lastError: "connection refused"}
+
+		app.noteFetchError(&appcore.CredentialUnavailableError{Status: credentials.Status{
+			Backend: "Secret Service",
+			State:   credentials.StateUnavailable,
+			Message: "Gave up waiting for the system keychain",
+		}})
+
+		if app.credentialWait != "" {
+			t.Fatalf("expected the stale hint to be cleared, got %q", app.credentialWait)
+		}
+		if app.lastError != "Gave up waiting for the system keychain" {
+			t.Fatalf("unexpected terminal message: %q", app.lastError)
 		}
 	})
 
@@ -393,14 +411,14 @@ func TestConnectionCredentialStorageText(t *testing.T) {
 	}, credentials.Status{
 		Backend: "Secret Service",
 		State:   credentials.StateAvailable,
-	}, credentials.Credentials{}); got != "System keychain (Secret Service)" {
+	}, credentials.Credentials{}, false); got != "System keychain (Secret Service)" {
 		t.Fatalf("unexpected keychain text: %q", got)
 	}
 
 	if got := connectionCredentialStorageText(config.ConnectionConfig{
 		AuthMethod:        config.AuthMethodPassword,
 		CredentialStorage: config.CredentialStoragePlaintext,
-	}, credentials.Status{}, credentials.Credentials{}); got != "Plain text config file" {
+	}, credentials.Status{}, credentials.Credentials{}, false); got != "Plain text config file" {
 		t.Fatalf("unexpected plaintext text: %q", got)
 	}
 
@@ -409,7 +427,7 @@ func TestConnectionCredentialStorageText(t *testing.T) {
 		CredentialStorage: config.CredentialStorageNone,
 	}, credentials.Status{}, credentials.Credentials{
 		Username: "demo",
-	}); got != "Session only" {
+	}, false); got != "Session only" {
 		t.Fatalf("unexpected session-only text: %q", got)
 	}
 
@@ -418,7 +436,7 @@ func TestConnectionCredentialStorageText(t *testing.T) {
 		CredentialStorage: config.CredentialStorageNone,
 	}, credentials.Status{}, credentials.Credentials{
 		APIKey: "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	}); got != "Session only" {
+	}, false); got != "Session only" {
 		t.Fatalf("unexpected API key session-only text: %q", got)
 	}
 
@@ -428,7 +446,7 @@ func TestConnectionCredentialStorageText(t *testing.T) {
 	}, credentials.Status{}, credentials.Credentials{
 		Username: "demo",
 		Password: "secret",
-	}); got != "Not saved" {
+	}, false); got != "Not saved" {
 		t.Fatalf("expected API key mode to ignore password credentials: %q", got)
 	}
 }
@@ -443,14 +461,14 @@ func TestConnectionCredentialWarningText(t *testing.T) {
 		Backend: "Secret Service",
 		State:   credentials.StateLocked,
 		Message: "keychain locked",
-	}, credentials.Credentials{}); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "keychain locked") {
+	}, credentials.Credentials{}, false); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "keychain locked") {
 		t.Fatalf("expected deprecation notice and keychain warning, got %q", got)
 	}
 
 	if got := connectionCredentialWarningText(config.ConnectionConfig{
 		AuthMethod:        config.AuthMethodPassword,
 		CredentialStorage: config.CredentialStoragePlaintext,
-	}, credentials.Status{}, credentials.Credentials{}); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "plain text") {
+	}, credentials.Status{}, credentials.Credentials{}, false); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "plain text") {
 		t.Fatalf("expected deprecation notice and plaintext warning, got %q", got)
 	}
 
@@ -459,7 +477,7 @@ func TestConnectionCredentialWarningText(t *testing.T) {
 		CredentialStorage: config.CredentialStorageNone,
 	}, credentials.Status{}, credentials.Credentials{
 		Username: "demo",
-	}); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "in memory") {
+	}, false); got == "" || !strings.Contains(got, deprecation) || !strings.Contains(got, "in memory") {
 		t.Fatalf("expected deprecation notice and session-only message, got %q", got)
 	}
 
@@ -468,7 +486,7 @@ func TestConnectionCredentialWarningText(t *testing.T) {
 		CredentialStorage: config.CredentialStorageKeychain,
 	}, credentials.Status{
 		State: credentials.StateAvailable,
-	}, credentials.Credentials{}); got != deprecation {
+	}, credentials.Credentials{}, false); got != deprecation {
 		t.Fatalf("expected only the deprecation notice, got %q", got)
 	}
 
@@ -477,14 +495,14 @@ func TestConnectionCredentialWarningText(t *testing.T) {
 		CredentialStorage: config.CredentialStorageKeychain,
 	}, credentials.Status{
 		State: credentials.StateAvailable,
-	}, credentials.Credentials{}); got != "" {
+	}, credentials.Credentials{}, false); got != "" {
 		t.Fatalf("expected no warning for API key auth, got %q", got)
 	}
 
 	if got := connectionCredentialWarningText(config.ConnectionConfig{
 		AuthMethod:        config.AuthMethodAPIKey,
 		CredentialStorage: config.CredentialStoragePlaintext,
-	}, credentials.Status{}, credentials.Credentials{}); got != "Warning: The API key is stored in plain text in the local config file." {
+	}, credentials.Status{}, credentials.Credentials{}, false); got != "Warning: The API key is stored in plain text in the local config file." {
 		t.Fatalf("unexpected API key plaintext warning: %q", got)
 	}
 
@@ -493,7 +511,7 @@ func TestConnectionCredentialWarningText(t *testing.T) {
 		CredentialStorage: config.CredentialStorageNone,
 	}, credentials.Status{}, credentials.Credentials{
 		APIKey: "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	}); got != "The API key is stored only in memory for this run." {
+	}, false); got != "The API key is stored only in memory for this run." {
 		t.Fatalf("unexpected API key session-only message: %q", got)
 	}
 }
@@ -514,25 +532,25 @@ func TestKeychainPendingLoadSummaryAndWarning(t *testing.T) {
 	}
 
 	t.Run("marker plus locked state reads as retrying", func(t *testing.T) {
-		summary := connectionCredentialStorageText(pending, lockedStatus, credentials.Credentials{})
+		summary := connectionCredentialStorageText(pending, lockedStatus, credentials.Credentials{}, true)
 		if summary != "System keychain (Secret Service) — not loaded yet, retrying" {
 			t.Fatalf("unexpected pending summary: %q", summary)
 		}
-		if got := connectionCredentialWarningText(pending, lockedStatus, credentials.Credentials{}); got != keychainPendingLoadWarning {
+		if got := connectionCredentialWarningText(pending, lockedStatus, credentials.Credentials{}, true); got != keychainPendingLoadWarning {
 			t.Fatalf("unexpected pending warning: %q", got)
 		}
-		if !keychainLoadPending(pending, lockedStatus, credentials.Credentials{}) {
+		if !keychainLoadPending(pending, lockedStatus, credentials.Credentials{}, true) {
 			t.Fatal("expected the pending predicate to hold")
 		}
 	})
 
 	t.Run("loaded credentials stop the pending state", func(t *testing.T) {
 		session := credentials.Credentials{APIKey: "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
-		summary := connectionCredentialStorageText(pending, lockedStatus, session)
+		summary := connectionCredentialStorageText(pending, lockedStatus, session, true)
 		if summary != "System keychain (Secret Service)" {
 			t.Fatalf("unexpected loaded summary: %q", summary)
 		}
-		if keychainLoadPending(pending, lockedStatus, session) {
+		if keychainLoadPending(pending, lockedStatus, session, true) {
 			t.Fatal("expected the pending predicate to be false with session credentials")
 		}
 	})
@@ -545,14 +563,14 @@ func TestKeychainPendingLoadSummaryAndWarning(t *testing.T) {
 			State:   credentials.StateAvailable,
 		}
 
-		summary := connectionCredentialStorageText(markerless, notStored, credentials.Credentials{})
+		summary := connectionCredentialStorageText(markerless, notStored, credentials.Credentials{}, true)
 		if summary != "System keychain (Secret Service)" {
 			t.Fatalf("unexpected markerless summary: %q", summary)
 		}
-		if got := connectionCredentialWarningText(markerless, notStored, credentials.Credentials{}); got != "" {
+		if got := connectionCredentialWarningText(markerless, notStored, credentials.Credentials{}, true); got != "" {
 			t.Fatalf("unexpected markerless warning: %q", got)
 		}
-		if keychainLoadPending(markerless, notStored, credentials.Credentials{}) {
+		if keychainLoadPending(markerless, notStored, credentials.Credentials{}, true) {
 			t.Fatal("expected the pending predicate to be false without the marker")
 		}
 	})
@@ -561,10 +579,51 @@ func TestKeychainPendingLoadSummaryAndWarning(t *testing.T) {
 		markerless := pending
 		markerless.KeychainHasCredentials = false
 
-		got := connectionStorageWarningText(markerless, lockedStatus, credentials.Credentials{})
+		got := connectionStorageWarningText(markerless, lockedStatus, credentials.Credentials{}, true)
 		want := "Warning: Credentials are configured to use the system keychain, but it is currently unavailable. keychain locked"
 		if got != want {
 			t.Fatalf("unexpected unavailable warning:\n got: %q\nwant: %q", got, want)
+		}
+	})
+
+	// After the retry loop gave up (or hit a terminal state) nothing is
+	// retrying anymore, so Settings must surface the status message instead of
+	// claiming a retry is running.
+	t.Run("terminal failure stops reading as retrying", func(t *testing.T) {
+		gaveUp := credentials.Status{
+			Backend: "Secret Service",
+			State:   credentials.StateUnavailable,
+			Message: "Gave up waiting for the system keychain; open Settings > Connection and re-enter the credentials.",
+		}
+
+		summary := connectionCredentialStorageText(pending, gaveUp, credentials.Credentials{}, false)
+		if summary != "System keychain (Secret Service)" {
+			t.Fatalf("unexpected terminal summary: %q", summary)
+		}
+		want := "Gave up waiting for the system keychain; open Settings > Connection and re-enter the credentials."
+		if got := connectionCredentialWarningText(pending, gaveUp, credentials.Credentials{}, false); got != want {
+			t.Fatalf("unexpected terminal warning:\n got: %q\nwant: %q", got, want)
+		}
+		if keychainLoadPending(pending, gaveUp, credentials.Credentials{}, false) {
+			t.Fatal("expected the pending predicate to be false without an active retry")
+		}
+		if !keychainLoadUnresolved(pending, gaveUp, credentials.Credentials{}) {
+			t.Fatal("expected the shape to stay unresolved")
+		}
+	})
+
+	t.Run("terminal invalid payload keeps its message", func(t *testing.T) {
+		invalid := credentials.Status{
+			Backend: "Secret Service",
+			State:   credentials.StateInvalid,
+			Message: "decode keychain credentials: invalid character",
+		}
+
+		if got := connectionCredentialWarningText(pending, invalid, credentials.Credentials{}, false); got != invalid.Message {
+			t.Fatalf("unexpected terminal warning: %q", got)
+		}
+		if keychainLoadPending(pending, invalid, credentials.Credentials{}, false) {
+			t.Fatal("expected an invalid payload to never read as retrying")
 		}
 	})
 }
