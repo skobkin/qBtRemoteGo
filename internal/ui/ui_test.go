@@ -2,8 +2,13 @@ package ui
 
 import (
 	"errors"
+	"io"
+	"log/slog"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
@@ -601,6 +606,84 @@ func formItemTexts(items []*widget.FormItem) []string {
 		texts = append(texts, item.Text)
 	}
 	return texts
+}
+
+// newPollTestController builds a controller with credential storage disabled so
+// constructing it never touches the real system keychain.
+func newPollTestController(t *testing.T) *appcore.Controller {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	cfg := config.Default()
+	cfg.Connection.CredentialStorage = config.CredentialStorageNone
+	cfg.UI.ActivePollSeconds = 3
+	cfg.UI.BackgroundPollSeconds = 30
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	controller, err := appcore.NewController(path, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+
+	return controller
+}
+
+func TestPollIntervalSwitchesOnVisibility(t *testing.T) {
+	app := &application{controller: newPollTestController(t)}
+	app.windowVisible.Store(true)
+
+	if got := app.pollInterval(); got != 3*time.Second {
+		t.Fatalf("unexpected active interval: %v", got)
+	}
+
+	app.windowVisible.Store(false)
+	if got := app.pollInterval(); got != 30*time.Second {
+		t.Fatalf("unexpected background interval: %v", got)
+	}
+}
+
+// The poll goroutine reads the visibility flag while UI callbacks flip it; the
+// stress is only meaningful under -race.
+func TestPollIntervalConcurrentVisibilityFlip(t *testing.T) {
+	app := &application{controller: newPollTestController(t)}
+	app.windowVisible.Store(true)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			app.windowVisible.Store(!app.windowVisible.Load())
+		}
+	}()
+
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		_ = app.pollInterval()
+	}
+	close(stop)
+	wg.Wait()
+}
+
+func TestCurrentServerVersionDefault(t *testing.T) {
+	app := &application{}
+	if got := app.currentServerVersion(); got != "" {
+		t.Fatalf("unexpected default server version: %q", got)
+	}
+
+	app.serverVersion.Store("5.2.5")
+	if got := app.currentServerVersion(); got != "5.2.5" {
+		t.Fatalf("unexpected server version: %q", got)
+	}
 }
 
 func equalStrings(got []string, want []string) bool {

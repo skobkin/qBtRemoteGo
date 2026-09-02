@@ -41,19 +41,24 @@ type application struct {
 	controller *appcore.Controller
 	logManager *logging.Manager
 
-	allTorrents       []qbt.Torrent
-	visibleTorrents   []qbt.Torrent
-	selection         map[string]bool
-	selectionAnchor   string
-	filterQuery       string
-	transfer          qbt.TransferInfo
-	serverState       qbt.ServerState
-	serverStateKnown  bool
-	connectionState   connectionState
-	serverVersion     string
-	lastError         string
-	credentialWait    string
-	windowVisible     bool
+	allTorrents      []qbt.Torrent
+	visibleTorrents  []qbt.Torrent
+	selection        map[string]bool
+	selectionAnchor  string
+	filterQuery      string
+	transfer         qbt.TransferInfo
+	serverState      qbt.ServerState
+	serverStateKnown bool
+	connectionState  connectionState
+	// serverVersion is written by the UI thread (refresh, settings save) and
+	// read by the poll goroutine when deciding whether to probe the version;
+	// it holds a string.
+	serverVersion  atomic.Value
+	lastError      string
+	credentialWait string
+	// windowVisible is written by UI callbacks and read by the poll goroutine
+	// to pick the refresh interval.
+	windowVisible     atomic.Bool
 	trayAvailable     bool
 	settingsWindow    fyne.Window
 	pendingInvocation appcore.InvocationBatch
@@ -133,17 +138,17 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	window.SetIcon(resources.AppIcon())
 
 	ui := &application{
-		fyApp:         fyApp,
-		window:        window,
-		logger:        logManager.Logger("ui"),
-		controller:    controller,
-		logManager:    logManager,
-		selection:     map[string]bool{},
-		detailsState:  newTorrentDetailsState(),
-		rowTaps:       rowTapSequencer{interval: torrentDoubleTapInterval},
-		windowVisible: true,
-		statusLabel:   widget.NewLabel(""),
+		fyApp:        fyApp,
+		window:       window,
+		logger:       logManager.Logger("ui"),
+		controller:   controller,
+		logManager:   logManager,
+		selection:    map[string]bool{},
+		detailsState: newTorrentDetailsState(),
+		rowTaps:      rowTapSequencer{interval: torrentDoubleTapInterval},
+		statusLabel:  widget.NewLabel(""),
 	}
+	ui.windowVisible.Store(true)
 
 	ui.buildMainWindow()
 	ui.configureTray()
@@ -154,7 +159,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 
 	startHidden := !setupNeeded && controller.Config().UI.StartMinimizedToTray && ui.trayAvailable && initialInvocation.Empty() && startupSyncWarnings == ""
 	if startHidden {
-		ui.windowVisible = false
+		ui.windowVisible.Store(false)
 	} else {
 		window.Show()
 	}
@@ -281,7 +286,7 @@ func (a *application) bindCloseBehavior() {
 		return
 	}
 	a.window.SetCloseIntercept(func() {
-		a.windowVisible = false
+		a.windowVisible.Store(false)
 		a.window.Hide()
 	})
 }
@@ -298,7 +303,7 @@ func (a *application) configureTray() {
 		speedItem:  fyne.NewMenuItem("Down 0 B/s | Up 0 B/s", nil),
 		showItem: fyne.NewMenuItem("Open main window", func() {
 			fyne.Do(func() {
-				a.windowVisible = true
+				a.windowVisible.Store(true)
 				a.window.Show()
 				a.window.RequestFocus()
 			})
@@ -312,7 +317,7 @@ func (a *application) configureTray() {
 	desk.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
 	systray.SetOnTapped(func() {
 		fyne.Do(func() {
-			a.windowVisible = true
+			a.windowVisible.Store(true)
 			a.window.Show()
 			a.window.RequestFocus()
 		})
@@ -512,7 +517,7 @@ func (a *application) openSettingsWindow() {
 		// The connection settings may have changed (e.g. a different server URL),
 		// so the cached server version no longer applies; the next connected
 		// refresh probes it again.
-		a.serverVersion = ""
+		a.serverVersion.Store("")
 		a.window.SetTitle(mainWindowTitle(a.connectionState, ""))
 		a.refreshDetailsPresentation()
 		a.ensureDetailsFocusForSelection()
@@ -661,7 +666,7 @@ func mergeInvocationBatches(dst, src appcore.InvocationBatch) appcore.Invocation
 func (a *application) handleOrDeferInvocation(batch appcore.InvocationBatch) {
 	if needsConnectionSetup(a.controller.Config()) {
 		a.deferInvocationUntilConnectionSetup(batch)
-		a.windowVisible = true
+		a.windowVisible.Store(true)
 		a.window.Show()
 		a.window.RequestFocus()
 		a.openSettingsWindow()
@@ -820,7 +825,7 @@ func connectionStorageWarningText(
 
 func (a *application) handleInvocation(batch appcore.InvocationBatch) {
 	a.logger.Info("handling activation in UI", "magnet_links", batch.MagnetLinks, "torrent_files", batch.TorrentFiles)
-	a.windowVisible = true
+	a.windowVisible.Store(true)
 	a.window.Show()
 	a.window.RequestFocus()
 
@@ -1233,15 +1238,29 @@ func (a *application) refreshStatusIcons() {
 	}
 }
 
+// pollInterval picks the refresh cadence: the active interval while the main
+// window is shown, the slower background one while it is hidden to the tray.
+// currentServerVersion returns the last known qBittorrent version, or "" while
+// unknown; safe for the poll goroutine to read while the UI thread updates it.
+func (a *application) currentServerVersion() string {
+	version, _ := a.serverVersion.Load().(string)
+
+	return version
+}
+
+func (a *application) pollInterval() time.Duration {
+	cfg := a.controller.Config()
+	if a.windowVisible.Load() {
+		return time.Duration(cfg.UI.ActivePollSeconds) * time.Second
+	}
+
+	return time.Duration(cfg.UI.BackgroundPollSeconds) * time.Second
+}
+
 func (a *application) pollLoop() {
 	a.refreshNow()
 	for {
-		cfg := a.controller.Config()
-		interval := time.Duration(cfg.UI.ActivePollSeconds) * time.Second
-		if !a.windowVisible {
-			interval = time.Duration(cfg.UI.BackgroundPollSeconds) * time.Second
-		}
-		time.Sleep(interval)
+		time.Sleep(a.pollInterval())
 		a.refreshNow()
 	}
 }
@@ -1259,7 +1278,7 @@ func (a *application) refreshNow() {
 	// version is forgotten here and probed again once the connection is back.
 	var serverVersion string
 	var serverVersionErr error
-	if err == nil && a.serverVersion == "" {
+	if err == nil && a.currentServerVersion() == "" {
 		serverVersion, serverVersionErr = a.controller.FetchServerVersion(ctx)
 	}
 
@@ -1272,12 +1291,12 @@ func (a *application) refreshNow() {
 			if serverVersionErr != nil {
 				a.logger.Debug("load server version", "error", serverVersionErr)
 			} else if version := strings.TrimSpace(serverVersion); version != "" {
-				a.serverVersion = version
+				a.serverVersion.Store(version)
 			}
 		} else {
 			a.noteFetchError(err)
 			a.connectionState = connectionStateDisconnected
-			a.serverVersion = ""
+			a.serverVersion.Store("")
 		}
 		if transferErr == nil {
 			a.transfer = transfer
@@ -1290,7 +1309,7 @@ func (a *application) refreshNow() {
 		} else {
 			a.noteFetchError(serverStateErr)
 		}
-		if title := mainWindowTitle(a.connectionState, a.serverVersion); title != a.window.Title() {
+		if title := mainWindowTitle(a.connectionState, a.currentServerVersion()); title != a.window.Title() {
 			a.window.SetTitle(title)
 		}
 		a.refreshVisibleTorrents()
