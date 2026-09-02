@@ -102,6 +102,27 @@ func TestSetTorrentAppliesSelectionState(t *testing.T) {
 	}
 }
 
+// widget.List.Refresh remeasures its template by calling CreateItem, so every
+// poll mints a row that is never bound or shown. Only bound rows may be
+// tracked: the selection scan would otherwise retain and walk one dead widget
+// per refresh.
+func TestListRefreshDoesNotRetainTemplateRows(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+
+	bound := len(app.listRows)
+	if bound == 0 {
+		t.Fatal("expected bound rows to be tracked")
+	}
+
+	for i := 0; i < 5; i++ {
+		app.list.Refresh()
+	}
+
+	if got := len(app.listRows); got != bound {
+		t.Fatalf("tracked rows grew from %d to %d across list refreshes", bound, got)
+	}
+}
+
 // The compact-rows setting must flow into both min-size sources the list
 // measures (the row widget and its content layout) and re-layout the visible
 // rows on a plain list refresh.

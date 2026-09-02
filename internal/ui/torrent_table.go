@@ -128,6 +128,9 @@ type torrentListRow struct {
 	// selectedShown mirrors the selection background's visibility so rows whose
 	// selection state did not change skip the repaint entirely.
 	selectedShown bool
+	// tracked marks rows that registered themselves on the application for the
+	// targeted selection refresh; see setTorrent.
+	tracked bool
 }
 
 type columnResizeHandle struct {
@@ -434,10 +437,6 @@ func newTorrentListRow(app *application) *torrentListRow {
 	)
 	row.root = container.NewStack(row.background, row.hoverBG, row.content)
 	row.ExtendBaseWidget(row)
-	// Track the row for the targeted selection refresh. List recycles rows and
-	// never destroys them while the window lives, so the slice stays bounded by
-	// the visible row count.
-	app.listRows = append(app.listRows, row)
 	return row
 }
 
@@ -459,6 +458,16 @@ func (r *torrentListRow) setSelected(selected bool) {
 }
 
 func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
+	// Register the row for the targeted selection refresh on its first bind.
+	// List.Refresh remeasures its template through CreateItem on every poll,
+	// and those rows are never bound or shown, so registering in the
+	// constructor would retain one dead row per refresh. Bound rows are pooled
+	// and reused while the window lives, so the tracked set stays bounded by
+	// the peak visible row count.
+	if !r.tracked {
+		r.tracked = true
+		r.app.listRows = append(r.app.listRows, r)
+	}
 	r.hash = torrent.Hash
 	r.background.FillColor = theme.Color(theme.ColorNameSelection)
 	r.setSelected(r.app.selection[torrent.Hash])
