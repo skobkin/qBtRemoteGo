@@ -38,6 +38,14 @@ type Controller struct {
 	// building a client under the lock is cheap.
 	cachedClient       *qbt.Client
 	cachedClientConfig qbt.ClientConfig
+
+	// Background keychain retry state (see credential_retry.go).
+	// credentialRetryActive is guarded by stateMu; the channels are closed at
+	// most once, guarded by credentialRetryOnce.
+	credentialRetryActive bool
+	credentialRetryStop   chan struct{}
+	credentialRetryDone   chan struct{}
+	credentialRetryOnce   sync.Once
 }
 
 type AddDialogData struct {
@@ -84,14 +92,22 @@ func newController(configPath string, logger *slog.Logger, store credentials.Sto
 	}
 
 	controller := &Controller{
-		configPath:      configPath,
-		config:          cfg,
-		logger:          logger,
-		platform:        platform.NewManager(logger),
-		credentialStore: store,
+		configPath:          configPath,
+		config:              cfg,
+		logger:              logger,
+		platform:            platform.NewManager(logger),
+		credentialStore:     store,
+		credentialRetryStop: make(chan struct{}),
+		credentialRetryDone: make(chan struct{}),
 	}
 	if err := controller.loadSessionCredentials(context.Background()); err != nil {
 		return nil, err
+	}
+	// Stored credentials that were not loaded yet (e.g. the wallet was still
+	// unlocking at boot) are re-read in the background instead of failing the
+	// whole session.
+	if controller.keychainLoadPending() {
+		controller.startCredentialRetryLoop()
 	}
 
 	return controller, nil
@@ -898,23 +914,33 @@ func (c *Controller) persistConfig(syncIntegrations bool, mutate func(cfg *confi
 	return true, nil
 }
 
+// loadSessionCredentials runs once at construction, before any other
+// goroutine touches the controller, so its direct field writes are safe. Every
+// keychain call is bounded: an unreachable or slow wallet no longer blocks
+// startup indefinitely — the controller starts with empty credentials and the
+// retry loop takes over (see credential_retry.go).
 func (c *Controller) loadSessionCredentials(ctx context.Context) error {
-	status := c.credentialStore.Status(ctx)
-	c.credentialStatus = status
-
 	method := c.config.Connection.AuthMethod
 	switch c.config.Connection.CredentialStorage {
 	case config.CredentialStorageKeychain:
-		creds, err := c.credentialStore.Get(ctx)
+		creds, err := callWithTimeout(startupCredentialTimeout, func() (credentials.Credentials, error) {
+			return c.credentialStore.Get(ctx)
+		})
 		if err != nil {
+			status := keychainLoadStatus(c.config.Connection.KeychainHasCredentials, err)
+			c.credentialStatus = status
 			c.sessionCredentials = credentials.Credentials{}
-			c.credentialStatus = c.statusFromError(err)
-			c.logger.Warn("system keychain credentials unavailable", "backend", c.credentialStatus.Backend, "state", c.credentialStatus.State, "error", err)
+			c.logger.Warn("system keychain credentials unavailable at startup", "backend", status.Backend, "state", status.State, "error", err)
 
 			return nil
 		}
 		method = c.reconcileAuthMethod(method, creds)
 		c.sessionCredentials = canonicalCredentials(method, creds)
+		c.credentialStatus = credentials.Status{
+			Backend: credentials.BackendName(),
+			State:   credentials.StateAvailable,
+			Message: "System keychain is available.",
+		}
 
 		return nil
 	case config.CredentialStoragePlaintext:
@@ -925,15 +951,30 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 		}
 		method = c.reconcileAuthMethod(method, creds)
 		c.sessionCredentials = canonicalCredentials(method, creds)
+		c.credentialStatus = credentials.Status{
+			Backend: credentials.BackendName(),
+			State:   credentials.StateAvailable,
+			Message: "Credentials are stored in the local config file.",
+		}
 
 		return nil
 	case config.CredentialStorageNone:
 		c.sessionCredentials = credentials.Credentials{}
+		c.credentialStatus = credentials.Status{
+			Backend: credentials.BackendName(),
+			State:   credentials.StateAvailable,
+			Message: "Credential storage is disabled.",
+		}
 
 		return nil
 	default:
 		if c.config.Connection.Username == "" && c.config.Connection.Password == "" && c.config.Connection.APIKey == "" {
 			c.sessionCredentials = credentials.Credentials{}
+			c.credentialStatus = credentials.Status{
+				Backend: credentials.BackendName(),
+				State:   credentials.StateAvailable,
+				Message: "No credentials are stored yet.",
+			}
 
 			return nil
 		}
@@ -946,12 +987,17 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 		method = c.reconcileAuthMethod(method, legacy)
 		legacy = canonicalCredentials(method, legacy)
 		c.sessionCredentials = legacy
+
+		status := boundedKeychainStatus(startupCredentialTimeout, c.credentialStore)
+		c.credentialStatus = status
 		if status.State != credentials.StateAvailable {
 			c.logger.Warn("legacy plaintext credentials remain because system keychain is unavailable", "backend", status.Backend, "state", status.State)
 
 			return nil
 		}
-		if err := c.credentialStore.Set(ctx, legacy); err != nil {
+		if _, err := callWithTimeout(startupCredentialTimeout, func() (struct{}, error) {
+			return struct{}{}, c.credentialStore.Set(ctx, legacy)
+		}); err != nil {
 			c.credentialStatus = c.statusFromError(err)
 			c.logger.Warn("migrate plaintext credentials to system keychain", "error", err, "backend", c.credentialStatus.Backend, "state", c.credentialStatus.State)
 
@@ -1184,6 +1230,18 @@ func connectionClientConfig(cfg config.ConnectionConfig, creds credentials.Crede
 func (c *Controller) client() (*qbt.Client, error) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
+
+	// While the background retry is still trying to load stored keychain
+	// credentials, fetches must fail with a typed "waiting" error instead of
+	// connecting with empty credentials (in password mode empty credentials
+	// are otherwise legal and would just fail at login with a confusing
+	// message).
+	if c.config.Connection.CredentialStorage == config.CredentialStorageKeychain &&
+		c.config.Connection.KeychainHasCredentials &&
+		c.credentialRetryActive &&
+		c.sessionCredentials == (credentials.Credentials{}) {
+		return nil, &CredentialUnavailableError{Status: c.credentialStatus}
+	}
 
 	qcfg, err := connectionClientConfig(c.config.Connection, c.sessionCredentials)
 	if err != nil {

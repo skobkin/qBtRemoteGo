@@ -1232,7 +1232,11 @@ func newTestController(t *testing.T, cfg config.AppConfig, store credentials.Sto
 		t.Fatalf("new controller: %v", err)
 	}
 	controller.platform = nil
-	controller.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Swap the logger through the locked setter: the keychain retry loop may
+	// already be running and reads the logger under stateMu.
+	controller.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	controller.platform = nil
+	t.Cleanup(controller.stopCredentialRetries)
 
 	return controller
 }
