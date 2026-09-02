@@ -429,6 +429,46 @@ func TestHoverLabelMouseInDelayedShowAppearsAfterDelay(t *testing.T) {
 	}
 }
 
+// recordingHoverTarget counts the enter/leave notifications a hover-capable
+// cell forwards to its owning row.
+type recordingHoverTarget struct{ ins, outs int }
+
+func (t *recordingHoverTarget) hoverIn()  { t.ins++ }
+func (t *recordingHoverTarget) hoverOut() { t.outs++ }
+
+func TestHoverLabelNotifiesRowTargetOnHover(t *testing.T) {
+	test.NewTempApp(t)
+
+	layer := newTooltipOverlay()
+	layer.Resize(fyne.NewSize(320, 240))
+	manager := newHoverTooltipManager(layer)
+	target := &recordingHoverTarget{}
+
+	cell := newHoverLabel(manager, 0, target)
+	// The fyne test driver runs fyne.Do callbacks inline on the timer
+	// goroutine, so a live hide timer would race the test goroutine. Disable
+	// the timer and drive finishHide directly (see hoverTooltipOwner.hideDelay).
+	cell.hideDelay = time.Hour
+	cell.Resize(fyne.NewSize(80, 20))
+	win := test.NewWindow(container.NewStack(cell, layer))
+	defer win.Close()
+	win.Resize(fyne.NewSize(320, 240))
+
+	fyne.DoAndWait(func() {
+		cell.MouseIn(nil)
+	})
+	if target.ins != 1 {
+		t.Fatalf("expected one hoverIn on the row target, got %d", target.ins)
+	}
+
+	fyne.DoAndWait(func() {
+		cell.MouseOut()
+	})
+	if target.outs != 1 {
+		t.Fatalf("expected one hoverOut on the row target, got %d", target.outs)
+	}
+}
+
 func newTestApplication(t *testing.T) *application {
 	t.Helper()
 	layer := newTooltipOverlay()
@@ -514,5 +554,76 @@ func TestRowHoverInCancelsPendingHoverOut(t *testing.T) {
 
 	if !row.hoverBG.Visible() {
 		t.Fatalf("hover background should remain visible after re-entry cancels pending hoverOut")
+	}
+}
+
+// The content row reproduces the list's row hover tint: its hover-capable
+// cells swallow the events the list row would otherwise receive.
+func TestDetailsContentRowHoverShowsBackground(t *testing.T) {
+	test.NewTempApp(t)
+
+	app := newTestApplication(t)
+	row := newDetailsContentRow(app)
+	// The fyne test driver runs fyne.Do callbacks inline on the timer
+	// goroutine, so a live 50 ms timer would write widget state concurrently
+	// with the assertions. Disable the timer and drive the delayed hide here.
+	row.hoverOutDelay = time.Hour
+	win := test.NewWindow(row)
+	defer win.Close()
+	win.Resize(fyne.NewSize(totalContentWidth(), contentRowHeight))
+
+	if row.hoverBG.Visible() {
+		t.Fatal("hover background should start hidden")
+	}
+
+	// A cell enters: the row must learn about it through the hoverTarget.
+	fyne.DoAndWait(func() {
+		row.size.MouseIn(nil)
+	})
+	if !row.hoverBG.Visible() {
+		t.Fatal("hover background should be visible after a cell hover")
+	}
+
+	fyne.DoAndWait(func() {
+		row.hoverOut()
+	})
+	if !row.hoverBG.Visible() {
+		t.Fatal("hover background should remain visible while the hide delay is pending")
+	}
+
+	fyne.DoAndWait(row.finishHoverOut)
+
+	if row.hoverBG.Visible() {
+		t.Fatal("hover background should be hidden after the hide delay elapsed")
+	}
+}
+
+func TestDetailsContentRowNameTooltipUsesFullPath(t *testing.T) {
+	test.NewTempApp(t)
+
+	app := newTestApplication(t)
+	app.tooltipLayer.Resize(fyne.NewSize(320, 240))
+	row := newDetailsContentRow(app)
+	row.Resize(fyne.NewSize(totalContentWidth(), contentRowHeight))
+	full := "data/movies/Some.Extremely.Long.Directory.Name.2026.1080p.WEB-DL.x264-GROUP/file.mkv"
+	row.SetRow(&contentVisibleRow{node: &contentNode{
+		name:     "file.mkv",
+		path:     full,
+		priority: contentPriorityNormal,
+	}})
+	win := test.NewWindow(container.NewWithoutLayout(row, app.tooltipLayer))
+	defer win.Close()
+	win.Resize(fyne.NewSize(800, 600))
+
+	if row.name.fullText != full {
+		t.Fatalf("name hover text %q, want the full path %q", row.name.fullText, full)
+	}
+
+	fyne.DoAndWait(func() {
+		row.name.MouseIn(nil)
+	})
+
+	if len(app.tooltipLayer.layer.Objects) != 1 {
+		t.Fatalf("expected a tooltip on the truncated name, got %d objects", len(app.tooltipLayer.layer.Objects))
 	}
 }

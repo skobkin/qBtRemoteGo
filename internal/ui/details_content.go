@@ -5,9 +5,12 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -88,18 +91,24 @@ type detailsContentHeader struct {
 
 type detailsContentRow struct {
 	widget.BaseWidget
-	app          *application
-	root         *fyne.Container
-	nameCell     *fyne.Container
-	checkbox     *widget.Label
-	expander     *contentExpanderToggle
-	name         *widget.Label
-	size         *widget.Label
-	progress     *widget.ProgressBar
-	priority     *widget.Label
-	remaining    *widget.Label
-	availability *widget.Label
-	current      *contentVisibleRow
+	app     *application
+	root    *fyne.Container
+	hoverBG *canvas.Rectangle
+	// nameCell is the name column: the expander toggle plus the name label,
+	// indented by tree depth.
+	nameCell      *fyne.Container
+	checkbox      *widget.Label
+	expander      *contentExpanderToggle
+	name          *hoverLabel
+	size          *hoverLabel
+	progress      *widget.ProgressBar
+	priority      *hoverLabel
+	remaining     *hoverLabel
+	availability  *hoverLabel
+	current       *contentVisibleRow
+	hovered       bool
+	hoverTimer    *time.Timer
+	hoverOutDelay time.Duration
 }
 
 type contentHeaderLayout struct{}
@@ -393,24 +402,27 @@ func (t *contentExpanderToggle) SetExpanded(open bool) {
 
 func newDetailsContentRow(app *application) *detailsContentRow {
 	row := &detailsContentRow{
-		app:          app,
-		checkbox:     widget.NewLabel(""),
-		name:         widget.NewLabel(""),
-		size:         widget.NewLabel(""),
-		progress:     widget.NewProgressBar(),
-		priority:     widget.NewLabel(""),
-		remaining:    widget.NewLabel(""),
-		availability: widget.NewLabel(""),
+		app:           app,
+		hoverBG:       canvas.NewRectangle(theme.Color(theme.ColorNameHover)),
+		hoverOutDelay: rowHoverOutDelay,
+		checkbox:      widget.NewLabel(""),
+		progress:      widget.NewProgressBar(),
 	}
-	for _, label := range []*widget.Label{row.checkbox, row.name, row.size, row.priority, row.remaining, row.availability} {
-		label.Truncation = fyne.TextTruncateEllipsis
-	}
-	row.size.Alignment = fyne.TextAlignTrailing
-	row.remaining.Alignment = fyne.TextAlignTrailing
-	row.availability.Alignment = fyne.TextAlignTrailing
+	row.hoverBG.Hide()
+	row.checkbox.Truncation = fyne.TextTruncateEllipsis
+	// Cells carry instant tooltips: like the torrent table's non-name cells,
+	// the tooltip appears only when the value is wider than its column.
+	row.name = newHoverLabel(app.tooltipManager, 0, row)
+	row.size = newHoverLabel(app.tooltipManager, 0, row)
+	row.priority = newHoverLabel(app.tooltipManager, 0, row)
+	row.remaining = newHoverLabel(app.tooltipManager, 0, row)
+	row.availability = newHoverLabel(app.tooltipManager, 0, row)
+	row.size.SetAlignment(fyne.TextAlignTrailing)
+	row.remaining.SetAlignment(fyne.TextAlignTrailing)
+	row.availability.SetAlignment(fyne.TextAlignTrailing)
 	row.expander = newContentExpanderToggle(nil)
 	row.nameCell = container.New(&contentNameLayout{row: row}, row.expander, row.name)
-	row.root = container.New(&contentRowLayout{},
+	content := container.New(&contentRowLayout{},
 		row.checkbox,
 		row.nameCell,
 		row.size,
@@ -419,8 +431,59 @@ func newDetailsContentRow(app *application) *detailsContentRow {
 		row.remaining,
 		row.availability,
 	)
+	row.root = container.NewStack(row.hoverBG, content)
 	row.ExtendBaseWidget(row)
 	return row
+}
+
+// hoverIn shows the row highlight. Hover-capable cells swallow the list's own
+// row hover tint (the driver delivers hover to the deepest Hoverable), so the
+// row reproduces it and the cells forward their enter/leave events here.
+func (r *detailsContentRow) hoverIn() {
+	if r.hoverTimer != nil {
+		r.hoverTimer.Stop()
+		r.hoverTimer = nil
+	}
+	if r.hovered {
+		return
+	}
+	r.hovered = true
+	r.hoverBG.FillColor = theme.Color(theme.ColorNameHover)
+	r.hoverBG.Show()
+	r.hoverBG.Refresh()
+}
+
+func (r *detailsContentRow) hoverOut() {
+	if r.hoverTimer != nil {
+		r.hoverTimer.Stop()
+	}
+	r.hoverTimer = time.AfterFunc(r.hoverOutDelay, func() {
+		fyne.Do(r.finishHoverOut)
+	})
+}
+
+// finishHoverOut performs the delayed part of hoverOut on the UI thread.
+func (r *detailsContentRow) finishHoverOut() {
+	if !r.hovered {
+		r.hoverTimer = nil
+
+		return
+	}
+	r.hovered = false
+	r.hoverBG.Hide()
+	r.hoverBG.Refresh()
+	r.hoverTimer = nil
+}
+
+func (r *detailsContentRow) MouseIn(*desktop.MouseEvent) {
+	r.hoverIn()
+}
+
+func (r *detailsContentRow) MouseMoved(*desktop.MouseEvent) {
+}
+
+func (r *detailsContentRow) MouseOut() {
+	r.hoverOut()
 }
 
 func (r *detailsContentRow) CreateRenderer() fyne.WidgetRenderer {
@@ -434,12 +497,18 @@ func (r *detailsContentRow) SetRow(row *contentVisibleRow) {
 	}
 	node := row.node
 	r.checkbox.SetText(contentCheckboxText(node.priority))
-	r.name.SetText(node.name)
-	r.size.SetText(appcore.HumanBytes(node.size))
+	// The name's hover text is the full path: the label shows the entry name
+	// truncated by the column, so the tooltip is what disambiguates it.
+	r.name.SetText(node.name, node.path)
+	size := appcore.HumanBytes(node.size)
+	r.size.SetText(size, size)
 	r.progress.SetValue(node.progress)
-	r.priority.SetText(contentPriorityLabel(node.priority))
-	r.remaining.SetText(appcore.HumanBytes(node.remaining))
-	r.availability.SetText(contentAvailabilityLabel(node))
+	priority := contentPriorityLabel(node.priority)
+	r.priority.SetText(priority, priority)
+	remaining := appcore.HumanBytes(node.remaining)
+	r.remaining.SetText(remaining, remaining)
+	availability := contentAvailabilityLabel(node)
+	r.availability.SetText(availability, availability)
 	if node.isDir && !row.filtering {
 		nodePath := node.path
 		r.expander.onTapped = func() {

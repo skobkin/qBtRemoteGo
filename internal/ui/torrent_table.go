@@ -140,13 +140,21 @@ type columnResizeHandle struct {
 	dragging       bool
 }
 
+// hoverTarget is notified when a hover-capable cell inside a row is entered or
+// left so the owning row can keep its highlight alive while the cursor crosses
+// the gaps between the row's cells.
+type hoverTarget interface {
+	hoverIn()
+	hoverOut()
+}
+
 type hoverLabel struct {
 	widget.BaseWidget
 	hoverTooltipOwner
 	label     *widget.Label
 	fullText  string
 	showDelay time.Duration
-	row       *torrentListRow
+	row       hoverTarget
 }
 
 type torrentHeaderLayout struct {
@@ -799,7 +807,7 @@ func (r *torrentListRow) finishHoverOut() {
 	r.hoverTimer = nil
 }
 
-func newHoverLabel(manager *hoverTooltipManager, showDelay time.Duration, row *torrentListRow) *hoverLabel {
+func newHoverLabel(manager *hoverTooltipManager, showDelay time.Duration, row hoverTarget) *hoverLabel {
 	label := widget.NewLabel("")
 	label.Truncation = fyne.TextTruncateEllipsis
 	h := &hoverLabel{
