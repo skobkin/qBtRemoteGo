@@ -618,7 +618,7 @@ func (a *application) openSettingsWindow() {
 		if credentialsUnresolved {
 			editedCreds = mergeUnloadedCredentials(editedCreds, a.controller.SessionCredentials())
 		}
-		if apiKeyRequired(updated.Connection.AuthMethod, editedCreds.APIKey, credentialsUnresolved) {
+		if apiKeyRequired(updated.Connection.AuthMethod, cfg.Connection.AuthMethod, editedCreds.APIKey, credentialsUnresolved) {
 			dialog.ShowError(errors.New("API key is required when API key authentication is selected"), win)
 			return
 		}
@@ -812,9 +812,13 @@ func mergeUnloadedCredentials(edited, stored credentials.Credentials) credential
 // apiKeyRequired reports whether saving in API-key mode with an empty key
 // field must be rejected. While a stored keychain load is unresolved, the
 // empty field means "keep the stored key", so the save goes through and the
-// controller keeps the payload.
-func apiKeyRequired(method config.AuthMethod, editedKey string, pendingLoad bool) bool {
-	return method == config.AuthMethodAPIKey && strings.TrimSpace(editedKey) == "" && !pendingLoad
+// controller keeps the payload — but only when saving the method the
+// unresolved payload belongs to. Switching methods leaves the stored payload
+// behind (canonicalCredentials drops it on save), so the new method must be
+// given a real key.
+func apiKeyRequired(method, storedMethod config.AuthMethod, editedKey string, loadUnresolved bool) bool {
+	loadUnresolved = loadUnresolved && method == storedMethod
+	return method == config.AuthMethodAPIKey && strings.TrimSpace(editedKey) == "" && !loadUnresolved
 }
 
 func connectionCredentialStorageText(

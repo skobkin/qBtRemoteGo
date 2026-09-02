@@ -654,17 +654,20 @@ func TestMergeUnloadedCredentials(t *testing.T) {
 }
 
 func TestAPIKeyRequired(t *testing.T) {
-	if !apiKeyRequired(config.AuthMethodAPIKey, "", false) {
+	if !apiKeyRequired(config.AuthMethodAPIKey, config.AuthMethodAPIKey, "", false) {
 		t.Fatal("expected an empty API key field to reject the save")
 	}
-	if apiKeyRequired(config.AuthMethodAPIKey, "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false) {
+	if apiKeyRequired(config.AuthMethodAPIKey, config.AuthMethodAPIKey, "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false) {
 		t.Fatal("did not expect a typed API key to reject the save")
 	}
-	if apiKeyRequired(config.AuthMethodPassword, "", false) {
+	if apiKeyRequired(config.AuthMethodPassword, config.AuthMethodPassword, "", false) {
 		t.Fatal("did not expect password auth to require an API key")
 	}
-	if apiKeyRequired(config.AuthMethodAPIKey, "", true) {
+	if apiKeyRequired(config.AuthMethodAPIKey, config.AuthMethodAPIKey, "", true) {
 		t.Fatal("an unresolved stored load must keep the stored key instead of rejecting the save")
+	}
+	if !apiKeyRequired(config.AuthMethodAPIKey, config.AuthMethodPassword, "", true) {
+		t.Fatal("switching to API-key auth while password credentials are unresolved must require a real key")
 	}
 }
 
