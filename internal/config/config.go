@@ -160,10 +160,15 @@ func Load(path string) (AppConfig, error) {
 	return cfg, nil
 }
 
+// Save persists the config atomically: the payload is written to a temporary
+// file in the same directory (same filesystem) and renamed into place, so a
+// crash or concurrent reader never observes a truncated or partially written
+// config.json. Concurrent Save calls remain last-writer-wins by design.
 func Save(path string, cfg AppConfig) error {
 	Normalize(&cfg)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 
@@ -173,8 +178,40 @@ func Save(path string, cfg AppConfig) error {
 	}
 	data = append(data, '\n')
 
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, ".qbtremotego-config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	if err := writeTempConfig(tmp, data); err != nil {
+		_ = os.Remove(tmpName)
+
+		return err
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+
+		return fmt.Errorf("replace config: %w", err)
+	}
+
+	return nil
+}
+
+func writeTempConfig(tmp *os.File, data []byte) error {
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+
 		return fmt.Errorf("write config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+
+		return fmt.Errorf("sync config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close config: %w", err)
 	}
 
 	return nil

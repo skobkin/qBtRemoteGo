@@ -1,9 +1,13 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -203,6 +207,94 @@ func TestSaveOmitsScrubbedKeychainCredentials(t *testing.T) {
 	text := string(data)
 	if containsAny(text, `"username":`, `"password":`, `"api_key":`) {
 		t.Fatalf("expected scrubbed config to omit credentials:\n%s", text)
+	}
+}
+
+func TestSaveLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	if err := Save(path, Default()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read config dir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Fatalf("expected no temp file leftovers, found %q", entry.Name())
+		}
+	}
+}
+
+func TestSaveCleansUpTempFileWhenTargetUnwritable(t *testing.T) {
+	dir := t.TempDir()
+	// A directory at the target path makes the final rename fail.
+	path := filepath.Join(dir, "config.json")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatalf("create dir at target path: %v", err)
+	}
+
+	if err := Save(path, Default()); err == nil {
+		t.Fatal("expected save into a directory path to fail")
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read config dir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Fatalf("expected failed save to remove its temp file, found %q", entry.Name())
+		}
+	}
+}
+
+func TestConcurrentSavesKeepConfigLoadable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	const writers = 8
+	const savesPerWriter = 25
+
+	var wg sync.WaitGroup
+	for writer := range writers {
+		wg.Add(1)
+		go func(writer int) {
+			defer wg.Done()
+
+			for i := range savesPerWriter {
+				cfg := Default()
+				cfg.Connection.URL = fmt.Sprintf("https://writer-%d.example.invalid/%d", writer, i)
+				if err := Save(path, cfg); err != nil {
+					t.Errorf("save config: %v", err)
+
+					return
+				}
+			}
+		}(writer)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		for range writers * savesPerWriter {
+			if _, err := Load(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("load config while saving: %v", err)
+
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	<-done
+
+	if _, err := Load(path); err != nil {
+		t.Fatalf("load final config: %v", err)
 	}
 }
 
