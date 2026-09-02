@@ -64,6 +64,7 @@ type application struct {
 	pendingInvocation appcore.InvocationBatch
 
 	list           *widget.List
+	listRows       []*torrentListRow
 	tableHeader    *torrentHeaderRow
 	tablePreview   *canvas.Rectangle
 	tableScroll    *container.Scroll
@@ -1828,9 +1829,15 @@ func (a *application) pruneSelectionToVisible() {
 	}
 }
 
+// refreshTorrentSelection repaints the selection highlight. The list cannot do
+// this cheaply: List.Refresh re-renders every visible row inside the tap
+// handler, and List.RefreshItem runs the same full renderer refresh plus the
+// one row, so a plain selection switch paid for the whole table. Rows recycle,
+// so scanning the tracked row widgets and toggling only the changed selection
+// backgrounds touches exactly the affected rows.
 func (a *application) refreshTorrentSelection() {
-	if a.list != nil {
-		a.list.Refresh()
+	for _, row := range a.listRows {
+		row.setSelected(a.selection[row.hash])
 	}
 }
 

@@ -5,7 +5,102 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
+
+	"github.com/skobkin/qbtremotego/internal/qbt"
 )
+
+// newTorrentTableTestApp builds the main window with a handful of torrents so
+// the row-selection machinery can be exercised without a server.
+func newTorrentTableTestApp(t *testing.T) *application {
+	t.Helper()
+	test.NewTempApp(t)
+	app := &application{
+		fyApp:        fyne.CurrentApp(),
+		window:       fyne.CurrentApp().NewWindow("torrent table"),
+		controller:   newPollTestController(t),
+		selection:    map[string]bool{},
+		detailsState: newTorrentDetailsState(),
+		rowTaps:      rowTapSequencer{interval: torrentDoubleTapInterval},
+		statusLabel:  widget.NewLabel(""),
+	}
+	app.buildMainWindow()
+	// The test canvas defaults to a size that only fits a couple of rows; size
+	// the list so every seeded torrent gets a bound row widget.
+	app.list.Resize(fyne.NewSize(800, 400))
+	app.allTorrents = []qbt.Torrent{
+		{Hash: "hash-a", Name: "A"},
+		{Hash: "hash-b", Name: "B"},
+		{Hash: "hash-c", Name: "C"},
+	}
+	app.refreshVisibleTorrents()
+
+	for _, torrent := range app.allTorrents {
+		app.rowForTest(t, torrent.Hash)
+	}
+
+	return app
+}
+
+func (a *application) rowForTest(t *testing.T, hash string) *torrentListRow {
+	t.Helper()
+	for _, row := range a.listRows {
+		if row.hash == hash {
+			return row
+		}
+	}
+	t.Fatalf("no list row is bound to %s", hash)
+
+	return nil
+}
+
+// The selection refresh must toggle exactly the rows whose selection state
+// changed: the scan runs inside the tap handler, where a full list refresh
+// re-renders every visible row and makes selection feel laggy.
+func TestRefreshTorrentSelectionTogglesChangedRowsOnly(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+
+	app.selectOnlyTorrent("hash-a")
+	app.refreshTorrentSelection()
+	if !app.rowForTest(t, "hash-a").selectedShown {
+		t.Fatal("expected the selected row to show its selection background")
+	}
+
+	app.selectOnlyTorrent("hash-b")
+	app.refreshTorrentSelection()
+	if app.rowForTest(t, "hash-a").selectedShown {
+		t.Fatal("expected the deselected row to hide its selection background")
+	}
+	if !app.rowForTest(t, "hash-b").selectedShown {
+		t.Fatal("expected the newly selected row to show its selection background")
+	}
+	if app.rowForTest(t, "hash-c").selectedShown {
+		t.Fatal("expected an untouched row to keep its background hidden")
+	}
+
+	app.toggleTorrentSelection("hash-b")
+	app.refreshTorrentSelection()
+	if app.rowForTest(t, "hash-b").selectedShown {
+		t.Fatal("expected the toggled-off row to hide its selection background")
+	}
+}
+
+// Rows bound after the selection was made (first render, scrolling, poll
+// refresh) must pick up the current selection state.
+func TestSetTorrentAppliesSelectionState(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+
+	app.selectOnlyTorrent("hash-b")
+	app.refreshVisibleTorrents()
+
+	if !app.rowForTest(t, "hash-b").selectedShown {
+		t.Fatal("expected a row bound to the selected torrent to show its selection background")
+	}
+	if app.rowForTest(t, "hash-a").selectedShown {
+		t.Fatal("expected a row bound to an unselected torrent to hide its selection background")
+	}
+}
 
 func TestRowTapSequencer(t *testing.T) {
 	start := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)

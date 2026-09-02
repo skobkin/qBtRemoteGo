@@ -124,6 +124,9 @@ type torrentListRow struct {
 	hovered       bool
 	hoverTimer    *time.Timer
 	hoverOutDelay time.Duration
+	// selectedShown mirrors the selection background's visibility so rows whose
+	// selection state did not change skip the repaint entirely.
+	selectedShown bool
 }
 
 type columnResizeHandle struct {
@@ -159,6 +162,9 @@ type torrentTableLayout struct {
 
 func (a *application) buildTorrentTable() fyne.CanvasObject {
 	a.columnWidths = mergeColumnWidths(a.controller.Config().UI.ColumnWidths)
+	// The list is built once; drop any rows registered by an earlier build so
+	// the selection scan never touches dead widgets.
+	a.listRows = nil
 
 	a.tableHeader = newTorrentHeaderRow(a)
 	a.tablePreview = canvas.NewRectangle(theme.Color(theme.ColorNamePrimary))
@@ -399,18 +405,34 @@ func newTorrentListRow(app *application) *torrentListRow {
 	)
 	row.root = container.NewStack(row.background, row.hoverBG, row.content)
 	row.ExtendBaseWidget(row)
+	// Track the row for the targeted selection refresh. List recycles rows and
+	// never destroys them while the window lives, so the slice stays bounded by
+	// the visible row count.
+	app.listRows = append(app.listRows, row)
 	return row
 }
 
-func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
-	r.hash = torrent.Hash
-	r.background.FillColor = theme.Color(theme.ColorNameSelection)
-	if r.app.selection[torrent.Hash] {
+// setSelected syncs the row's selection background. Only the background moves:
+// Fyne has no cheap way to repaint a single list row (RefreshItem re-runs the
+// renderer's full refresh), so the selection refresh walks the tracked rows
+// and calls this directly.
+func (r *torrentListRow) setSelected(selected bool) {
+	if r.selectedShown == selected {
+		return
+	}
+	r.selectedShown = selected
+	if selected {
 		r.background.Show()
 	} else {
 		r.background.Hide()
 	}
 	r.background.Refresh()
+}
+
+func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
+	r.hash = torrent.Hash
+	r.background.FillColor = theme.Color(theme.ColorNameSelection)
+	r.setSelected(r.app.selection[torrent.Hash])
 
 	r.name.SetAlignment(fyne.TextAlignLeading)
 	r.name.SetText(torrent.Name, torrent.Name)
