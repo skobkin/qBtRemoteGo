@@ -627,3 +627,103 @@ func TestDetailsContentRowNameTooltipUsesFullPath(t *testing.T) {
 		t.Fatalf("expected a tooltip on the truncated name, got %d objects", len(app.tooltipLayer.layer.Objects))
 	}
 }
+
+func TestHoverCellLabelShowsAndClearsHoverBackground(t *testing.T) {
+	test.NewTempApp(t)
+
+	layer := newTooltipOverlay()
+	layer.Resize(fyne.NewSize(320, 240))
+	manager := newHoverTooltipManager(layer)
+
+	cell := newHoverCellLabel(manager)
+	// The fyne test driver runs fyne.Do callbacks inline on the timer
+	// goroutine, so a live hide timer would race the test goroutine. Disable
+	// the timer (see hoverTooltipOwner.hideDelay); the tint itself hides
+	// synchronously in MouseOut.
+	cell.hideDelay = time.Hour
+	cell.Resize(fyne.NewSize(80, 20))
+	win := test.NewWindow(container.NewStack(cell, layer))
+	defer win.Close()
+	win.Resize(fyne.NewSize(320, 240))
+
+	if cell.hoverBG.Visible() {
+		t.Fatal("hover background should start hidden")
+	}
+
+	fyne.DoAndWait(func() {
+		cell.MouseIn(nil)
+	})
+	if !cell.hoverBG.Visible() {
+		t.Fatal("hover background should be visible while the cell is hovered")
+	}
+
+	// A poll refresh re-binds the hovered cell to new text: the stale tint
+	// must clear even though the cursor never left the cell.
+	fyne.DoAndWait(func() {
+		cell.SetText("new text", "new text")
+	})
+	if cell.hoverBG.Visible() {
+		t.Fatal("hover background should be hidden when the cell is rebound")
+	}
+
+	fyne.DoAndWait(func() {
+		cell.MouseIn(nil)
+	})
+	if !cell.hoverBG.Visible() {
+		t.Fatal("hover background should be visible again on re-entry")
+	}
+
+	fyne.DoAndWait(func() {
+		cell.MouseOut()
+	})
+	if cell.hoverBG.Visible() {
+		t.Fatal("hover background should be hidden after mouse out")
+	}
+}
+
+// widget.Table measures its cell template to size rows and columns, so the
+// hover cell must measure exactly like the plain ellipsized label it replaces.
+func TestHoverCellLabelMinSizeMatchesPlainLabel(t *testing.T) {
+	test.NewTempApp(t)
+
+	text := "udp://tracker.example.invalid:1337/announce?key=very-long-value"
+	plain := widget.NewLabel("")
+	plain.Wrapping = fyne.TextWrapOff
+	plain.Truncation = fyne.TextTruncateEllipsis
+	plain.SetText(text)
+
+	cell := newHoverCellLabel(nil)
+	cell.SetText(text, text)
+
+	if cell.MinSize() != plain.MinSize() {
+		t.Fatalf("hover cell min size %v, want the plain label's %v", cell.MinSize(), plain.MinSize())
+	}
+}
+
+// The details tables (peers, trackers, HTTP sources) reuse the torrent-table
+// tooltip: a value wider than its fixed column shows the full text on hover.
+func TestDetailsTableViewCellShowsTooltipWhenTruncated(t *testing.T) {
+	test.NewTempApp(t)
+
+	app := newTestApplication(t)
+	app.tooltipLayer.Resize(fyne.NewSize(800, 600))
+
+	v := newDetailsTableView(detailsTrackerColumnSpecs, app.tooltipManager)
+	v.SetRows([][]string{
+		{"0", "udp://tracker.example.invalid:1337/announce?long=way-past-the-280px-column", "Working", "11", "7", "4", "9", ""},
+	})
+	cell := v.table.CreateCell().(*hoverLabel)
+	v.table.UpdateCell(widget.TableCellID{Row: 0, Col: 1}, cell)
+	cell.Resize(fyne.NewSize(80, 20))
+	win := test.NewWindow(container.NewWithoutLayout(cell, app.tooltipLayer))
+	defer win.Close()
+	win.Resize(fyne.NewSize(800, 600))
+
+	fyne.DoAndWait(func() {
+		cell.MouseIn(nil)
+	})
+
+	if len(app.tooltipLayer.layer.Objects) != 1 {
+		t.Fatalf("expected a tooltip on the truncated tracker URL, got %d objects", len(app.tooltipLayer.layer.Objects))
+	}
+}

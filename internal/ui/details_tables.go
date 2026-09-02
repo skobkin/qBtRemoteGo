@@ -48,32 +48,32 @@ var (
 )
 
 type detailsTableView struct {
-	root  *fyne.Container
-	table *widget.Table
-	specs []detailsColumnSpec
-	rows  [][]string
+	root    *fyne.Container
+	table   *widget.Table
+	specs   []detailsColumnSpec
+	rows    [][]string
+	manager *hoverTooltipManager
 }
 
-func newDetailsTableView(specs []detailsColumnSpec) *detailsTableView {
+func newDetailsTableView(specs []detailsColumnSpec, manager *hoverTooltipManager) *detailsTableView {
 	v := &detailsTableView{
-		root:  container.NewStack(),
-		specs: specs,
+		root:    container.NewStack(),
+		specs:   specs,
+		manager: manager,
 	}
 	v.table = widget.NewTable(
 		func() (int, int) {
 			return len(v.rows), len(v.specs)
 		},
 		func() fyne.CanvasObject {
-			label := widget.NewLabel("")
-			label.Wrapping = fyne.TextWrapOff
-			label.Truncation = fyne.TextTruncateEllipsis
-			return label
+			return newHoverCellLabel(v.manager)
 		},
 		func(id widget.TableCellID, object fyne.CanvasObject) {
 			if id.Row < 0 || id.Row >= len(v.rows) || id.Col < 0 || id.Col >= len(v.specs) {
 				return
 			}
-			object.(*widget.Label).SetText(v.rows[id.Row][id.Col])
+			text := v.rows[id.Row][id.Col]
+			object.(*hoverLabel).SetText(text, text)
 		},
 	)
 	for index, spec := range specs {
@@ -128,7 +128,7 @@ func newDetailsTableTabView(
 		app:    app,
 		tab:    tab,
 		root:   container.NewStack(),
-		table:  newDetailsTableView(specs),
+		table:  newDetailsTableView(specs, app.tooltipManager),
 		status: newDetailsStatusChrome(app),
 		msgs:   msgs,
 		rows:   rows,

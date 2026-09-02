@@ -151,7 +151,15 @@ type hoverTarget interface {
 type hoverLabel struct {
 	widget.BaseWidget
 	hoverTooltipOwner
-	label     *widget.Label
+	label *widget.Label
+	// root is what the renderer wraps: the label itself, or a stack with an
+	// optional self-painted hover background (see hoverBG). Built in the
+	// constructor so a renderer rebuilt by Fyne's renderer cache keeps it.
+	root fyne.CanvasObject
+	// hoverBG paints the hover tint when this label is a widget.Table cell:
+	// a hoverable cell suppresses the table's built-in tint for the cell, so
+	// the cell must reproduce it. Nil in the plain (row cell) variant.
+	hoverBG   *canvas.Rectangle
 	fullText  string
 	showDelay time.Duration
 	row       hoverTarget
@@ -813,11 +821,55 @@ func newHoverLabel(manager *hoverTooltipManager, showDelay time.Duration, row ho
 	h := &hoverLabel{
 		hoverTooltipOwner: hoverTooltipOwner{manager: manager},
 		label:             label,
+		root:              label,
 		showDelay:         showDelay,
 		row:               row,
 	}
 	h.ExtendBaseWidget(h)
 	return h
+}
+
+// newHoverCellLabel returns a hover label for a widget.Table cell: it shows a
+// tooltip when its text is truncated (like the torrent-table cells) and paints
+// its own hover background, because a hoverable cell suppresses the table's
+// built-in hover tint.
+func newHoverCellLabel(manager *hoverTooltipManager) *hoverLabel {
+	label := widget.NewLabel("")
+	label.Wrapping = fyne.TextWrapOff
+	label.Truncation = fyne.TextTruncateEllipsis
+	bg := canvas.NewRectangle(theme.Color(theme.ColorNameHover))
+	bg.CornerRadius = theme.Size(theme.SizeNameSelectionRadius)
+	bg.Hide()
+	h := &hoverLabel{
+		hoverTooltipOwner: hoverTooltipOwner{manager: manager},
+		label:             label,
+		root:              container.NewStack(bg, label),
+		hoverBG:           bg,
+	}
+	h.ExtendBaseWidget(h)
+	return h
+}
+
+// showHoverBackground repaints the cell tint the table suppresses while this
+// cell handles hover; the color is re-resolved so a runtime theme switch keeps
+// the tint current.
+func (h *hoverLabel) showHoverBackground() {
+	if h.hoverBG == nil {
+		return
+	}
+	h.hoverBG.FillColor = theme.Color(theme.ColorNameHover)
+	h.hoverBG.Show()
+	h.hoverBG.Refresh()
+}
+
+// hideHoverBackground clears the tint, both on mouse-out and when the label is
+// rebound to new text while pooled (the cursor may sit still over the cell).
+func (h *hoverLabel) hideHoverBackground() {
+	if h.hoverBG == nil {
+		return
+	}
+	h.hoverBG.Hide()
+	h.hoverBG.Refresh()
 }
 
 func (h *hoverLabel) SetAlignment(alignment fyne.TextAlign) {
@@ -828,6 +880,7 @@ func (h *hoverLabel) SetAlignment(alignment fyne.TextAlign) {
 func (h *hoverLabel) SetText(display string, hover string) {
 	h.cancelShow()
 	h.hideTooltip(h)
+	h.hideHoverBackground()
 	h.label.SetText(display)
 	if strings.TrimSpace(hover) == "" {
 		h.fullText = display
@@ -840,6 +893,7 @@ func (h *hoverLabel) MouseIn(*desktop.MouseEvent) {
 	if h.row != nil {
 		h.row.hoverIn()
 	}
+	h.showHoverBackground()
 	if strings.TrimSpace(h.fullText) == "" {
 		return
 	}
@@ -865,11 +919,12 @@ func (h *hoverLabel) MouseOut() {
 	if h.row != nil {
 		h.row.hoverOut()
 	}
+	h.hideHoverBackground()
 	h.scheduleHide(h)
 }
 
 func (h *hoverLabel) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(h.label)
+	return widget.NewSimpleRenderer(h.root)
 }
 
 func clampMinZero(value float32) float32 {
