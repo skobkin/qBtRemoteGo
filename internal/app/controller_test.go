@@ -360,7 +360,6 @@ func TestSaveSettingsSessionOnlyKeepsKeychainModeDuringTemporaryOutage(t *testin
 		func(service, user, password string) error { return errors.New("keychain locked") },
 		func(service, user string) error { return nil },
 	))
-	controller.config.Connection.CredentialStorage = config.CredentialStorageKeychain
 
 	result, err := controller.SaveSettings(context.Background(), controller.Config(), credentials.Credentials{
 		Username: "temp-user",
