@@ -128,8 +128,11 @@ func (v *torrentDetailsView) emptyState() fyne.CanvasObject {
 		if v.app.currentDetailsMode() == detailsPanelModeOverlayRight {
 			text = "Double-click a torrent to open details."
 		}
+		// No Wrapping: NewCenter sizes the label to its minimum, and a wrapped
+		// label's minimum width is a one-character column (with a height of one
+		// line per character), which renders the text vertically. Both texts
+		// are short constants, so the unwrapped minimum is always readable.
 		label := widget.NewLabel(text)
-		label.Wrapping = fyne.TextWrapWord
 		v.empty = container.NewCenter(container.NewPadded(label))
 	}
 

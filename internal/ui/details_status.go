@@ -29,10 +29,17 @@ func newDetailsStatusChrome(app *application) *detailsStatusChrome {
 	}
 	c.label.Wrapping = fyne.TextWrapWord
 	c.label.Truncation = fyne.TextTruncateEllipsis
+	// The VBox below stretches the label to the full panel width, so the text
+	// centers itself through alignment. Inside a Center container the label
+	// would be sized to its minimum instead — and a wrapped label's minimum is
+	// a one-character column whose height grows by one line per character, so
+	// the message collapses and its inflated minimum can drag the bottom
+	// details pane's split height up.
+	c.label.Alignment = fyne.TextAlignCenter
 	c.retry = widget.NewButton("Retry", func() { app.retryActiveDetailsLoad() })
 	c.root = container.NewVBox(
-		container.NewCenter(container.NewPadded(c.label)),
-		container.NewCenter(c.retry),
+		container.NewPadded(c.label),
+		container.NewCenter(container.NewPadded(c.retry)),
 	)
 
 	return c
