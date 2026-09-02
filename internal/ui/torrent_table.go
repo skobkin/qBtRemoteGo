@@ -13,6 +13,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	appcore "github.com/skobkin/qbtremotego/internal/app"
+	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
@@ -274,9 +275,11 @@ func (a *application) hideColumnPreview() {
 }
 
 func (a *application) persistColumnWidths() {
-	cfg := a.controller.Config()
-	cfg.UI.ColumnWidths = cloneColumnWidths(a.columnWidths)
-	if err := a.controller.SaveLocalUI(cfg); err != nil {
+	widths := cloneColumnWidths(a.columnWidths)
+	err := a.controller.SaveLocalUI(func(cfg *config.AppConfig) {
+		cfg.UI.ColumnWidths = widths
+	})
+	if err != nil {
 		a.logger.Warn("persist column widths", "error", err)
 	}
 }

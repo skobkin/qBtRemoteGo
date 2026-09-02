@@ -40,9 +40,9 @@ func TestSaveLocalUIDoesNotSyncDesktopIntegrations(t *testing.T) {
 		t.Fatalf("new controller: %v", err)
 	}
 
-	updated := controller.Config()
-	updated.UI.FilterBy = "location"
-	if err := controller.SaveLocalUI(updated); err != nil {
+	if err := controller.SaveLocalUI(func(cfg *config.AppConfig) {
+		cfg.UI.FilterBy = "location"
+	}); err != nil {
 		t.Fatalf("SaveLocalUI() error = %v", err)
 	}
 

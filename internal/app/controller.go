@@ -163,11 +163,18 @@ func (c *Controller) SaveSettings(
 	// reach the keychain, the config file, or the session.
 	creds = canonicalCredentials(cfg.Connection.AuthMethod, creds)
 
-	current := c.Config()
-	cfg.Connection.Username = current.Connection.Username
-	cfg.Connection.Password = current.Connection.Password
-	cfg.Connection.APIKey = current.Connection.APIKey
-	cfg.Connection.CredentialStorage = current.Connection.CredentialStorage
+	// Edits are applied to the latest in-memory config (see persistConfig), not
+	// to a snapshot taken when the settings window opened, so they can never
+	// revert changes persisted in the meantime. Only the fields this form owns
+	// are written; credential fields are managed by the branches below.
+	applyEdits := func(dst *config.AppConfig) {
+		dst.Connection.URL = cfg.Connection.URL
+		dst.Connection.AuthMethod = cfg.Connection.AuthMethod
+		dst.Connection.SkipCertificateCheck = cfg.Connection.SkipCertificateCheck
+		dst.UI = cfg.UI
+		dst.Integration = cfg.Integration
+		dst.Logging = cfg.Logging
+	}
 
 	trimmedCreds := credentials.Credentials{
 		Username: strings.TrimSpace(creds.Username),
@@ -178,7 +185,7 @@ func (c *Controller) SaveSettings(
 	status := c.credentialStore.Status(ctx)
 	c.setCredentialStatus(status)
 
-	persistedMode := current.Connection.CredentialStorage
+	persistedMode := c.Config().Connection.CredentialStorage
 	if status.State == credentials.StateAvailable {
 		if err := c.credentialStore.Set(ctx, trimmedCreds); err != nil {
 			status = c.statusFromError(err)
@@ -190,14 +197,16 @@ func (c *Controller) SaveSettings(
 				}, nil
 			}
 
-			return c.saveWithFallback(cfg, trimmedCreds, persistedMode, fallback, status)
+			return c.saveWithFallback(applyEdits, trimmedCreds, persistedMode, fallback, status)
 		}
 
-		cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
-		cfg.Connection.Username = ""
-		cfg.Connection.Password = ""
-		cfg.Connection.APIKey = ""
-		saved, err := c.persistConfig(cfg, true)
+		saved, err := c.persistConfig(true, func(dst *config.AppConfig) {
+			applyEdits(dst)
+			dst.Connection.CredentialStorage = config.CredentialStorageKeychain
+			dst.Connection.Username = ""
+			dst.Connection.Password = ""
+			dst.Connection.APIKey = ""
+		})
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
@@ -208,7 +217,7 @@ func (c *Controller) SaveSettings(
 	}
 
 	if !credsChanged {
-		_, err := c.persistConfig(cfg, true)
+		_, err := c.persistConfig(true, applyEdits)
 		if err != nil {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
@@ -224,17 +233,16 @@ func (c *Controller) SaveSettings(
 		}, nil
 	}
 
-	return c.saveWithFallback(cfg, trimmedCreds, persistedMode, fallback, status)
+	return c.saveWithFallback(applyEdits, trimmedCreds, persistedMode, fallback, status)
 }
 
-func (c *Controller) SaveLocalUI(cfg config.AppConfig) error {
-	config.Normalize(&cfg)
-	saved, err := c.persistConfig(cfg, false)
-	if err != nil && !saved {
-		return err
-	}
+// SaveLocalUI persists local UI preferences without touching connection
+// settings or desktop integrations. Edits are applied to the latest in-memory
+// config (see persistConfig).
+func (c *Controller) SaveLocalUI(mutate func(cfg *config.AppConfig)) error {
+	_, err := c.persistConfig(false, mutate)
 
-	return nil
+	return err
 }
 
 func (c *Controller) SyncIntegrations() []error {
@@ -379,19 +387,20 @@ func (c *Controller) AddTorrent(ctx context.Context, data AddDialogData) error {
 }
 
 // rememberSavePath runs inside bulk-action goroutines, so it must go through
-// the locked accessors instead of touching c.config directly.
+// the locked accessors instead of touching c.config directly. The unchanged
+// pre-check works on a cheap Config() snapshot; the real read-modify-write
+// happens under persistConfig's lock, so a settings save in flight cannot be
+// reverted by a stale recent-paths list.
 func (c *Controller) rememberSavePath(path string, trigger string) {
-	cfg := c.Config()
-	config.AddRecentPath(&cfg, path)
-	if slices.Equal(cfg.UI.RecentSavePaths, c.Config().UI.RecentSavePaths) {
+	probe := c.Config()
+	config.AddRecentPath(&probe, path)
+	if slices.Equal(probe.UI.RecentSavePaths, c.Config().UI.RecentSavePaths) {
 		return
 	}
-	if err := config.Save(c.configPath, cfg); err != nil {
+	if _, err := c.persistConfig(false, func(cfg *config.AppConfig) {
+		config.AddRecentPath(cfg, path)
+	}); err != nil {
 		c.currentLogger().Warn("save config after recent path update", "trigger", trigger, "error", err)
-	} else {
-		c.stateMu.Lock()
-		c.config = cfg
-		c.stateMu.Unlock()
 	}
 }
 
@@ -844,18 +853,37 @@ func cmpFloat(a float64, b float64) int {
 	}
 }
 
-func (c *Controller) persistConfig(cfg config.AppConfig, syncIntegrations bool) (bool, error) {
+// persistConfig applies mutate to the latest in-memory config and writes the
+// result to disk and back into memory as one locked read-modify-write, so
+// concurrent savers (settings saves, recent-path updates on bulk-action
+// goroutines, keychain migration) cannot revert each other's changes. mutate
+// must replace — never edit in place — any slice or map it touches (see
+// config.AddRecentPath). The returned bool reports whether the config was
+// persisted even when err is non-nil (integration sync warnings).
+func (c *Controller) persistConfig(syncIntegrations bool, mutate func(cfg *config.AppConfig)) (bool, error) {
+	c.stateMu.Lock()
+	cfg := c.config
+	if mutate != nil {
+		mutate(&cfg)
+	}
 	if err := config.Save(c.configPath, cfg); err != nil {
+		c.stateMu.Unlock()
+
 		return false, err
 	}
-
-	c.stateMu.Lock()
 	c.config = cfg
 	c.stateMu.Unlock()
-	if !syncIntegrations || c.platform == nil {
+
+	if !syncIntegrations {
 		return true, nil
 	}
-	if errs := c.platform.Sync(cfg.Integration); len(errs) > 0 {
+	c.stateMu.RLock()
+	platformManager := c.platform
+	c.stateMu.RUnlock()
+	if platformManager == nil {
+		return true, nil
+	}
+	if errs := platformManager.Sync(cfg.Integration); len(errs) > 0 {
 		return true, errors.New(platform.JoinErrors(errs))
 	}
 
@@ -936,7 +964,7 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 }
 
 func (c *Controller) saveWithFallback(
-	cfg config.AppConfig,
+	applyEdits func(cfg *config.AppConfig),
 	creds credentials.Credentials,
 	persistedMode config.CredentialStorageMode,
 	fallback CredentialFallbackChoice,
@@ -944,11 +972,13 @@ func (c *Controller) saveWithFallback(
 ) (SaveSettingsResult, error) {
 	switch fallback {
 	case CredentialFallbackPlaintext:
-		cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
-		cfg.Connection.Username = creds.Username
-		cfg.Connection.Password = creds.Password
-		cfg.Connection.APIKey = creds.APIKey
-		saved, err := c.persistConfig(cfg, true)
+		saved, err := c.persistConfig(true, func(dst *config.AppConfig) {
+			applyEdits(dst)
+			dst.Connection.CredentialStorage = config.CredentialStoragePlaintext
+			dst.Connection.Username = creds.Username
+			dst.Connection.Password = creds.Password
+			dst.Connection.APIKey = creds.APIKey
+		})
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
@@ -959,16 +989,18 @@ func (c *Controller) saveWithFallback(
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}
 	case CredentialFallbackSessionOnly:
-		switch persistedMode {
-		case config.CredentialStorageKeychain:
-			cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
-		default:
-			cfg.Connection.CredentialStorage = config.CredentialStorageNone
-		}
-		cfg.Connection.Username = ""
-		cfg.Connection.Password = ""
-		cfg.Connection.APIKey = ""
-		saved, err := c.persistConfig(cfg, true)
+		saved, err := c.persistConfig(true, func(dst *config.AppConfig) {
+			applyEdits(dst)
+			switch persistedMode {
+			case config.CredentialStorageKeychain:
+				dst.Connection.CredentialStorage = config.CredentialStorageKeychain
+			default:
+				dst.Connection.CredentialStorage = config.CredentialStorageNone
+			}
+			dst.Connection.Username = ""
+			dst.Connection.Password = ""
+			dst.Connection.APIKey = ""
+		})
 		if err != nil && !saved {
 			return SaveSettingsResult{CredentialStatus: status}, err
 		}

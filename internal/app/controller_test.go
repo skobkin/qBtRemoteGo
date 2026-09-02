@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -854,6 +856,78 @@ func TestClientCacheInvalidatedOnConnectionChange(t *testing.T) {
 
 	if got := logins.Load(); got != 2 {
 		t.Fatalf("expected one auth/login per server, got %d", got)
+	}
+}
+
+// Regression for the config lost-update race: rememberSavePath used to persist
+// a full config snapshot taken before a concurrent SaveSettings, reverting the
+// saved connection URL. Recent-path writes must always start from the latest
+// config, so the settings save survives any interleaving. The settings form
+// owns the UI section, so recent-path survival depends on write order and is
+// deliberately not asserted.
+func TestRememberSavePathDoesNotRevertConcurrentSettingsSave(t *testing.T) {
+	// Plaintext credentials plus an unavailable keychain keep SaveSettings on
+	// the plain persist path: no keychain writes, no fallback decision.
+	cfg := config.Default()
+	cfg.Connection.URL = "https://old.example.invalid"
+	cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
+	cfg.Connection.Username = "demo"
+	cfg.Connection.Password = "secret"
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	settingsDone := make(chan error, 1)
+	go func() {
+		updated := controller.Config()
+		updated.Connection.URL = "https://new.example.invalid"
+		_, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
+			Username: "demo",
+			Password: "secret",
+		}, CredentialFallbackUnspecified)
+		settingsDone <- err
+	}()
+
+	// Hammer rememberSavePath for the whole duration of the settings save so
+	// recent-path writes land both before and after it. The iteration cap keeps
+	// the test bounded even if the settings save never needs the lock.
+	var wg sync.WaitGroup
+	for worker := range 8 {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := range 200 {
+				select {
+				case <-settingsDone:
+					return
+				default:
+				}
+				controller.rememberSavePath(fmt.Sprintf("/data/worker-%d-%d", worker, i), "test")
+			}
+		}(worker)
+	}
+
+	err := <-settingsDone
+	// The buffered send was consumed above; close the channel so every worker
+	// observes the completion instead of racing main for the single value.
+	close(settingsDone)
+	if err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	wg.Wait()
+
+	final := controller.Config()
+	if final.Connection.URL != "https://new.example.invalid" {
+		t.Fatalf("concurrent recent-path updates reverted the saved URL: %q", final.Connection.URL)
+	}
+	disk, err := config.Load(controller.configPath)
+	if err != nil {
+		t.Fatalf("load persisted config: %v", err)
+	}
+	if disk.Connection.URL != "https://new.example.invalid" {
+		t.Fatalf("persisted URL was reverted by concurrent recent-path updates: %q", disk.Connection.URL)
 	}
 }
 

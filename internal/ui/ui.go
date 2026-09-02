@@ -227,9 +227,11 @@ func (a *application) buildMainWindow() {
 	}
 
 	a.filterBy = widget.NewSelect([]string{"Name", "Location"}, func(value string) {
-		cfg := a.controller.Config()
-		cfg.UI.FilterBy = strings.ToLower(value)
-		if err := a.controller.SaveLocalUI(cfg); err != nil {
+		filterBy := strings.ToLower(value)
+		err := a.controller.SaveLocalUI(func(cfg *config.AppConfig) {
+			cfg.UI.FilterBy = filterBy
+		})
+		if err != nil {
 			a.logger.Warn("persist filter_by", "error", err)
 		}
 		a.refreshVisibleTorrents()
@@ -1011,8 +1013,10 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		if current.UI.AddTorrentAdvancedExpanded == advancedItem.Open {
 			return
 		}
-		current.UI.AddTorrentAdvancedExpanded = advancedItem.Open
-		if err := a.controller.SaveLocalUI(current); err != nil {
+		expanded := advancedItem.Open
+		if err := a.controller.SaveLocalUI(func(cfg *config.AppConfig) {
+			cfg.UI.AddTorrentAdvancedExpanded = expanded
+		}); err != nil {
 			a.logger.Warn("save add torrent advanced state", "error", err)
 		}
 	})
