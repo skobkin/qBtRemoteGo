@@ -131,7 +131,15 @@ type detailsDrawer struct {
 	app      *application
 	backdrop *drawerBackdrop
 	panel    fyne.CanvasObject
-	visible  bool
+	// inner is built once and cached: Fyne's renderer cache destroys the
+	// renderer of a hidden widget after a minute, and a re-created renderer is
+	// never handed a Layout call. A fresh container would therefore size itself
+	// from the layout's zero MinSize and leave the panel collapsed (labels
+	// painted over the list) until something resized it. Object sizes survive
+	// renderer destruction, so the cached container re-lays out at its real
+	// size when the renderer comes back.
+	inner   *fyne.Container
+	visible bool
 }
 
 func newDetailsDrawer(app *application, panel fyne.CanvasObject) *detailsDrawer {
@@ -140,6 +148,7 @@ func newDetailsDrawer(app *application, panel fyne.CanvasObject) *detailsDrawer 
 		backdrop: newDrawerBackdrop(func() { app.closeTorrentDetails() }),
 		panel:    panel,
 	}
+	d.inner = container.New(&detailsDrawerLayout{}, d.backdrop, d.panel)
 	d.ExtendBaseWidget(d)
 	return d
 }
@@ -155,7 +164,7 @@ func (d *detailsDrawer) SetVisible(visible bool) {
 }
 
 func (d *detailsDrawer) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(container.New(&detailsDrawerLayout{}, d.backdrop, d.panel))
+	return widget.NewSimpleRenderer(d.inner)
 }
 
 func (d *detailsDrawer) MinSize() fyne.Size {
