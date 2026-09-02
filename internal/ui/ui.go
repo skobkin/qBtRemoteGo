@@ -341,28 +341,27 @@ func (a *application) openSettingsWindow() {
 	urlEntry := widget.NewEntry()
 	urlEntry.SetText(cfg.Connection.URL)
 	authMethod := widget.NewSelect(authMethodLabels(), nil)
+	session := a.controller.SessionCredentials()
+	credStatus := a.controller.CredentialStatus()
+	// While the background retry is still loading stored keychain credentials,
+	// the empty API-key field must not read as "nothing stored".
+	apiKeyPending := keychainLoadPending(cfg.Connection, credStatus, session)
 	usernameEntry := widget.NewEntry()
-	usernameEntry.SetText(a.controller.SessionCredentials().Username)
+	usernameEntry.SetText(session.Username)
 	passwordEntry := widget.NewPasswordEntry()
-	passwordEntry.SetText(a.controller.SessionCredentials().Password)
+	passwordEntry.SetText(session.Password)
 	apiKeyEntry := widget.NewPasswordEntry()
-	apiKeyEntry.SetPlaceHolder("qbt_…")
-	apiKeyEntry.SetText(a.controller.SessionCredentials().APIKey)
+	if apiKeyPending {
+		apiKeyEntry.SetPlaceHolder("Stored in the system keychain; loading…")
+	} else {
+		apiKeyEntry.SetPlaceHolder("qbt_…")
+	}
+	apiKeyEntry.SetText(session.APIKey)
 	skipTLS := widget.NewCheck("", nil)
 	skipTLS.SetChecked(cfg.Connection.SkipCertificateCheck)
 	testStatus := widget.NewLabel("")
-	credentialSummary := widget.NewLabel(connectionCredentialStorageText(
-		cfg.Connection.AuthMethod,
-		cfg.Connection.CredentialStorage,
-		a.controller.CredentialStatus(),
-		a.controller.SessionCredentials(),
-	))
-	credentialWarning := widget.NewLabel(connectionCredentialWarningText(
-		cfg.Connection.AuthMethod,
-		cfg.Connection.CredentialStorage,
-		a.controller.CredentialStatus(),
-		a.controller.SessionCredentials(),
-	))
+	credentialSummary := widget.NewLabel(connectionCredentialStorageText(cfg.Connection, credStatus, session))
+	credentialWarning := widget.NewLabel(connectionCredentialWarningText(cfg.Connection, credStatus, session))
 	credentialWarning.Wrapping = fyne.TextWrapWord
 
 	rememberEntry := widget.NewEntry()
@@ -477,8 +476,11 @@ func (a *application) openSettingsWindow() {
 		connectionTabContent.Objects[0] = widget.NewForm(authFormItems(method)...)
 		connectionTabContent.Refresh()
 		credentialWarning.SetText(connectionCredentialWarningText(
-			method,
-			cfg.Connection.CredentialStorage,
+			config.ConnectionConfig{
+				AuthMethod:             method,
+				CredentialStorage:      cfg.Connection.CredentialStorage,
+				KeychainHasCredentials: cfg.Connection.KeychainHasCredentials,
+			},
 			a.controller.CredentialStatus(),
 			a.controller.SessionCredentials(),
 		))
@@ -711,14 +713,31 @@ func authMethodKey(label string) config.AuthMethod {
 	return config.AuthMethodPassword
 }
 
+// keychainLoadPending reports whether the config says credentials are stored in
+// the system keychain but none were loaded into the session and the keychain
+// state is not "available" — the boot race, where the wallet had not finished
+// unlocking. Settings must present this as "stored, retrying" instead of an
+// empty form that reads as "nothing stored".
+func keychainLoadPending(conn config.ConnectionConfig, status credentials.Status, session credentials.Credentials) bool {
+	return conn.CredentialStorage == config.CredentialStorageKeychain &&
+		conn.KeychainHasCredentials &&
+		session == credentials.Credentials{} &&
+		status.State != credentials.StateAvailable
+}
+
 func connectionCredentialStorageText(
-	method config.AuthMethod,
-	mode config.CredentialStorageMode,
+	conn config.ConnectionConfig,
 	status credentials.Status,
 	session credentials.Credentials,
 ) string {
-	switch mode {
+	switch conn.CredentialStorage {
 	case config.CredentialStorageKeychain:
+		if keychainLoadPending(conn, status, session) {
+			if backend := strings.TrimSpace(status.Backend); backend != "" {
+				return "System keychain (" + backend + ") — not loaded yet, retrying"
+			}
+			return "System keychain — not loaded yet, retrying"
+		}
 		if status.Backend != "" {
 			return "System keychain (" + status.Backend + ")"
 		}
@@ -726,7 +745,7 @@ func connectionCredentialStorageText(
 	case config.CredentialStoragePlaintext:
 		return "Plain text config file"
 	default:
-		if method == config.AuthMethodAPIKey {
+		if conn.AuthMethod == config.AuthMethodAPIKey {
 			if strings.TrimSpace(session.APIKey) != "" {
 				return "Session only"
 			}
@@ -741,14 +760,17 @@ func connectionCredentialStorageText(
 
 const authMethodPasswordDeprecationNotice = "Username & password authentication is deprecated; consider switching to an API key (requires qBittorrent v5.2.0 or newer)."
 
+// keychainPendingLoadWarning is the Settings hint shown while the background
+// retry is still loading stored keychain credentials.
+const keychainPendingLoadWarning = "Credentials are stored in the system keychain but have not been loaded yet; qBtRemoteGo keeps retrying in the background."
+
 func connectionCredentialWarningText(
-	method config.AuthMethod,
-	mode config.CredentialStorageMode,
+	conn config.ConnectionConfig,
 	status credentials.Status,
 	session credentials.Credentials,
 ) string {
-	warning := connectionStorageWarningText(method, mode, status, session)
-	if method != config.AuthMethodPassword {
+	warning := connectionStorageWarningText(conn, status, session)
+	if conn.AuthMethod != config.AuthMethodPassword {
 		return warning
 	}
 
@@ -760,13 +782,15 @@ func connectionCredentialWarningText(
 }
 
 func connectionStorageWarningText(
-	method config.AuthMethod,
-	mode config.CredentialStorageMode,
+	conn config.ConnectionConfig,
 	status credentials.Status,
 	session credentials.Credentials,
 ) string {
-	switch mode {
+	switch conn.CredentialStorage {
 	case config.CredentialStorageKeychain:
+		if keychainLoadPending(conn, status, session) {
+			return keychainPendingLoadWarning
+		}
 		if status.State == credentials.StateAvailable {
 			return ""
 		}
@@ -776,12 +800,12 @@ func connectionStorageWarningText(
 		}
 		return "Warning: Credentials are configured to use the system keychain, but it is currently unavailable. " + message
 	case config.CredentialStoragePlaintext:
-		if method == config.AuthMethodAPIKey {
+		if conn.AuthMethod == config.AuthMethodAPIKey {
 			return "Warning: The API key is stored in plain text in the local config file."
 		}
 		return "Warning: Credentials are stored in plain text in the local config file."
 	default:
-		if method == config.AuthMethodAPIKey {
+		if conn.AuthMethod == config.AuthMethodAPIKey {
 			if strings.TrimSpace(session.APIKey) != "" {
 				return "The API key is stored only in memory for this run."
 			}
