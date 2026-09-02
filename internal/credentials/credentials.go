@@ -23,6 +23,10 @@ const (
 	StateLocked      State = "locked"
 	StateUnavailable State = "unavailable"
 	StateUnsupported State = "unsupported"
+	// StateInvalid means the keychain answered and holds an entry, but its
+	// payload cannot be decoded — distinct from "nothing stored" so a corrupt
+	// entry is never mistaken for missing credentials.
+	StateInvalid State = "invalid"
 )
 
 type Credentials struct {
@@ -134,7 +138,10 @@ func (s *keyringStore) Get(_ context.Context) (Credentials, error) {
 
 	var stored payload
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return Credentials{}, fmt.Errorf("decode keychain credentials: %w", err)
+		return Credentials{}, &Error{
+			state: StateInvalid,
+			err:   fmt.Errorf("decode keychain credentials: %w", err),
+		}
 	}
 
 	return Credentials(stored), nil
@@ -175,6 +182,8 @@ func statusForState(backend string, state State, detail string) Status {
 			message = "System keychain is locked."
 		case StateUnsupported:
 			message = "System keychain is not supported on this platform."
+		case StateInvalid:
+			message = "The stored keychain credentials are unreadable."
 		default:
 			message = "System keychain is unavailable."
 		}
@@ -221,4 +230,20 @@ func backendName() string {
 	default:
 		return "System keychain"
 	}
+}
+
+// BackendName reports the human-readable name of the system keychain backend
+// on this platform (e.g. "Secret Service" on Linux) so callers can label
+// statuses without performing a keyring probe.
+func BackendName() string {
+	return backendName()
+}
+
+// IsNotStored reports whether err means the keychain answered but holds no
+// entry for this app — as opposed to the keychain being unavailable, locked,
+// or returning an unreadable payload. Callers that persist a marker saying
+// credentials were stored can use this to tell "not loaded yet" from
+// "nothing stored".
+func IsNotStored(err error) bool {
+	return errors.Is(err, keyring.ErrNotFound)
 }

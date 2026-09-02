@@ -3,6 +3,7 @@ package credentials
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	keyring "github.com/zalando/go-keyring"
@@ -136,5 +137,56 @@ func TestDeleteIgnoresNotFound(t *testing.T) {
 
 	if err := store.Delete(context.Background()); err != nil {
 		t.Fatalf("delete: %v", err)
+	}
+}
+
+func TestGetClassifiesUndecodablePayload(t *testing.T) {
+	store := NewStoreForTests(
+		func(service, user string) (string, error) {
+			return "not json", nil
+		},
+		nil,
+		nil,
+	)
+
+	_, err := store.Get(context.Background())
+	var credErr *Error
+	if !errors.As(err, &credErr) {
+		t.Fatalf("expected a classified *Error, got %#v", err)
+	}
+	if credErr.State() != StateInvalid {
+		t.Fatalf("unexpected state for an undecodable payload: %q", credErr.State())
+	}
+
+	status := store.Status(context.Background())
+	if status.State != StateInvalid {
+		t.Fatalf("unexpected status state: %#v", status)
+	}
+	if status.Backend == "" {
+		t.Fatal("expected the status to name the backend")
+	}
+}
+
+func TestIsNotStored(t *testing.T) {
+	if !IsNotStored(keyring.ErrNotFound) {
+		t.Fatal("expected ErrNotFound to count as not stored")
+	}
+	if !IsNotStored(fmt.Errorf("read keychain credentials: %w", keyring.ErrNotFound)) {
+		t.Fatal("expected a wrapped ErrNotFound to count as not stored")
+	}
+	if IsNotStored(errors.New("collection is locked")) {
+		t.Fatal("expected a locked keychain not to count as not stored")
+	}
+	if IsNotStored(nil) {
+		t.Fatal("expected a nil error not to count as not stored")
+	}
+}
+
+func TestBackendName(t *testing.T) {
+	if BackendName() == "" {
+		t.Fatal("expected a non-empty backend name")
+	}
+	if BackendName() != backendName() {
+		t.Fatal("expected BackendName to match the internal backend name")
 	}
 }
