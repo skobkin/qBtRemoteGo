@@ -31,7 +31,7 @@ type Client struct {
 	logger     *slog.Logger
 
 	mu            sync.Mutex
-	authenticated bool
+	authenticated bool // guarded by mu; login is single-flight under mu
 }
 
 type ClientConfig struct {
@@ -542,6 +542,13 @@ func (c *Client) invalidateSessionOnAuthFailure(statusCode int) {
 	c.mu.Unlock()
 }
 
+// ensureAuthenticated performs a login when needed. The mu lock is held across
+// the whole check → login → flag update sequence so concurrent fetch goroutines
+// sharing one cached client perform a single login instead of racing each other
+// into duplicate auth/login calls (each of which can invalidate the previous
+// session server-side). A stale 401 from an older session can still clear the
+// flag after another goroutine's fresh login, costing one redundant login; that
+// path self-heals on the next request.
 func (c *Client) ensureAuthenticated(ctx context.Context) error {
 	if c.apiKey != "" {
 		// API keys authenticate statelessly via the Authorization header; qBittorrent
@@ -550,9 +557,9 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 	}
 
 	c.mu.Lock()
-	alreadyAuthenticated := c.authenticated
-	c.mu.Unlock()
-	if alreadyAuthenticated {
+	defer c.mu.Unlock()
+
+	if c.authenticated {
 		return nil
 	}
 
@@ -585,9 +592,7 @@ func (c *Client) ensureAuthenticated(ctx context.Context) error {
 		return fmt.Errorf("auth/login returned %s: %s", resp.Status, text)
 	}
 
-	c.mu.Lock()
 	c.authenticated = true
-	c.mu.Unlock()
 
 	return nil
 }

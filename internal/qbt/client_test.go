@@ -14,8 +14,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestSplitRemotePath(t *testing.T) {
@@ -899,6 +901,74 @@ func TestClientReauthenticatesAfterSessionExpiry(t *testing.T) {
 
 	if got := logins.Load(); got != 2 {
 		t.Fatalf("expected a fresh login after session expiry, got %d logins", got)
+	}
+}
+
+func TestConcurrentRequestsPerformSingleLogin(t *testing.T) {
+	var logins atomic.Int32
+	// loginStarted signals each entry into the login handler; release gates the
+	// reply so every goroutine that decided to log in is parked inside the
+	// handler before any of them can mark the client authenticated.
+	loginStarted := make(chan struct{}, 8)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			logins.Add(1)
+			loginStarted <- struct{}{}
+			<-release
+			// The session cookie must stay non-Secure: the test server is plain
+			// HTTP and the jar would not resend a Secure cookie.
+			http.SetCookie(w, &http.Cookie{Name: "SID", Value: "session"}) //nolint:gosec
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/info":
+			_, _ = io.WriteString(w, "[]")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		URL:      server.URL,
+		Username: "user",
+		Password: "pass",
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	const goroutines = 8
+	start := make(chan struct{})
+	errs := make([]error, goroutines)
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			<-start
+			_, errs[i] = client.Torrents(context.Background())
+		}()
+	}
+	close(start)
+
+	select {
+	case <-loginStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected a login attempt to start")
+	}
+	close(release)
+
+	wg.Wait()
+
+	if got := logins.Load(); got != 1 {
+		t.Fatalf("expected concurrent first requests to share one login, got %d", got)
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
 	}
 }
 
