@@ -105,7 +105,7 @@ func TestCredentialRetryStepLoadsCredentialsAfterRecovery(t *testing.T) {
 	controller := newKeychainPendingController(t, store)
 
 	recovered.Store(true)
-	if stop := controller.credentialRetryStep(); !stop {
+	if stop := controller.credentialRetryStep(1); !stop {
 		t.Fatal("expected a successful load to stop the retry")
 	}
 
@@ -142,7 +142,7 @@ func TestCredentialRetryStepDoesNotClobberSavedCredentials(t *testing.T) {
 	controller.setSessionCredentials(saved)
 	recovered.Store(true)
 
-	if stop := controller.credentialRetryStep(); !stop {
+	if stop := controller.credentialRetryStep(1); !stop {
 		t.Fatal("expected the step to stop when credentials are already loaded")
 	}
 	if got := controller.SessionCredentials(); got != saved {
@@ -157,7 +157,7 @@ func TestCredentialRetryStepStopsWhenStorageModeChanges(t *testing.T) {
 	controller.config.Connection.CredentialStorage = config.CredentialStorageNone
 	controller.stateMu.Unlock()
 
-	if stop := controller.credentialRetryStep(); !stop {
+	if stop := controller.credentialRetryStep(1); !stop {
 		t.Fatal("expected the step to stop when the storage mode is no longer keychain")
 	}
 }
@@ -269,19 +269,138 @@ func TestLegacyKeychainConfigWithoutMarkerStartsRetry(t *testing.T) {
 	}
 }
 
-// A reachable keychain that holds nothing maps to the available state, so a
-// marker-less config must not start a retry: the plain nothing-stored error is
-// the correct answer for it.
-func TestMarkerlessKeychainWithoutStoredCredentialsDoesNotRetry(t *testing.T) {
+// newMarkerlessKeychainController builds a controller whose config claims
+// keychain storage but predates the stored-credentials marker — the shape
+// released builds wrote — saved at a known path so tests can assert what a
+// load persisted.
+func newMarkerlessKeychainController(t *testing.T, store credentials.Store) (*Controller, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
 	cfg := config.Default()
 	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
-	controller := newTestController(t, cfg, newNotStoredStore())
+	cfg.Connection.AuthMethod = config.AuthMethodAPIKey
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
 
-	if controller.credentialsRetryPending() {
-		t.Fatal("did not expect a retry when the keychain holds nothing")
+	controller, err := newController(path, slog.New(slog.NewTextHandler(io.Discard, nil)), store)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	controller.platform = nil
+	t.Cleanup(controller.stopCredentialRetries)
+
+	return controller, path
+}
+
+// A marker-less config cannot trust a "not found": the boot race looks
+// identical to a keychain that holds nothing. The startup read must start the
+// bounded grace probes while keeping the available classification — the plain
+// nothing-stored error stays, and no waiting hint may appear for credentials
+// that may genuinely not exist.
+func TestMarkerlessNotFoundStartsGraceRetryWithoutWaitingHint(t *testing.T) {
+	controller, _ := newMarkerlessKeychainController(t, newNotStoredStore())
+
+	if !controller.credentialsRetryPending() {
+		t.Fatal("expected a grace retry for a marker-less not-found startup read")
 	}
 	if got := controller.CredentialStatus().State; got != credentials.StateAvailable {
 		t.Fatalf("unexpected status state: %q", got)
+	}
+
+	_, err := controller.client()
+	var waitErr *CredentialUnavailableError
+	if errors.As(err, &waitErr) {
+		t.Fatal("did not expect a waiting error while the grace probes run")
+	}
+	if err == nil || !strings.Contains(err.Error(), "no API key is stored") {
+		t.Fatalf("expected the plain nothing-stored error, got %v", err)
+	}
+}
+
+// The grace probes must stay bounded and must never escalate to the terminal
+// gave-up status: for a config without the marker an absent entry most
+// plausibly means nothing is stored, so the available classification is the
+// correct resting state.
+func TestCredentialRetryStepBoundsGraceForMarkerlessNotFound(t *testing.T) {
+	controller, _ := newMarkerlessKeychainController(t, newNotStoredStore())
+
+	for attempt := 1; attempt < graceNotFoundRetries; attempt++ {
+		if stop := controller.credentialRetryStep(attempt); stop {
+			t.Fatalf("attempt %d: expected the grace probe to continue", attempt)
+		}
+		if got := controller.CredentialStatus().State; got != credentials.StateAvailable {
+			t.Fatalf("attempt %d: unexpected status state %q", attempt, got)
+		}
+	}
+	if stop := controller.credentialRetryStep(graceNotFoundRetries); !stop {
+		t.Fatal("expected the grace probes to stop after the bound")
+	}
+
+	status := controller.CredentialStatus()
+	if status.State != credentials.StateAvailable {
+		t.Fatalf("grace exhaustion must keep the nothing-stored state, got %q", status.State)
+	}
+	if strings.Contains(status.Message, "Gave up waiting") {
+		t.Fatalf("a marker-less config must not end in the terminal gave-up status, got %q", status.Message)
+	}
+}
+
+// A successful load must persist the marker for configs saved before it
+// existed, so later boots can tell the boot race from "nothing stored".
+func TestSuccessfulStartupLoadBackfillsMarker(t *testing.T) {
+	store := credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return `{"api_key":"` + testAPIKey + `"}`, nil },
+		nil,
+		nil,
+	)
+	controller, path := newMarkerlessKeychainController(t, store)
+
+	if got := controller.SessionCredentials().APIKey; got != testAPIKey {
+		t.Fatalf("expected the keychain credentials to load, got %#v", controller.SessionCredentials())
+	}
+	disk, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if !disk.Connection.KeychainHasCredentials {
+		t.Fatal("expected a successful startup load to persist the marker")
+	}
+}
+
+// The same backfill applies when the credentials only show up after the boot
+// race clears and a grace probe finds them.
+func TestSuccessfulRetryLoadBackfillsMarker(t *testing.T) {
+	var recovered atomic.Bool
+	store := credentials.NewStoreForTests(
+		func(service, user string) (string, error) {
+			if !recovered.Load() {
+				return "", keyring.ErrNotFound
+			}
+
+			return `{"api_key":"` + testAPIKey + `"}`, nil
+		},
+		nil,
+		nil,
+	)
+	controller, path := newMarkerlessKeychainController(t, store)
+	if !controller.credentialsRetryPending() {
+		t.Fatal("expected the grace retry to be probing after the failed startup read")
+	}
+
+	recovered.Store(true)
+	if stop := controller.credentialRetryStep(1); !stop {
+		t.Fatal("expected a successful load to stop the retry")
+	}
+
+	disk, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if !disk.Connection.KeychainHasCredentials {
+		t.Fatal("expected a successful retry load to persist the marker")
 	}
 }
 
@@ -397,9 +516,16 @@ func TestKeychainLoadPendingPredicate(t *testing.T) {
 			wantPend: true,
 		},
 		{
-			name:   "marker-less available state is not pending",
+			name:     "marker-less not-found still probes",
+			mode:     config.CredentialStorageKeychain,
+			marker:   false,
+			state:    credentials.StateAvailable,
+			wantPend: true,
+		},
+		{
+			name:   "stored marker with a reachable empty keychain is not pending",
 			mode:   config.CredentialStorageKeychain,
-			marker: false,
+			marker: true,
 			state:  credentials.StateAvailable,
 		},
 		{

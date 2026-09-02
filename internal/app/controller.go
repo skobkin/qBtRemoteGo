@@ -960,6 +960,13 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 			State:   credentials.StateAvailable,
 			Message: "System keychain is available.",
 		}
+		if creds != (credentials.Credentials{}) {
+			// A config saved before the marker existed just proved it holds
+			// credentials: record the marker so later boots classify a
+			// transient "not found" as the boot race instead of "nothing
+			// stored".
+			c.backfillKeychainMarker()
+		}
 
 		return nil
 	case config.CredentialStoragePlaintext:

@@ -24,6 +24,12 @@ var (
 	// maxCredentialRetries caps the number of attempts before the loop records
 	// a terminal, actionable status (~10 minutes at the defaults).
 	maxCredentialRetries = 60
+	// graceNotFoundRetries bounds the probes spent on a "not found" from a
+	// config without the stored-credentials marker (~30 seconds at the
+	// defaults). Released builds stored credentials without the marker, so for
+	// them a missing entry cannot be told apart from the boot race and the
+	// retry has to probe before believing "nothing is stored".
+	graceNotFoundRetries = 6
 )
 
 // callWithTimeout runs fn in its own goroutine and bounds how long the caller
@@ -100,16 +106,18 @@ func (c *Controller) CredentialRetryActive() bool {
 // concluded that nothing is stored. The stored-credentials marker makes "not
 // found" mean "stored but not loaded yet"; configs saved before the marker
 // existed carry no marker, so for them every non-available keychain state — a
-// locked wallet, a timed-out or otherwise failing read — must keep retrying.
-// Only a reachable keychain holding nothing (available + not found) rules a
-// retry out.
+// locked wallet, a timed-out or otherwise failing read — must keep retrying,
+// and even a reachable keychain reporting "not found" cannot be trusted: the
+// boot race looks identical to an empty keychain. Those configs get the
+// bounded grace probes in credentialRetryStep instead.
 func (c *Controller) keychainLoadPending() bool {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
 
 	return c.config.Connection.CredentialStorage == config.CredentialStorageKeychain &&
 		c.sessionCredentials == (credentials.Credentials{}) &&
-		c.credentialStatus.State != credentials.StateAvailable
+		(c.credentialStatus.State != credentials.StateAvailable ||
+			!c.config.Connection.KeychainHasCredentials)
 }
 
 // startCredentialRetryLoop launches the background loop that re-reads the
@@ -154,7 +162,7 @@ func (c *Controller) credentialRetryLoop() {
 		default:
 		}
 
-		if c.credentialRetryStep() {
+		if c.credentialRetryStep(attempt) {
 			return
 		}
 		if attempt >= maxCredentialRetries {
@@ -175,9 +183,11 @@ func (c *Controller) credentialRetryLoop() {
 }
 
 // credentialRetryStep performs one bounded keychain load attempt and reports
-// whether the loop should stop. It is callable outside the loop so tests can
-// drive attempts deterministically instead of sleeping.
-func (c *Controller) credentialRetryStep() (stop bool) {
+// whether the loop should stop. attempt is the 1-based number of this probe;
+// it bounds the grace period granted to marker-less configs below. The step is
+// callable outside the loop so tests can drive attempts deterministically
+// instead of sleeping.
+func (c *Controller) credentialRetryStep(attempt int) (stop bool) {
 	mode, marker := c.keychainLoadContext()
 	if mode != config.CredentialStorageKeychain {
 		return true
@@ -192,10 +202,12 @@ func (c *Controller) credentialRetryStep() (stop bool) {
 	if err == nil {
 		if !c.applyKeychainCredentials(creds) {
 			// Credentials were saved (or the mode changed) while the attempt
-			// ran; whatever is in the session now wins.
+			// ran, or the payload was empty; whatever is in the session now
+			// wins.
 			return true
 		}
 		c.currentLogger().Info("system keychain credentials loaded after retry", "backend", credentials.BackendName())
+		c.backfillKeychainMarker()
 
 		return true
 	}
@@ -203,6 +215,21 @@ func (c *Controller) credentialRetryStep() (stop bool) {
 	status := keychainLoadStatus(marker, err)
 	c.setCredentialStatus(status)
 	if !retryableCredentialStatus(status) {
+		if !marker && credentials.IsNotStored(err) {
+			// The keychain is reachable and reports no entry, but the config
+			// predates the marker, so this may still be the boot race. Keep the
+			// available ("nothing stored") classification — the UI must not
+			// show a waiting hint for credentials that may not exist — and
+			// probe a few more times before concluding quietly.
+			if attempt < graceNotFoundRetries {
+				c.currentLogger().Debug("probing for credentials stored before the keychain marker existed", "backend", status.Backend, "attempt", attempt, "error", err)
+
+				return false
+			}
+			c.currentLogger().Warn("system keychain reports no stored credentials", "backend", status.Backend, "attempts", attempt, "error", err)
+
+			return true
+		}
 		c.currentLogger().Warn("system keychain credentials not recoverable by retrying", "backend", status.Backend, "state", status.State, "error", err)
 
 		return true
@@ -210,6 +237,28 @@ func (c *Controller) credentialRetryStep() (stop bool) {
 	c.currentLogger().Debug("system keychain credentials still unavailable", "backend", status.Backend, "state", status.State, "error", err)
 
 	return false
+}
+
+// backfillKeychainMarker records the stored-credentials marker for configs
+// written before the marker existed. A successful keychain read is exactly the
+// fact the marker stands for, so persisting it here lets later boots classify
+// a transient "not found" as the boot race instead of "nothing stored". A
+// failed persist only postpones that: the next settings save sets the marker
+// too.
+func (c *Controller) backfillKeychainMarker() {
+	c.stateMu.RLock()
+	mode := c.config.Connection.CredentialStorage
+	marked := c.config.Connection.KeychainHasCredentials
+	c.stateMu.RUnlock()
+	if mode != config.CredentialStorageKeychain || marked {
+		return
+	}
+
+	if _, err := c.persistConfig(false, func(cfg *config.AppConfig) {
+		cfg.Connection.KeychainHasCredentials = true
+	}); err != nil {
+		c.currentLogger().Warn("persist keychain credentials marker", "error", err)
+	}
 }
 
 // giveUpCredentialRetries records a terminal status after the retry cap, with
@@ -243,6 +292,12 @@ func (c *Controller) applyKeychainCredentials(creds credentials.Credentials) boo
 		return false
 	}
 	if c.sessionCredentials != (credentials.Credentials{}) {
+		return false
+	}
+	if creds == (credentials.Credentials{}) {
+		// An empty payload is a keychain quirk, not stored credentials:
+		// applying it would log a bogus recovery and backfill the marker onto
+		// an empty keychain.
 		return false
 	}
 
