@@ -205,6 +205,7 @@ func (c *Controller) SaveSettings(
 		saved, err := c.persistConfig(true, func(dst *config.AppConfig) {
 			applyEdits(dst)
 			dst.Connection.CredentialStorage = config.CredentialStorageKeychain
+			dst.Connection.KeychainHasCredentials = true
 			dst.Connection.Username = ""
 			dst.Connection.Password = ""
 			dst.Connection.APIKey = ""
@@ -957,11 +958,13 @@ func (c *Controller) loadSessionCredentials(ctx context.Context) error {
 			return nil
 		}
 
-		c.config.Connection.CredentialStorage = config.CredentialStorageKeychain
-		c.config.Connection.Username = ""
-		c.config.Connection.Password = ""
-		c.config.Connection.APIKey = ""
-		if err := config.Save(c.configPath, c.config); err != nil {
+		if _, err := c.persistConfig(false, func(cfg *config.AppConfig) {
+			cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+			cfg.Connection.KeychainHasCredentials = true
+			cfg.Connection.Username = ""
+			cfg.Connection.Password = ""
+			cfg.Connection.APIKey = ""
+		}); err != nil {
 			return err
 		}
 		c.logger.Info("migrated plaintext credentials to system keychain", "backend", status.Backend)
@@ -982,6 +985,7 @@ func (c *Controller) saveWithFallback(
 		saved, err := c.persistConfig(true, func(dst *config.AppConfig) {
 			applyEdits(dst)
 			dst.Connection.CredentialStorage = config.CredentialStoragePlaintext
+			dst.Connection.KeychainHasCredentials = false
 			dst.Connection.Username = creds.Username
 			dst.Connection.Password = creds.Password
 			dst.Connection.APIKey = creds.APIKey
@@ -1055,6 +1059,61 @@ func currentCredentialBackend(status credentials.Status, store credentials.Store
 	}
 
 	return store.Status(context.Background()).Backend
+}
+
+// errKeychainTimeout reports that a keychain call outlived its timeout; go-keyring
+// has no context support, so timed-out calls are abandoned in a goroutine.
+var errKeychainTimeout = errors.New("system keychain did not respond in time")
+
+// keychainLoadStatus classifies the outcome of a keychain credential load for
+// the UI. The persisted marker set on every successful keychain write is what
+// lets "not found" mean "stored but not loaded yet" (the boot race: the wallet
+// had not finished unlocking) instead of "nothing stored".
+func keychainLoadStatus(marker bool, err error) credentials.Status {
+	backend := credentials.BackendName()
+	switch {
+	case err == nil:
+		return credentials.Status{
+			Backend: backend,
+			State:   credentials.StateAvailable,
+			Message: "System keychain is available.",
+		}
+	case errors.Is(err, errKeychainTimeout):
+		return credentials.Status{
+			Backend: backend,
+			State:   credentials.StateUnavailable,
+			Message: err.Error(),
+		}
+	case credentials.IsNotStored(err):
+		if marker {
+			return credentials.Status{
+				Backend: backend,
+				State:   credentials.StateUnavailable,
+				Message: "The system keychain has not loaded the stored credentials yet.",
+			}
+		}
+
+		return credentials.Status{
+			Backend: backend,
+			State:   credentials.StateAvailable,
+			Message: "System keychain is available.",
+		}
+	default:
+		var credErr *credentials.Error
+		if errors.As(err, &credErr) {
+			return credentials.Status{
+				Backend: backend,
+				State:   credErr.State(),
+				Message: err.Error(),
+			}
+		}
+
+		return credentials.Status{
+			Backend: backend,
+			State:   credentials.StateUnavailable,
+			Message: err.Error(),
+		}
+	}
 }
 
 // canonicalCredentials drops credentials that do not belong to the active auth

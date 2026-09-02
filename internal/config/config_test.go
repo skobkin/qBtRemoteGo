@@ -210,6 +210,24 @@ func TestSaveOmitsScrubbedKeychainCredentials(t *testing.T) {
 	}
 }
 
+func TestSaveOmitsKeychainMarkerWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	if err := Save(path, Default()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	// #nosec G304 -- test reads back a temp config file written in this test.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(data), "keychain_has_credentials") {
+		t.Fatalf("expected the unset keychain marker to be omitted:\n%s", data)
+	}
+}
+
 func TestSaveLeavesNoTempFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

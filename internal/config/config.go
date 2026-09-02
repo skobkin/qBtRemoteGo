@@ -18,13 +18,20 @@ type AppConfig struct {
 }
 
 type ConnectionConfig struct {
-	URL                  string                `json:"url"`
-	AuthMethod           AuthMethod            `json:"auth_method,omitempty"`
-	CredentialStorage    CredentialStorageMode `json:"credential_storage,omitempty"`
-	Username             string                `json:"username,omitempty"`
-	Password             string                `json:"password,omitempty"` //nolint:gosec // User-managed qBittorrent credential persisted in the local app config.
-	APIKey               string                `json:"api_key,omitempty"`  //nolint:gosec // User-managed qBittorrent API key persisted in the local app config.
-	SkipCertificateCheck bool                  `json:"skip_certificate_check"`
+	URL               string                `json:"url"`
+	AuthMethod        AuthMethod            `json:"auth_method,omitempty"`
+	CredentialStorage CredentialStorageMode `json:"credential_storage,omitempty"`
+	// KeychainHasCredentials records that a successful system keychain write
+	// has stored the credentials, so a later "not found" from the keychain
+	// means "stored but not loaded yet" (e.g. a wallet that had not finished
+	// unlocking at boot) rather than "nothing stored". It is cleared whenever
+	// a save persists non-keychain storage; the keychain delete path has no
+	// production callers, so there is deliberately no delete-clearing case.
+	KeychainHasCredentials bool   `json:"keychain_has_credentials,omitempty"`
+	Username               string `json:"username,omitempty"`
+	Password               string `json:"password,omitempty"` //nolint:gosec // User-managed qBittorrent credential persisted in the local app config.
+	APIKey                 string `json:"api_key,omitempty"`  //nolint:gosec // User-managed qBittorrent API key persisted in the local app config.
+	SkipCertificateCheck   bool   `json:"skip_certificate_check"`
 }
 
 type AuthMethod string

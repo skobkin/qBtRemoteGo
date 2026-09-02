@@ -1029,6 +1029,195 @@ func TestClientAlwaysUsesCurrentLogger(t *testing.T) {
 	}
 }
 
+func TestKeychainLoadStatusClassification(t *testing.T) {
+	lockedStore := credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", errors.New("collection is locked") },
+		nil,
+		nil,
+	)
+	_, lockedErr := lockedStore.Get(context.Background())
+
+	invalidStore := credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "not json", nil },
+		nil,
+		nil,
+	)
+	_, invalidErr := invalidStore.Get(context.Background())
+
+	tests := []struct {
+		name      string
+		marker    bool
+		err       error
+		wantState credentials.State
+		wantInMsg string
+	}{
+		{
+			name:      "successful load is available",
+			marker:    true,
+			err:       nil,
+			wantState: credentials.StateAvailable,
+		},
+		{
+			name:      "not found with marker means not loaded yet",
+			marker:    true,
+			err:       keyring.ErrNotFound,
+			wantState: credentials.StateUnavailable,
+			wantInMsg: "not loaded",
+		},
+		{
+			name:      "not found without marker means nothing stored",
+			marker:    false,
+			err:       keyring.ErrNotFound,
+			wantState: credentials.StateAvailable,
+		},
+		{
+			name:      "timeout is unavailable",
+			marker:    true,
+			err:       errKeychainTimeout,
+			wantState: credentials.StateUnavailable,
+			wantInMsg: "did not respond in time",
+		},
+		{
+			name:      "classified keychain error keeps its state",
+			marker:    true,
+			err:       lockedErr,
+			wantState: credentials.StateLocked,
+		},
+		{
+			name:      "undecodable payload is invalid",
+			marker:    true,
+			err:       invalidErr,
+			wantState: credentials.StateInvalid,
+		},
+		{
+			name:      "unclassified error is unavailable",
+			marker:    false,
+			err:       errors.New("dbus connection refused"),
+			wantState: credentials.StateUnavailable,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status := keychainLoadStatus(tc.marker, tc.err)
+			if status.State != tc.wantState {
+				t.Fatalf("state = %q, want %q (message %q)", status.State, tc.wantState, status.Message)
+			}
+			if status.Backend == "" {
+				t.Fatal("expected the backend to be named")
+			}
+			if tc.wantInMsg != "" && !strings.Contains(status.Message, tc.wantInMsg) {
+				t.Fatalf("message %q does not contain %q", status.Message, tc.wantInMsg)
+			}
+		})
+	}
+}
+
+func TestSaveSettingsSetsKeychainMarker(t *testing.T) {
+	controller := newTestController(t, config.Default(), credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	updated := controller.Config()
+	updated.Connection.AuthMethod = config.AuthMethodAPIKey
+	result, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
+		APIKey: "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}, CredentialFallbackUnspecified)
+	if err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if result.DecisionRequired {
+		t.Fatal("did not expect a fallback decision for an available keychain")
+	}
+
+	final := controller.Config()
+	if final.Connection.CredentialStorage != config.CredentialStorageKeychain {
+		t.Fatalf("unexpected storage mode: %q", final.Connection.CredentialStorage)
+	}
+	if !final.Connection.KeychainHasCredentials {
+		t.Fatal("expected the keychain marker to be set after a keychain save")
+	}
+
+	disk, err := config.Load(controller.configPath)
+	if err != nil {
+		t.Fatalf("load persisted config: %v", err)
+	}
+	if !disk.Connection.KeychainHasCredentials {
+		t.Fatal("expected the keychain marker to persist")
+	}
+}
+
+func TestPlaintextFallbackClearsMarker(t *testing.T) {
+	cfg := config.Default()
+	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+	cfg.Connection.KeychainHasCredentials = true
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", errors.New("collection is locked") },
+		func(service, user, password string) error { return errors.New("collection is locked") },
+		func(service, user string) error { return nil },
+	))
+
+	updated := controller.Config()
+	updated.Connection.AuthMethod = config.AuthMethodPassword
+	if _, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{
+		Username: "demo",
+		Password: "secret",
+	}, CredentialFallbackPlaintext); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+
+	final := controller.Config()
+	if final.Connection.CredentialStorage != config.CredentialStoragePlaintext {
+		t.Fatalf("unexpected storage mode: %q", final.Connection.CredentialStorage)
+	}
+	if final.Connection.KeychainHasCredentials {
+		t.Fatal("expected the keychain marker to be cleared by the plaintext fallback")
+	}
+
+	disk, err := config.Load(controller.configPath)
+	if err != nil {
+		t.Fatalf("load persisted config: %v", err)
+	}
+	if disk.Connection.KeychainHasCredentials {
+		t.Fatal("expected the cleared marker to persist")
+	}
+}
+
+func TestMigrationSetsKeychainMarker(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	cfg := config.Default()
+	cfg.Connection.Username = "demo"
+	cfg.Connection.Password = "secret"
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	controller, err := newController(path, slog.Default(), credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	controller.platform = nil
+
+	if !controller.Config().Connection.KeychainHasCredentials {
+		t.Fatal("expected the migration to set the keychain marker")
+	}
+
+	disk, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("load persisted config: %v", err)
+	}
+	if !disk.Connection.KeychainHasCredentials {
+		t.Fatal("expected the marker to persist after migration")
+	}
+}
+
 func newTestController(t *testing.T, cfg config.AppConfig, store credentials.Store) *Controller {
 	t.Helper()
 
