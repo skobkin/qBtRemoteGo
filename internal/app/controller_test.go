@@ -931,6 +931,104 @@ func TestRememberSavePathDoesNotRevertConcurrentSettingsSave(t *testing.T) {
 	}
 }
 
+// newConnectableTestController returns a controller whose config carries a
+// usable connection, so client() can actually build a client.
+func newConnectableTestController(t *testing.T) *Controller {
+	t.Helper()
+
+	cfg := config.Default()
+	cfg.Connection.URL = "http://localhost:8080"
+	cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
+	cfg.Connection.Username = "demo"
+	cfg.Connection.Password = "secret"
+
+	return newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+}
+
+func TestSetLoggerRebuildsCachedClient(t *testing.T) {
+	controller := newConnectableTestController(t)
+
+	first, err := controller.client()
+	if err != nil {
+		t.Fatalf("first client: %v", err)
+	}
+	cached, err := controller.client()
+	if err != nil {
+		t.Fatalf("cached client: %v", err)
+	}
+	if cached != first {
+		t.Fatal("expected the client to be cached")
+	}
+
+	replacement := slog.New(slog.NewTextHandler(io.Discard, nil))
+	controller.SetLogger(replacement)
+
+	rebuilt, err := controller.client()
+	if err != nil {
+		t.Fatalf("client after SetLogger: %v", err)
+	}
+	if rebuilt == first {
+		t.Fatal("expected SetLogger to rebuild the cached client")
+	}
+	if rebuilt.Logger() != replacement {
+		t.Fatalf("rebuilt client does not use the new logger")
+	}
+}
+
+// A client built concurrently with a logger swap must be either discarded and
+// rebuilt or built with the new logger — never keep a logger that a later
+// SetLogger may have closed underneath (log-to-file rotation).
+func TestClientAlwaysUsesCurrentLogger(t *testing.T) {
+	controller := newConnectableTestController(t)
+
+	const swaps = 4
+	loggers := make([]*slog.Logger, swaps)
+	for i := range loggers {
+		loggers[i] = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	const callers = 8
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				client, err := controller.client()
+				if err != nil {
+					t.Errorf("client: %v", err)
+
+					return
+				}
+				_ = client
+			}
+		}()
+	}
+	for _, logger := range loggers {
+		controller.SetLogger(logger)
+	}
+	close(stop)
+	wg.Wait()
+
+	client, err := controller.client()
+	if err != nil {
+		t.Fatalf("final client: %v", err)
+	}
+	if client.Logger() != loggers[swaps-1] {
+		t.Fatal("cached client kept a stale logger")
+	}
+}
+
 func newTestController(t *testing.T, cfg config.AppConfig, store credentials.Store) *Controller {
 	t.Helper()
 

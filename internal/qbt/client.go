@@ -120,6 +120,12 @@ func (c *Client) TestConnection(ctx context.Context) error {
 	return err
 }
 
+// Logger exposes the logger the client was built with, so callers can verify
+// which logger a cached client captured.
+func (c *Client) Logger() *slog.Logger {
+	return c.logger
+}
+
 // Version authenticates if needed and returns the qBittorrent server version
 // reported by app/version.
 func (c *Client) Version(ctx context.Context) (string, error) {

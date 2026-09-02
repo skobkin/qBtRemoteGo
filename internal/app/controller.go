@@ -19,20 +19,23 @@ import (
 
 type Controller struct {
 	configPath      string
-	platform        *platform.Manager
 	credentialStore credentials.Store
 
 	// stateMu guards the state shared between the UI thread (which mutates
-	// settings) and the poll / details fetch goroutines (which read it).
+	// settings) and the poll / details fetch goroutines (which read it): the
+	// config, the logger, the platform manager, session credentials, the
+	// credential status, and the cached client below.
 	stateMu            sync.RWMutex
 	config             config.AppConfig
 	logger             *slog.Logger
+	platform           *platform.Manager
 	sessionCredentials credentials.Credentials
 	credentialStatus   credentials.Status
 
 	// Cached qBittorrent client: caching keeps the login session (cookie jar)
 	// alive across requests instead of performing a fresh auth/login per call.
-	clientMu           sync.Mutex
+	// Guarded by stateMu like everything above; qbt.NewClient does no I/O, so
+	// building a client under the lock is cheap.
 	cachedClient       *qbt.Client
 	cachedClientConfig qbt.ClientConfig
 }
@@ -110,19 +113,18 @@ func (c *Controller) currentLogger() *slog.Logger {
 	return c.logger
 }
 
+// SetLogger swaps the active logger, rebuilds the platform manager with it,
+// and drops the cached client (which captured the previous logger) as one
+// locked step, so an in-flight client lookup cannot finish with the stale
+// logger.
 func (c *Controller) SetLogger(logger *slog.Logger) {
 	c.stateMu.Lock()
-	c.logger = logger
-	c.stateMu.Unlock()
+	defer c.stateMu.Unlock()
 
-	// The cached client captured the previous logger, so drop it and let the
-	// next call rebuild with the new one.
-	c.clientMu.Lock()
+	c.logger = logger
+	c.platform = platform.NewManager(logger)
 	c.cachedClient = nil
 	c.cachedClientConfig = qbt.ClientConfig{}
-	c.clientMu.Unlock()
-
-	c.platform = platform.NewManager(logger)
 }
 
 func (c *Controller) SessionCredentials() credentials.Credentials {
@@ -246,7 +248,12 @@ func (c *Controller) SaveLocalUI(mutate func(cfg *config.AppConfig)) error {
 }
 
 func (c *Controller) SyncIntegrations() []error {
-	return c.platform.Sync(c.Config().Integration)
+	c.stateMu.RLock()
+	platformManager := c.platform
+	integration := c.config.Integration
+	c.stateMu.RUnlock()
+
+	return platformManager.Sync(integration)
 }
 
 func (c *Controller) TestConnection(ctx context.Context, cfg config.ConnectionConfig, creds credentials.Credentials) error {
@@ -1020,19 +1027,24 @@ func (c *Controller) saveWithFallback(
 	return SaveSettingsResult{CredentialStatus: status}, nil
 }
 
+// statusFromError classifies a keychain error for the UI. The stored status is
+// read under the lock, but the backend lookup may probe the keyring, so it
+// runs outside the lock.
 func (c *Controller) statusFromError(err error) credentials.Status {
+	c.stateMu.RLock()
+	previous := c.credentialStatus
+	c.stateMu.RUnlock()
+
+	backend := currentCredentialBackend(previous, c.credentialStore)
+	state := credentials.StateUnavailable
 	var credErr *credentials.Error
 	if errors.As(err, &credErr) {
-		return credentials.Status{
-			Backend: currentCredentialBackend(c.credentialStatus, c.credentialStore),
-			State:   credErr.State(),
-			Message: err.Error(),
-		}
+		state = credErr.State()
 	}
 
 	return credentials.Status{
-		Backend: currentCredentialBackend(c.credentialStatus, c.credentialStore),
-		State:   credentials.StateUnavailable,
+		Backend: backend,
+		State:   state,
 		Message: err.Error(),
 	}
 }
@@ -1104,25 +1116,26 @@ func connectionClientConfig(cfg config.ConnectionConfig, creds credentials.Crede
 
 // client returns a cached qBittorrent client for the current connection
 // configuration, rebuilding it whenever the connection settings or session
-// credentials change (the config struct doubles as the cache key). The key is
-// read under stateMu so a settings save on the UI thread cannot be observed
-// half-applied by a fetch goroutine assembling the key.
+// credentials change (the config struct doubles as the cache key). The whole
+// snapshot → cache check → build → store sequence runs under one exclusive
+// stateMu hold: the key cannot be observed half-applied by a concurrent
+// settings save, and SetLogger cannot leave the cache holding a client built
+// with the old logger. The lock is exclusive because it also writes the cache;
+// qbt.NewClient does no I/O, so the critical section is cheap.
 func (c *Controller) client() (*qbt.Client, error) {
-	c.stateMu.RLock()
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
 	qcfg, err := connectionClientConfig(c.config.Connection, c.sessionCredentials)
-	logger := c.logger
-	c.stateMu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
 
-	c.clientMu.Lock()
-	defer c.clientMu.Unlock()
 	if c.cachedClient != nil && c.cachedClientConfig == qcfg {
 		return c.cachedClient, nil
 	}
 
-	client, err := qbt.NewClient(qcfg, logger)
+	client, err := qbt.NewClient(qcfg, c.logger)
 	if err != nil {
 		return nil, err
 	}
