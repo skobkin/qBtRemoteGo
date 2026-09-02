@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -86,6 +87,97 @@ func TestStatusTextUsesEmojiMarkers(t *testing.T) {
 	if got := app.statusText(); got != want {
 		t.Fatalf("unexpected status text:\n got: %q\nwant: %q", got, want)
 	}
+}
+
+func TestStatusTextShowsKeychainWait(t *testing.T) {
+	wait := "Waiting for system keychain (Secret Service)…"
+	app := &application{
+		allTorrents:     []qbt.Torrent{{Hash: "a"}},
+		visibleTorrents: []qbt.Torrent{{Hash: "a"}},
+		credentialWait:  wait,
+		lastError:       "boom",
+	}
+
+	got := app.statusText()
+	want := "📦 1 | 🔎 1 | ⬇️ 0 B/s | ⬆️ 0 B/s | Lim ⬇️:∞ ⬆️:∞ | Waiting for system keychain (Secret Service)… | Last error: boom"
+	if got != want {
+		t.Fatalf("unexpected status text:\n got: %q\nwant: %q", got, want)
+	}
+
+	// The waiting hint renders without a trailing "Last error" when no
+	// connection failure was recorded alongside it.
+	app.lastError = ""
+	if strings.Contains(app.statusText(), "Last error") {
+		t.Fatalf("expected the waiting hint to replace the error, got %q", app.statusText())
+	}
+}
+
+func TestKeychainWaitingText(t *testing.T) {
+	if got, want := keychainWaitingText(credentials.Status{Backend: "Secret Service"}), "Waiting for system keychain (Secret Service)…"; got != want {
+		t.Fatalf("unexpected waiting text: got %q, want %q", got, want)
+	}
+	if got, want := keychainWaitingText(credentials.Status{Backend: "  "}), "Waiting for system keychain…"; got != want {
+		t.Fatalf("unexpected fallback waiting text: got %q, want %q", got, want)
+	}
+	if got, want := keychainWaitingText(credentials.Status{}), "Waiting for system keychain…"; got != want {
+		t.Fatalf("unexpected empty-status waiting text: got %q, want %q", got, want)
+	}
+}
+
+func TestNoteFetchErrorClassification(t *testing.T) {
+	t.Run("typed waiting error becomes the hint and clears the error", func(t *testing.T) {
+		app := &application{lastError: "connection refused"}
+
+		app.noteFetchError(&appcore.CredentialUnavailableError{Status: credentials.Status{
+			Backend: "Secret Service",
+			State:   credentials.StateUnavailable,
+		}})
+
+		if app.credentialWait != "Waiting for system keychain (Secret Service)…" {
+			t.Fatalf("unexpected waiting hint: %q", app.credentialWait)
+		}
+		if app.lastError != "" {
+			t.Fatalf("expected the stale error to be cleared, got %q", app.lastError)
+		}
+	})
+
+	t.Run("plain error keeps the first failure", func(t *testing.T) {
+		app := &application{}
+
+		app.noteFetchError(errors.New("first failure"))
+		app.noteFetchError(errors.New("second failure"))
+
+		if app.lastError != "first failure" {
+			t.Fatalf("expected first-error-wins, got %q", app.lastError)
+		}
+		if app.credentialWait != "" {
+			t.Fatalf("unexpected waiting hint: %q", app.credentialWait)
+		}
+	})
+
+	t.Run("plain error replaces a stale waiting hint", func(t *testing.T) {
+		stale := "Waiting for system keychain…"
+		app := &application{credentialWait: stale}
+
+		app.noteFetchError(errors.New("no API key is stored"))
+
+		if app.lastError != "no API key is stored" {
+			t.Fatalf("expected the stale hint to be superseded, got lastError %q", app.lastError)
+		}
+		if app.credentialWait != "" {
+			t.Fatalf("expected the stale hint to be cleared, got %q", app.credentialWait)
+		}
+	})
+
+	t.Run("nil error is ignored", func(t *testing.T) {
+		app := &application{lastError: "kept"}
+
+		app.noteFetchError(nil)
+
+		if app.lastError != "kept" {
+			t.Fatalf("nil error cleared the recorded failure: %q", app.lastError)
+		}
+	})
 }
 
 func TestBuildAddTorrentFormSections(t *testing.T) {

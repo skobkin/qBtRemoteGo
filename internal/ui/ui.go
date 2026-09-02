@@ -52,6 +52,7 @@ type application struct {
 	connectionState   connectionState
 	serverVersion     string
 	lastError         string
+	credentialWait    string
 	windowVisible     bool
 	trayAvailable     bool
 	settingsWindow    fyne.Window
@@ -1140,10 +1141,47 @@ func (a *application) statusText() string {
 	if a.serverStateKnown {
 		parts = append(parts, "Free "+appcore.HumanBytes(a.serverState.FreeSpaceOnDisk))
 	}
+	if strings.TrimSpace(a.credentialWait) != "" {
+		parts = append(parts, a.credentialWait)
+	}
 	if strings.TrimSpace(a.lastError) != "" {
 		parts = append(parts, "Last error: "+a.lastError)
 	}
 	return strings.Join(parts, " | ")
+}
+
+// keychainWaitingText renders the status-bar hint shown while the controller's
+// background retry is still trying to load credentials from the system keychain.
+func keychainWaitingText(status credentials.Status) string {
+	if backend := strings.TrimSpace(status.Backend); backend != "" {
+		return "Waiting for system keychain (" + backend + ")…"
+	}
+
+	return "Waiting for system keychain…"
+}
+
+// noteFetchError records a fetch failure for the status bar. A typed
+// CredentialUnavailableError is not a connection failure: it becomes the
+// waiting hint and clears any stale connection error, while ordinary errors
+// keep the first failure until a refresh succeeds.
+func (a *application) noteFetchError(err error) {
+	if err == nil {
+		return
+	}
+	var waitErr *appcore.CredentialUnavailableError
+	if errors.As(err, &waitErr) {
+		a.credentialWait = keychainWaitingText(waitErr.Status)
+		a.lastError = ""
+
+		return
+	}
+	if strings.TrimSpace(a.lastError) != "" {
+		return
+	}
+	// A plain failure supersedes a stale waiting hint: once the retry loop is
+	// no longer reporting waiting errors, the hint would otherwise outlive it.
+	a.credentialWait = ""
+	a.lastError = err.Error()
 }
 
 func (a *application) refreshStatusIcons() {
@@ -1205,6 +1243,7 @@ func (a *application) refreshNow() {
 		if err == nil {
 			a.allTorrents = torrents
 			a.lastError = ""
+			a.credentialWait = ""
 			a.connectionState = connectionStateConnected
 			if serverVersionErr != nil {
 				a.logger.Debug("load server version", "error", serverVersionErr)
@@ -1212,20 +1251,20 @@ func (a *application) refreshNow() {
 				a.serverVersion = version
 			}
 		} else {
-			a.lastError = err.Error()
+			a.noteFetchError(err)
 			a.connectionState = connectionStateDisconnected
 			a.serverVersion = ""
 		}
 		if transferErr == nil {
 			a.transfer = transfer
-		} else if a.lastError == "" {
-			a.lastError = transferErr.Error()
+		} else {
+			a.noteFetchError(transferErr)
 		}
 		if serverStateErr == nil {
 			a.serverState = serverState
 			a.serverStateKnown = true
-		} else if a.lastError == "" {
-			a.lastError = serverStateErr.Error()
+		} else {
+			a.noteFetchError(serverStateErr)
 		}
 		if title := mainWindowTitle(a.connectionState, a.serverVersion); title != a.window.Title() {
 			a.window.SetTitle(title)
