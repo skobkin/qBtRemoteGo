@@ -97,7 +97,7 @@ type detailsContentRow struct {
 	// nameCell is the name column: the expander toggle plus the name label,
 	// indented by tree depth.
 	nameCell      *fyne.Container
-	checkbox      *widget.Label
+	checkbox      *triStateCheck
 	expander      *contentExpanderToggle
 	name          *hoverLabel
 	size          *hoverLabel
@@ -405,11 +405,10 @@ func newDetailsContentRow(app *application) *detailsContentRow {
 		app:           app,
 		hoverBG:       canvas.NewRectangle(theme.Color(theme.ColorNameHover)),
 		hoverOutDelay: rowHoverOutDelay,
-		checkbox:      widget.NewLabel(""),
 		progress:      widget.NewProgressBar(),
 	}
 	row.hoverBG.Hide()
-	row.checkbox.Truncation = fyne.TextTruncateEllipsis
+	row.checkbox = newTriStateCheck(row)
 	// Cells carry instant tooltips: like the torrent table's non-name cells,
 	// the tooltip appears only when the value is wider than its column.
 	row.name = newHoverLabel(app.tooltipManager, 0, row)
@@ -496,7 +495,7 @@ func (r *detailsContentRow) SetRow(row *contentVisibleRow) {
 		return
 	}
 	node := row.node
-	r.checkbox.SetText(contentCheckboxText(node.priority))
+	r.checkbox.SetState(contentCheckState(node.priority))
 	// The name's hover text is the full path: the label shows the entry name
 	// truncated by the column, so the tooltip is what disambiguates it.
 	r.name.SetText(node.name, node.path)
@@ -639,14 +638,14 @@ func contentPriorityLabel(priority int) string {
 	}
 }
 
-func contentCheckboxText(priority int) string {
+func contentCheckState(priority int) checkState {
 	switch priority {
 	case contentPriorityIgnored:
-		return "[ ]"
+		return checkStateUnchecked
 	case contentPriorityMixed:
-		return "[-]"
+		return checkStateMixed
 	default:
-		return "[x]"
+		return checkStateChecked
 	}
 }
 

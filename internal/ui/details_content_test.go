@@ -164,6 +164,28 @@ func TestContentRowExpanded(t *testing.T) {
 	}
 }
 
+func TestContentCheckState(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority int
+		want     checkState
+	}{
+		{"ignored file is unchecked", contentPriorityIgnored, checkStateUnchecked},
+		{"mixed folder is mixed", contentPriorityMixed, checkStateMixed},
+		{"normal priority is checked", contentPriorityNormal, checkStateChecked},
+		{"high priority is checked", contentPriorityHigh, checkStateChecked},
+		{"maximum priority is checked", contentPriorityMaximum, checkStateChecked},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := contentCheckState(tt.priority); got != tt.want {
+				t.Fatalf("contentCheckState(%d) = %v, want %v", tt.priority, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSortedPeersOrdersByAddressKey(t *testing.T) {
 	peers := sortedPeers(map[string]qbt.TorrentPeer{
 		"b": {IP: "2.2.2.2"},
