@@ -352,6 +352,10 @@ func (a *application) openSettingsWindow() {
 	// While the background retry is still loading stored keychain credentials,
 	// the empty API-key field must not read as "nothing stored".
 	apiKeyPending := keychainLoadPending(cfg.Connection, credStatus, session, retryActive)
+	// An unresolved stored load also means the empty credential fields do not
+	// mean "cleared credentials": saves and connection tests keep the stored
+	// values instead of blanking them.
+	credentialsUnresolved := keychainLoadUnresolved(cfg.Connection, credStatus, session)
 	usernameEntry := widget.NewEntry()
 	usernameEntry.SetText(session.Username)
 	passwordEntry := widget.NewPasswordEntry()
@@ -453,16 +457,20 @@ func (a *application) openSettingsWindow() {
 
 	testButton := widget.NewButton("Test connection", func() {
 		testStatus.SetText("Testing connection...")
+		testedCreds := credentials.Credentials{
+			Username: usernameEntry.Text,
+			Password: passwordEntry.Text,
+			APIKey:   strings.TrimSpace(apiKeyEntry.Text),
+		}
+		if credentialsUnresolved {
+			testedCreds = mergeUnloadedCredentials(testedCreds, a.controller.SessionCredentials())
+		}
 		go func() {
 			err := a.controller.TestConnection(context.Background(), config.ConnectionConfig{
 				URL:                  urlEntry.Text,
 				AuthMethod:           authMethodKey(authMethod.Selected),
 				SkipCertificateCheck: skipTLS.Checked,
-			}, credentials.Credentials{
-				Username: usernameEntry.Text,
-				Password: passwordEntry.Text,
-				APIKey:   apiKeyEntry.Text,
-			})
+			}, testedCreds)
 			fyne.Do(func() {
 				if err != nil {
 					testStatus.SetText("Connection test failed: " + err.Error())
@@ -572,11 +580,17 @@ func (a *application) openSettingsWindow() {
 			Password: passwordEntry.Text,
 			APIKey:   strings.TrimSpace(apiKeyEntry.Text),
 		}
-		if updated.Connection.AuthMethod == config.AuthMethodAPIKey {
-			if editedCreds.APIKey == "" {
-				dialog.ShowError(errors.New("API key is required when API key authentication is selected"), win)
-				return
-			}
+		// Fields left empty while the stored keychain load is unresolved keep
+		// the stored values: the form could not show them, and saving blanks
+		// would destroy the payload.
+		if credentialsUnresolved {
+			editedCreds = mergeUnloadedCredentials(editedCreds, a.controller.SessionCredentials())
+		}
+		if apiKeyRequired(updated.Connection.AuthMethod, editedCreds.APIKey, credentialsUnresolved) {
+			dialog.ShowError(errors.New("API key is required when API key authentication is selected"), win)
+			return
+		}
+		if editedCreds.APIKey != "" {
 			if err := qbt.ValidateAPIKey(editedCreds.APIKey); err != nil {
 				dialog.ShowError(err, win)
 				return
@@ -743,6 +757,32 @@ func keychainLoadPending(
 	retryActive bool,
 ) bool {
 	return keychainLoadUnresolved(conn, status, session) && retryActive
+}
+
+// mergeUnloadedCredentials fills the empty fields of the edited settings-form
+// credentials from credentials stored in the keychain that the form could not
+// show (a pending or failed startup load). Typed values win, so replacing the
+// stored credentials still works.
+func mergeUnloadedCredentials(edited, stored credentials.Credentials) credentials.Credentials {
+	if edited.Username == "" {
+		edited.Username = stored.Username
+	}
+	if edited.Password == "" {
+		edited.Password = stored.Password
+	}
+	if edited.APIKey == "" {
+		edited.APIKey = stored.APIKey
+	}
+
+	return edited
+}
+
+// apiKeyRequired reports whether saving in API-key mode with an empty key
+// field must be rejected. While a stored keychain load is unresolved, the
+// empty field means "keep the stored key", so the save goes through and the
+// controller keeps the payload.
+func apiKeyRequired(method config.AuthMethod, editedKey string, pendingLoad bool) bool {
+	return method == config.AuthMethodAPIKey && strings.TrimSpace(editedKey) == "" && !pendingLoad
 }
 
 func connectionCredentialStorageText(

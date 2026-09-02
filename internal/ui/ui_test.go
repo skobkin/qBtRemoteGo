@@ -628,6 +628,46 @@ func TestKeychainPendingLoadSummaryAndWarning(t *testing.T) {
 	})
 }
 
+// While a stored keychain load is unresolved, the settings form cannot show
+// the stored values; empty fields must keep them, and typed ones must win.
+func TestMergeUnloadedCredentials(t *testing.T) {
+	t.Run("empty fields keep the stored values", func(t *testing.T) {
+		stored := credentials.Credentials{
+			Username: "stored",
+			Password: "stored-pw",
+			APIKey:   "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}
+
+		if got := mergeUnloadedCredentials(credentials.Credentials{}, stored); got != stored {
+			t.Fatalf("expected the stored credentials, got %#v", got)
+		}
+	})
+
+	t.Run("typed values win over the stored ones", func(t *testing.T) {
+		stored := credentials.Credentials{Username: "stored", Password: "stored-pw"}
+		edited := credentials.Credentials{Username: "typed", Password: "typed-pw"}
+
+		if got := mergeUnloadedCredentials(edited, stored); got != edited {
+			t.Fatalf("unexpected merge result: got %#v, want %#v", got, edited)
+		}
+	})
+}
+
+func TestAPIKeyRequired(t *testing.T) {
+	if !apiKeyRequired(config.AuthMethodAPIKey, "", false) {
+		t.Fatal("expected an empty API key field to reject the save")
+	}
+	if apiKeyRequired(config.AuthMethodAPIKey, "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false) {
+		t.Fatal("did not expect a typed API key to reject the save")
+	}
+	if apiKeyRequired(config.AuthMethodPassword, "", false) {
+		t.Fatal("did not expect password auth to require an API key")
+	}
+	if apiKeyRequired(config.AuthMethodAPIKey, "", true) {
+		t.Fatal("an unresolved stored load must keep the stored key instead of rejecting the save")
+	}
+}
+
 func TestAuthMethodLabelRoundTrip(t *testing.T) {
 	tests := []struct {
 		name   string
