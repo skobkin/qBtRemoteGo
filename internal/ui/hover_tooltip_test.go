@@ -700,6 +700,36 @@ func TestHoverCellLabelMinSizeMatchesPlainLabel(t *testing.T) {
 	}
 }
 
+// Compact rows are shorter than a label's padded minimum and Fyne labels draw
+// text from the top of their bounds, so a full-height label pins the glyphs to
+// the bottom edge. The cell must center the label box instead, which centers
+// the glyphs with it, while the tint fills the whole cell.
+func TestHoverLabelCentersLabelVertically(t *testing.T) {
+	test.NewTempApp(t)
+
+	cellH := float32(26) // a compact torrent cell: compactRowHeight - 2
+	plainMin := widget.NewLabel("").MinSize().Height
+	expectY := (cellH - plainMin) / 2
+
+	h := newHoverLabel(nil, 0, nil)
+	h.Resize(fyne.NewSize(80, cellH))
+	if got := h.label.Position().Y; got != expectY {
+		t.Fatalf("label top %.2f, want %.2f so the glyphs center in the cell", got, expectY)
+	}
+	if got := h.label.Size(); got.Width != 80 || got.Height != plainMin {
+		t.Fatalf("label size %v, want 80 wide and the label minimum height %.2f", got, plainMin)
+	}
+
+	cell := newHoverCellLabel(nil)
+	cell.Resize(fyne.NewSize(80, cellH))
+	if got := cell.label.Position().Y; got != expectY {
+		t.Fatalf("cell label top %.2f, want %.2f", got, expectY)
+	}
+	if got := cell.hoverBG.Size(); got.Width != 80 || got.Height != cellH {
+		t.Fatalf("tint size %v, want the full cell 80x%.0f", got, cellH)
+	}
+}
+
 // The details tables (peers, trackers, HTTP sources) reuse the torrent-table
 // tooltip: a value wider than its fixed column shows the full text on hover.
 func TestDetailsTableViewCellShowsTooltipWhenTruncated(t *testing.T) {

@@ -821,12 +821,37 @@ func newHoverLabel(manager *hoverTooltipManager, showDelay time.Duration, row ho
 	h := &hoverLabel{
 		hoverTooltipOwner: hoverTooltipOwner{manager: manager},
 		label:             label,
-		root:              label,
+		root:              container.New(vCenterLayout{}, label),
 		showDelay:         showDelay,
 		row:               row,
 	}
 	h.ExtendBaseWidget(h)
 	return h
+}
+
+// vCenterLayout gives its single child the full width and centers it
+// vertically at the child's minimum height. Rows are shorter than a label's
+// padded minimum (a 28 px compact cell against a 35 px label) and Fyne labels
+// draw text from the top of their bounds with the theme's inner padding, so
+// filling the cell pushes the glyphs onto its bottom edge. Centering the label
+// box centers the glyphs with it; the widget's own bounds — and with them the
+// hover and tap hit areas — are laid out by the row and stay untouched.
+type vCenterLayout struct{}
+
+func (vCenterLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) != 1 {
+		return
+	}
+	h := objects[0].MinSize().Height
+	objects[0].Move(fyne.NewPos(0, (size.Height-h)/2))
+	objects[0].Resize(fyne.NewSize(size.Width, h))
+}
+
+func (vCenterLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) != 1 {
+		return fyne.Size{}
+	}
+	return objects[0].MinSize()
 }
 
 // newHoverCellLabel returns a hover label for a widget.Table cell: it shows a
@@ -843,7 +868,7 @@ func newHoverCellLabel(manager *hoverTooltipManager) *hoverLabel {
 	h := &hoverLabel{
 		hoverTooltipOwner: hoverTooltipOwner{manager: manager},
 		label:             label,
-		root:              container.NewStack(bg, label),
+		root:              container.NewStack(bg, container.New(vCenterLayout{}, label)),
 		hoverBG:           bg,
 	}
 	h.ExtendBaseWidget(h)
