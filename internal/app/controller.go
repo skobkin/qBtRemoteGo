@@ -204,6 +204,25 @@ func (c *Controller) SaveSettings(
 	c.setCredentialStatus(status)
 
 	persistedMode := c.Config().Connection.CredentialStorage
+
+	// An empty credentials form must never blank out a stored keychain payload:
+	// while a stored load is pending the form cannot show the values, and a
+	// blank write would destroy them (also once the retry has given up and the
+	// wallet is reachable again). Treat such a save as a pure settings change;
+	// clearing credentials is still possible by switching the storage mode
+	// away from the keychain.
+	if trimmedCreds == (credentials.Credentials{}) &&
+		persistedMode == config.CredentialStorageKeychain &&
+		c.Config().Connection.KeychainHasCredentials {
+		_, err := c.persistConfig(true, applyEdits)
+		if err != nil {
+			return SaveSettingsResult{CredentialStatus: status}, err
+		}
+		c.setCredentialStatus(status)
+
+		return SaveSettingsResult{CredentialStatus: status}, nil
+	}
+
 	if status.State == credentials.StateAvailable {
 		if err := c.credentialStore.Set(ctx, trimmedCreds); err != nil {
 			status = c.statusFromError(err)

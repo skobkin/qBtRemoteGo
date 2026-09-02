@@ -383,6 +383,53 @@ func TestSaveSettingsSessionOnlyKeepsKeychainModeDuringTemporaryOutage(t *testin
 	}
 }
 
+// Regression: saving settings while a stored keychain load is still pending
+// used to overwrite the keychain payload with blank credentials once the
+// keychain became reachable (or after the retry had given up), destroying the
+// stored secrets. An empty credentials form must keep the payload.
+func TestSaveSettingsWithEmptyCredentialsKeepsKeychainPayload(t *testing.T) {
+	store, raw := newCapturingKeychainStore()
+	cfg := config.Default()
+	cfg.Connection.URL = "http://localhost:8080"
+	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+	cfg.Connection.KeychainHasCredentials = true
+	cfg.Connection.AuthMethod = config.AuthMethodAPIKey
+	controller := newTestController(t, cfg, store)
+	// The retry loop would race the test by loading the stored payload into
+	// the session; stop it to pin the pending-load shape.
+	controller.stopCredentialRetries()
+
+	// The keychain holds credentials that the startup load never surfaced.
+	*raw = `{"api_key":"` + testAPIKey + `"}`
+	if controller.SessionCredentials() != (credentials.Credentials{}) {
+		t.Fatalf("expected an empty session before the save, got %#v", controller.SessionCredentials())
+	}
+
+	updated := controller.Config()
+	updated.Logging.Level = "debug"
+	result, err := controller.SaveSettings(context.Background(), updated, credentials.Credentials{}, CredentialFallbackUnspecified)
+	if err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if result.DecisionRequired {
+		t.Fatal("did not expect a fallback decision for an empty credentials form")
+	}
+
+	stored := decodeStoredPayload(t, *raw)
+	if stored.APIKey != testAPIKey {
+		t.Fatalf("expected the stored API key to survive the save, got %#v", stored)
+	}
+	if controller.SessionCredentials() != (credentials.Credentials{}) {
+		t.Fatalf("expected the session to stay untouched, got %#v", controller.SessionCredentials())
+	}
+	if !controller.Config().Connection.KeychainHasCredentials {
+		t.Fatal("expected the stored marker to survive the save")
+	}
+	if got := controller.Config().Logging.Level; got != "debug" {
+		t.Fatalf("expected the settings edit to persist, got %q", got)
+	}
+}
+
 var testAPIKey = "qbt_" + strings.Repeat("a", 28)
 
 func newCapturingKeychainStore() (credentials.Store, *string) {
