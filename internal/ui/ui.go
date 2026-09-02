@@ -622,7 +622,11 @@ func (a *application) openSettingsWindow() {
 			dialog.ShowError(errors.New("API key is required when API key authentication is selected"), win)
 			return
 		}
-		if editedCreds.APIKey != "" {
+		// Only the active method's key is validated: canonicalCredentials drops
+		// credentials of inactive methods on save, so a stored key that failed
+		// to load cleanly — still sitting in the hidden entry — must not block
+		// saving a password-mode configuration.
+		if updated.Connection.AuthMethod == config.AuthMethodAPIKey && editedCreds.APIKey != "" {
 			if err := qbt.ValidateAPIKey(editedCreds.APIKey); err != nil {
 				dialog.ShowError(err, win)
 				return
