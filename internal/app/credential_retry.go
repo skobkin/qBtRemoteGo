@@ -57,17 +57,22 @@ func callWithTimeout[T any](timeout time.Duration, fn func() (T, error)) (T, err
 }
 
 // CredentialUnavailableError reports that credentials are configured to live in
-// the system keychain but have not been loaded yet, and that the controller is
-// retrying in the background. The UI shows the carried status instead of a
-// plain connection failure.
+// the system keychain but have not been loaded yet. The UI shows the carried
+// status instead of a plain connection failure. Waiting distinguishes an
+// ongoing background retry (a transient waiting state) from a terminal failure
+// whose status message is already actionable on its own.
 type CredentialUnavailableError struct {
-	Status credentials.Status
+	Status  credentials.Status
+	Waiting bool
 }
 
 func (e *CredentialUnavailableError) Error() string {
 	message := "credentials are not loaded yet"
 	if e != nil && strings.TrimSpace(e.Status.Message) != "" {
 		message = e.Status.Message
+	}
+	if e == nil || !e.Waiting {
+		return message
 	}
 
 	return "waiting for system keychain: " + message

@@ -1231,16 +1231,20 @@ func (c *Controller) client() (*qbt.Client, error) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 
-	// While the background retry is still trying to load stored keychain
-	// credentials, fetches must fail with a typed "waiting" error instead of
-	// connecting with empty credentials (in password mode empty credentials
-	// are otherwise legal and would just fail at login with a confusing
-	// message).
+	// While stored keychain credentials have not been loaded into the session,
+	// fetches must fail with a typed error instead of connecting with empty
+	// credentials (in password mode empty credentials are otherwise legal and
+	// would just fail at login with a confusing message). This covers the
+	// running background retry as well as the terminal states it can end in —
+	// an unreadable payload, an unsupported keychain, or an exhausted retry
+	// cap — whose statuses carry the actionable message.
 	if c.config.Connection.CredentialStorage == config.CredentialStorageKeychain &&
-		c.config.Connection.KeychainHasCredentials &&
-		c.credentialRetryActive &&
-		c.sessionCredentials == (credentials.Credentials{}) {
-		return nil, &CredentialUnavailableError{Status: c.credentialStatus}
+		c.sessionCredentials == (credentials.Credentials{}) &&
+		c.credentialStatus.State != credentials.StateAvailable {
+		return nil, &CredentialUnavailableError{
+			Status:  c.credentialStatus,
+			Waiting: c.credentialRetryActive,
+		}
 	}
 
 	qcfg, err := connectionClientConfig(c.config.Connection, c.sessionCredentials)

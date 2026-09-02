@@ -285,6 +285,92 @@ func TestMarkerlessKeychainWithoutStoredCredentialsDoesNotRetry(t *testing.T) {
 	}
 }
 
+// After the retry loop ends in a terminal state (an unreadable payload, an
+// unsupported keychain, or the exhausted attempt cap) the stored marker is
+// still set and the session is still empty; client creation must surface the
+// actionable status instead of building a client with blank credentials.
+func TestClientSurfacesTerminalKeychainStatus(t *testing.T) {
+	for _, method := range []config.AuthMethod{config.AuthMethodAPIKey, config.AuthMethodPassword} {
+		t.Run(string(method), func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Connection.URL = "http://localhost:8080"
+			cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+			cfg.Connection.KeychainHasCredentials = true
+			cfg.Connection.AuthMethod = method
+			controller := newTestController(t, cfg, newNotStoredStore())
+			controller.stopCredentialRetries()
+
+			controller.setCredentialStatus(credentials.Status{
+				Backend: "Secret Service",
+				State:   credentials.StateUnavailable,
+				Message: "Gave up waiting for the system keychain; open Settings > Connection and re-enter the credentials.",
+			})
+
+			_, err := controller.client()
+			var waitErr *CredentialUnavailableError
+			if !errors.As(err, &waitErr) {
+				t.Fatalf("expected a CredentialUnavailableError, got %v", err)
+			}
+			if waitErr.Waiting {
+				t.Fatal("a terminal status must not be reported as still waiting")
+			}
+			if !strings.Contains(err.Error(), "Gave up waiting") {
+				t.Fatalf("expected the actionable terminal message, got %v", err)
+			}
+		})
+	}
+}
+
+// A marker-less keychain config with a failing keychain used to fall through
+// to normal client construction, which logs in with blank password
+// credentials.
+func TestClientWaitsForMarkerlessKeychainFailure(t *testing.T) {
+	cfg := config.Default()
+	cfg.Connection.URL = "http://localhost:8080"
+	cfg.Connection.CredentialStorage = config.CredentialStorageKeychain
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
+	store := credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", errors.New("collection is locked") },
+		nil,
+		nil,
+	)
+	controller := newTestController(t, cfg, store)
+
+	_, err := controller.client()
+	var waitErr *CredentialUnavailableError
+	if !errors.As(err, &waitErr) {
+		t.Fatalf("expected a CredentialUnavailableError, got %v", err)
+	}
+	if !waitErr.Waiting {
+		t.Fatal("expected the error to report an active retry")
+	}
+	if waitErr.Status.Backend == "" {
+		t.Fatal("expected the carried status to name the backend")
+	}
+}
+
+func TestCredentialUnavailableErrorMessage(t *testing.T) {
+	waiting := &CredentialUnavailableError{
+		Status:  credentials.Status{Message: "keychain locked"},
+		Waiting: true,
+	}
+	if got, want := waiting.Error(), "waiting for system keychain: keychain locked"; got != want {
+		t.Fatalf("unexpected waiting message: got %q, want %q", got, want)
+	}
+
+	terminal := &CredentialUnavailableError{
+		Status: credentials.Status{Message: "Gave up waiting for the system keychain"},
+	}
+	if got, want := terminal.Error(), "Gave up waiting for the system keychain"; got != want {
+		t.Fatalf("unexpected terminal message: got %q, want %q", got, want)
+	}
+
+	fallback := &CredentialUnavailableError{Waiting: true}
+	if got, want := fallback.Error(), "waiting for system keychain: credentials are not loaded yet"; got != want {
+		t.Fatalf("unexpected fallback message: got %q, want %q", got, want)
+	}
+}
+
 func TestKeychainLoadPendingPredicate(t *testing.T) {
 	controller := newTestController(t, config.Default(), newNotStoredStore())
 
