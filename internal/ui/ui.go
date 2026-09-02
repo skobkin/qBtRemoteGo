@@ -285,10 +285,32 @@ func (a *application) bindCloseBehavior() {
 	if !a.trayAvailable {
 		return
 	}
-	a.window.SetCloseIntercept(func() {
-		a.windowVisible.Store(false)
-		a.window.Hide()
-	})
+	a.window.SetCloseIntercept(a.hideMainWindow)
+}
+
+// showMainWindow reveals the main window and records visibility for the poll
+// interval.
+func (a *application) showMainWindow() {
+	a.windowVisible.Store(true)
+	a.window.Show()
+	a.window.RequestFocus()
+}
+
+// hideMainWindow tucks the main window into the tray and records visibility
+// for the poll interval.
+func (a *application) hideMainWindow() {
+	a.windowVisible.Store(false)
+	a.window.Hide()
+}
+
+// toggleMainWindow hides the main window when shown and shows it when hidden:
+// the standard left-click behaviour for a tray-controlled window.
+func (a *application) toggleMainWindow() {
+	if a.windowVisible.Load() {
+		a.hideMainWindow()
+		return
+	}
+	a.showMainWindow()
 }
 
 func (a *application) configureTray() {
@@ -297,16 +319,26 @@ func (a *application) configureTray() {
 		return
 	}
 
+	// Left-click on the tray icon toggles the main window (show if hidden,
+	// hide if shown).
+	//
+	// This must be registered before the tray item is published. fyne.io/systray
+	// snapshots ItemIsMenu from the tapped callbacks while exporting its DBus
+	// properties in nativeStart and never updates the snapshot; ItemIsMenu=true
+	// makes the desktop open the context menu on left-click instead of calling
+	// Activate. Fyne defers nativeStart to fyne.App.Run, so registering here —
+	// before SetSystemTrayMenu publishes the menu — keeps the property
+	// deterministically false.
+	systray.SetOnTapped(func() {
+		fyne.Do(a.toggleMainWindow)
+	})
+
 	a.trayAvailable = true
 	a.trayState = trayState{
 		desktopApp: desk,
 		speedItem:  fyne.NewMenuItem("Down 0 B/s | Up 0 B/s", nil),
 		showItem: fyne.NewMenuItem("Open main window", func() {
-			fyne.Do(func() {
-				a.windowVisible.Store(true)
-				a.window.Show()
-				a.window.RequestFocus()
-			})
+			fyne.Do(a.showMainWindow)
 		}),
 		quitItem: fyne.NewMenuItem("Quit application", func() {
 			a.fyApp.Quit()
@@ -315,13 +347,6 @@ func (a *application) configureTray() {
 	a.trayState.speedItem.Disabled = true
 	desk.SetSystemTrayIcon(resources.TrayIcon())
 	desk.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
-	systray.SetOnTapped(func() {
-		fyne.Do(func() {
-			a.windowVisible.Store(true)
-			a.window.Show()
-			a.window.RequestFocus()
-		})
-	})
 	systray.SetTooltip("Down 0 B/s | Up 0 B/s")
 }
 
