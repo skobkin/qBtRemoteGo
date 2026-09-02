@@ -62,6 +62,7 @@ type UIConfig struct {
 	FilterBy                   string             `json:"filter_by"`
 	SortColumn                 string             `json:"sort_column"`
 	SortDescending             bool               `json:"sort_descending"`
+	CompactRows                bool               `json:"compact_rows"`
 	ColumnWidths               map[string]float32 `json:"column_widths"`
 	RecentSavePaths            []string           `json:"recent_save_paths"`
 }
@@ -93,6 +94,7 @@ func Default() AppConfig {
 			FilterBy:                   "name",
 			SortColumn:                 "added",
 			SortDescending:             true,
+			CompactRows:                false,
 			ColumnWidths:               nil,
 			RecentSavePaths:            nil,
 		},

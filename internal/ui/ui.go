@@ -76,6 +76,7 @@ type application struct {
 	tooltipLayer   *tooltipOverlay
 	tooltipManager *hoverTooltipManager
 	columnWidths   map[string]float32
+	compactRows    bool
 	previewX       float32
 	detailsHost    *torrentDetailsHost
 	detailsState   *torrentDetailsState
@@ -426,6 +427,8 @@ func (a *application) openSettingsWindow() {
 	sortBy.SetSelected(sortColumnLabel(cfg.UI.SortColumn))
 	sortDescending := widget.NewCheck("", nil)
 	sortDescending.SetChecked(cfg.UI.SortDescending)
+	compactRows := widget.NewCheck("", nil)
+	compactRows.SetChecked(cfg.UI.CompactRows)
 	logLevel := widget.NewSelect(logging.SupportedLevels(), nil)
 	logLevel.SetSelected(cfg.Logging.Level)
 	logToFile := widget.NewCheck("", nil)
@@ -465,6 +468,7 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Details panel mode", detailsMode),
 		widget.NewFormItem("Sort by", sortBy),
 		widget.NewFormItem("Descending order", sortDescending),
+		widget.NewFormItem("Compact rows", compactRows),
 		widget.NewFormItem("Log level", logLevel),
 		widget.NewFormItem("Log to file", logToFile),
 	)
@@ -555,6 +559,7 @@ func (a *application) openSettingsWindow() {
 		// refresh probes it again.
 		a.serverVersion.Store("")
 		a.window.SetTitle(mainWindowTitle(a.connectionState, ""))
+		a.compactRows = updated.UI.CompactRows
 		a.refreshDetailsPresentation()
 		a.ensureDetailsFocusForSelection()
 		a.refreshVisibleTorrents()
@@ -595,6 +600,7 @@ func (a *application) openSettingsWindow() {
 		updated.UI.DetailsPanelMode = string(detailsModeFromLabel(detailsMode.Selected))
 		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
 		updated.UI.SortDescending = sortDescending.Checked
+		updated.UI.CompactRows = compactRows.Checked
 		updated.Logging.Level = logLevel.Selected
 		updated.Logging.LogToFile = logToFile.Checked
 		updated.Integration.RegisterMagnetHandler = registerMagnet.Checked

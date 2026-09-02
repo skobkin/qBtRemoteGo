@@ -65,6 +65,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg.UI.ColumnWidths = map[string]float32{"name": 480, "progress": 160}
 	cfg.UI.RecentSavePaths = []string{"/data/one", "/data/two"}
 	cfg.UI.RememberLastSaveLocation = false
+	cfg.UI.CompactRows = true
 
 	if err := Save(path, cfg); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -101,6 +102,15 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.UI.RememberLastSaveLocation {
 		t.Fatal("expected remember-last-save-location override to round-trip")
+	}
+	if !loaded.UI.CompactRows {
+		t.Fatal("expected compact rows to round-trip")
+	}
+}
+
+func TestDefaultCompactRowsDisabled(t *testing.T) {
+	if Default().UI.CompactRows {
+		t.Fatal("expected compact rows to default to disabled")
 	}
 }
 

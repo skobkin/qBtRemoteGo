@@ -102,6 +102,39 @@ func TestSetTorrentAppliesSelectionState(t *testing.T) {
 	}
 }
 
+// The compact-rows setting must flow into both min-size sources the list
+// measures (the row widget and its content layout) and re-layout the visible
+// rows on a plain list refresh.
+func TestTorrentRowMinSizeFollowsCompactRows(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+
+	if got := app.torrentRowHeightValue(); got != torrentRowHeight {
+		t.Fatalf("default row height %.0f, want %.0f", got, torrentRowHeight)
+	}
+	if got := app.rowForTest(t, "hash-a").MinSize().Height; got != torrentRowHeight {
+		t.Fatalf("default row min height %.0f, want %.0f", got, torrentRowHeight)
+	}
+
+	app.compactRows = true
+
+	if got := app.torrentRowHeightValue(); got != compactRowHeight {
+		t.Fatalf("compact row height %.0f, want %.0f", got, compactRowHeight)
+	}
+	if got := app.rowForTest(t, "hash-a").MinSize().Height; got != compactRowHeight {
+		t.Fatalf("compact row min height %.0f, want %.0f", got, compactRowHeight)
+	}
+	layout := &torrentRowLayout{app: app}
+	if got := layout.MinSize(nil).Height; got != compactRowHeight {
+		t.Fatalf("compact layout min height %.0f, want %.0f", got, compactRowHeight)
+	}
+
+	app.list.Refresh()
+
+	if got := app.rowForTest(t, "hash-a").Size().Height; got != compactRowHeight {
+		t.Fatalf("row height %.0f after list refresh, want %.0f", got, compactRowHeight)
+	}
+}
+
 func TestRowTapSequencer(t *testing.T) {
 	start := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 

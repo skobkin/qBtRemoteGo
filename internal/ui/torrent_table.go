@@ -19,6 +19,7 @@ import (
 
 const (
 	torrentRowHeight     float32 = 40
+	compactRowHeight     float32 = 28
 	torrentHeaderHeight  float32 = 38
 	headerHandleWidth    float32 = 8
 	headerCellPadding    float32 = 8
@@ -162,6 +163,7 @@ type torrentTableLayout struct {
 
 func (a *application) buildTorrentTable() fyne.CanvasObject {
 	a.columnWidths = mergeColumnWidths(a.controller.Config().UI.ColumnWidths)
+	a.compactRows = a.controller.Config().UI.CompactRows
 	// The list is built once; drop any rows registered by an earlier build so
 	// the selection scan never touches dead widgets.
 	a.listRows = nil
@@ -189,6 +191,17 @@ func (a *application) buildTorrentTable() fyne.CanvasObject {
 	a.tableScroll = container.NewHScroll(content)
 
 	return a.tableScroll
+}
+
+// torrentRowHeightValue returns the torrent row height for the current
+// compact-rows setting. The flag is cached on the application (like the column
+// widths) instead of being read from the controller here: MinSize runs per row
+// on every layout pass and Config copies the whole config under a lock.
+func (a *application) torrentRowHeightValue() float32 {
+	if a != nil && a.compactRows {
+		return compactRowHeight
+	}
+	return torrentRowHeight
 }
 
 func (a *application) totalColumnWidth() float32 {
@@ -469,7 +482,7 @@ func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
 }
 
 func (r *torrentListRow) MinSize() fyne.Size {
-	return fyne.NewSize(r.app.totalColumnWidth(), torrentRowHeight)
+	return fyne.NewSize(r.app.totalColumnWidth(), r.app.torrentRowHeightValue())
 }
 
 func (r *torrentListRow) CreateRenderer() fyne.WidgetRenderer {
@@ -591,7 +604,7 @@ func (l *torrentRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 }
 
 func (l *torrentRowLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
-	return fyne.NewSize(l.app.totalColumnWidth(), torrentRowHeight)
+	return fyne.NewSize(l.app.totalColumnWidth(), l.app.torrentRowHeightValue())
 }
 
 func (l *torrentTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
