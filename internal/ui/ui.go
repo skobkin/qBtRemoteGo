@@ -63,6 +63,12 @@ type application struct {
 	settingsWindow    fyne.Window
 	pendingInvocation appcore.InvocationBatch
 
+	// updateChecker is nil when the update manager failed to construct; every
+	// update entry point tolerates that. checkingUpdates guards against
+	// concurrent manual checks.
+	updateChecker   updateChecker
+	checkingUpdates atomic.Bool
+
 	list           *widget.List
 	listRows       []*torrentListRow
 	tableHeader    *torrentHeaderRow
@@ -93,6 +99,7 @@ type trayState struct {
 	desktopApp desktop.App
 	showItem   *fyne.MenuItem
 	speedItem  *fyne.MenuItem
+	updateItem *fyne.MenuItem
 	quitItem   *fyne.MenuItem
 }
 
@@ -152,6 +159,8 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	}
 	ui.windowVisible.Store(true)
 
+	ui.setupUpdateChecker()
+
 	ui.buildMainWindow()
 	ui.configureTray()
 	ui.bindCloseBehavior()
@@ -195,6 +204,9 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 
 	go ui.pollLoop()
 	fyApp.Run()
+	if ui.updateChecker != nil {
+		ui.updateChecker.Stop()
+	}
 	_ = logManager.Close()
 
 	return nil
@@ -342,14 +354,28 @@ func (a *application) configureTray() {
 		showItem: fyne.NewMenuItem("Open main window", func() {
 			fyne.Do(a.showMainWindow)
 		}),
+		updateItem: fyne.NewMenuItem("Check for updates…", func() {
+			fyne.Do(a.checkForUpdates)
+		}),
 		quitItem: fyne.NewMenuItem("Quit application", func() {
 			a.fyApp.Quit()
 		}),
 	}
 	a.trayState.speedItem.Disabled = true
 	desk.SetSystemTrayIcon(resources.TrayIcon())
-	desk.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
+	desk.SetSystemTrayMenu(a.trayMenu())
 	systray.SetTooltip("Down 0 B/s | Up 0 B/s")
+}
+
+// trayMenu assembles the system tray menu. It is the single source of the
+// item list: updateTray republishes the menu on every poll and must stay in
+// sync with configureTray.
+func (a *application) trayMenu() *fyne.Menu {
+	return fyne.NewMenu(appcore.Name,
+		a.trayState.speedItem,
+		a.trayState.showItem,
+		a.trayState.updateItem,
+		a.trayState.quitItem)
 }
 
 func (a *application) openSettingsWindow() {
@@ -1898,7 +1924,7 @@ func (a *application) updateTray() {
 	label := fmt.Sprintf("Down %s | Up %s", appcore.HumanSpeed(a.transfer.DownloadSpeed), appcore.HumanSpeed(a.transfer.UploadSpeed))
 	fyne.Do(func() {
 		a.trayState.speedItem.Label = label
-		a.trayState.desktopApp.SetSystemTrayMenu(fyne.NewMenu(appcore.Name, a.trayState.speedItem, a.trayState.showItem, a.trayState.quitItem))
+		a.trayState.desktopApp.SetSystemTrayMenu(a.trayMenu())
 		systray.SetTooltip(label)
 	})
 }
