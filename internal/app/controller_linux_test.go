@@ -46,7 +46,7 @@ func TestSaveLocalUIDoesNotSyncDesktopIntegrations(t *testing.T) {
 		t.Fatalf("SaveLocalUI() error = %v", err)
 	}
 
-	desktopPath := filepath.Join(dataHome, "applications", "qbtremotego.desktop")
+	desktopPath := filepath.Join(dataHome, "applications", "qbtremotego-handler.desktop")
 	if _, err := os.Stat(desktopPath); !os.IsNotExist(err) {
 		t.Fatalf("desktop entry should not be created by SaveLocalUI: err = %v", err)
 	}
