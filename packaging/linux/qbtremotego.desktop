@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=qBtRemoteGo
+GenericName=qBittorrent Remote Client
+Comment=Manage torrents on a remote qBittorrent server
+Exec=qbtremotego
+Icon=qbtremotego
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=qBittorrent;torrent;remote;
