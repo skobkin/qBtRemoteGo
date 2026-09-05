@@ -14,6 +14,7 @@ import (
 	fyneupdate "github.com/skobkin/go4updates/ui/fyne/update"
 
 	appcore "github.com/skobkin/qbtremotego/internal/app"
+	"github.com/skobkin/qbtremotego/internal/config"
 	appupdates "github.com/skobkin/qbtremotego/internal/updates"
 )
 
@@ -41,12 +42,72 @@ var newUpdateChecker = func(logger *slog.Logger, onAvailable func(updates.Result
 // checker is valid: every entry point degrades to a diagnostic dialog or a
 // log line.
 func (a *application) setupUpdateChecker() {
-	checker, err := newUpdateChecker(a.logManager.Logger("updates"), nil)
+	checker, err := newUpdateChecker(a.logManager.Logger("updates"), a.onAutoUpdateAvailable)
 	if err != nil {
 		a.logger.Warn("initialize update checker", "error", err)
 		return
 	}
 	a.updateChecker = checker
+}
+
+// startUpdateChecks enables periodic checks per config; development builds
+// and disabled configs skip them. Manual checks remain available either way.
+func (a *application) startUpdateChecks() {
+	if a.updateChecker == nil {
+		return
+	}
+	if !updateChecksEnabled(a.controller.Config(), appcore.BuildVersion()) {
+		a.logger.Debug("automatic update checks disabled",
+			"version", appcore.BuildVersion(),
+			"configured", a.controller.Config().Updates.CheckAutomatically)
+		return
+	}
+	a.updateChecker.Start()
+}
+
+// updateChecksEnabled reports whether automatic checks should run for this
+// config and build: never on development builds, otherwise per config.
+func updateChecksEnabled(cfg config.AppConfig, version string) bool {
+	if version == appcore.DevBuildVersion {
+		return false
+	}
+	return cfg.Updates.CheckAutomatically
+}
+
+// applyUpdateCheckSetting stops or (re)starts periodic checks after a
+// settings save. Called on the UI thread from finishSave.
+func (a *application) applyUpdateCheckSetting(enabled bool) {
+	if a.updateChecker == nil {
+		return
+	}
+	if appcore.BuildVersion() == appcore.DevBuildVersion {
+		return
+	}
+	if enabled == a.updateChecker.Running() {
+		return
+	}
+	if enabled {
+		// Start performs an immediate first check; the manager suppresses a
+		// repeated prompt for an already-shown version.
+		a.updateChecker.Start()
+		return
+	}
+	a.updateChecker.Stop()
+}
+
+// onAutoUpdateAvailable bridges from a Manager goroutine to the UI thread.
+// It only enqueues and never blocks the event drain.
+func (a *application) onAutoUpdateAvailable(result updates.Result) {
+	fyne.Do(func() {
+		a.presentAutoUpdate(result)
+	})
+}
+
+// presentAutoUpdate shows the new-release dialog; the manager already
+// deduplicated, so this runs at most once per version.
+func (a *application) presentAutoUpdate(result updates.Result) {
+	a.revealMainWindowIfHidden()
+	a.showUpdateDialog(result)
 }
 
 // checkForUpdates runs one manual update check and presents the outcome.
@@ -63,9 +124,11 @@ func (a *application) checkForUpdates() {
 	go func() {
 		result, err := a.updateChecker.CheckNow(context.Background())
 		fyne.Do(func() {
-			a.checkingUpdates.Store(false)
 			a.setUpdateItemDisabled(false)
 			a.presentManualCheckResult(result, err)
+			// Cleared last: a busy-flag observation implies the previous
+			// check, including its presentation, has fully completed.
+			a.checkingUpdates.Store(false)
 		})
 	}()
 }

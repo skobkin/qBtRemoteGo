@@ -202,6 +202,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		}
 	}()
 
+	ui.startUpdateChecks()
 	go ui.pollLoop()
 	fyApp.Run()
 	if ui.updateChecker != nil {
@@ -455,6 +456,8 @@ func (a *application) openSettingsWindow() {
 	sortDescending.SetChecked(cfg.UI.SortDescending)
 	compactRows := widget.NewCheck("", nil)
 	compactRows.SetChecked(cfg.UI.CompactRows)
+	checkUpdates := widget.NewCheck("", nil)
+	checkUpdates.SetChecked(cfg.Updates.CheckAutomatically)
 	logLevel := widget.NewSelect(logging.SupportedLevels(), nil)
 	logLevel.SetSelected(cfg.Logging.Level)
 	logToFile := widget.NewCheck("", nil)
@@ -495,6 +498,7 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Sort by", sortBy),
 		widget.NewFormItem("Descending order", sortDescending),
 		widget.NewFormItem("Compact rows", compactRows),
+		widget.NewFormItem("Check for updates automatically", checkUpdates),
 		widget.NewFormItem("Log level", logLevel),
 		widget.NewFormItem("Log to file", logToFile),
 	)
@@ -580,6 +584,9 @@ func (a *application) openSettingsWindow() {
 				"log_to_file", updated.Logging.LogToFile,
 			)
 		}
+		if cfg.Updates.CheckAutomatically != updated.Updates.CheckAutomatically {
+			a.applyUpdateCheckSetting(updated.Updates.CheckAutomatically)
+		}
 		// The connection settings may have changed (e.g. a different server URL),
 		// so the cached server version no longer applies; the next connected
 		// refresh probes it again.
@@ -627,6 +634,7 @@ func (a *application) openSettingsWindow() {
 		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
 		updated.UI.SortDescending = sortDescending.Checked
 		updated.UI.CompactRows = compactRows.Checked
+		updated.Updates.CheckAutomatically = checkUpdates.Checked
 		updated.Logging.Level = logLevel.Selected
 		updated.Logging.LogToFile = logToFile.Checked
 		updated.Integration.RegisterMagnetHandler = registerMagnet.Checked
