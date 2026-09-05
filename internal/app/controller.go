@@ -192,6 +192,7 @@ func (c *Controller) SaveSettings(
 		dst.UI = cfg.UI
 		dst.Integration = cfg.Integration
 		dst.Logging = cfg.Logging
+		dst.Updates = cfg.Updates
 	}
 
 	trimmedCreds := credentials.Credentials{

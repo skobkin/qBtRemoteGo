@@ -114,6 +114,59 @@ func TestDefaultCompactRowsDisabled(t *testing.T) {
 	}
 }
 
+func TestDefaultUpdatesCheckEnabled(t *testing.T) {
+	if !Default().Updates.CheckAutomatically {
+		t.Fatal("expected automatic update checks to default to enabled")
+	}
+}
+
+func TestLoadMissingUpdatesSectionDefaultsToTrue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	// Existing config.json from before the updates section landed: no
+	// "updates" key.
+	data := []byte("{\n  \"logging\": {\n    \"level\": \"info\"\n  },\n  \"ui\": {}\n}\n")
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !loaded.Updates.CheckAutomatically {
+		t.Fatal("expected missing updates section to default to enabled checks")
+	}
+}
+
+func TestSaveLoadRoundTripUpdatesDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	cfg := Default()
+	cfg.Updates.CheckAutomatically = false
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(raw), "\"check_automatically\"") {
+		t.Fatalf("expected snake_case key in config file, got: %s", raw)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.Updates.CheckAutomatically {
+		t.Fatal("expected automatic update checks to round-trip as disabled")
+	}
+}
+
 func TestNormalizeCredentialStorage(t *testing.T) {
 	cfg := Default()
 	cfg.Connection.CredentialStorage = " KEYCHAIN "
