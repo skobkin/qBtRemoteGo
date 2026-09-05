@@ -15,6 +15,7 @@ type AppConfig struct {
 	UI          UIConfig          `json:"ui"`
 	Integration IntegrationConfig `json:"integration"`
 	Logging     LoggingConfig     `json:"logging"`
+	Updates     UpdatesConfig     `json:"updates"`
 }
 
 type ConnectionConfig struct {
@@ -78,6 +79,13 @@ type LoggingConfig struct {
 	LogToFile bool   `json:"log_to_file"`
 }
 
+// UpdatesConfig controls the application's release update checks. Manual
+// checks from the tray menu are always available regardless of this section.
+type UpdatesConfig struct {
+	// CheckAutomatically enables the startup and periodic update checks.
+	CheckAutomatically bool `json:"check_automatically"`
+}
+
 func Default() AppConfig {
 	return AppConfig{
 		Connection: ConnectionConfig{},
@@ -102,6 +110,9 @@ func Default() AppConfig {
 		Logging: LoggingConfig{
 			Level:     "info",
 			LogToFile: false,
+		},
+		Updates: UpdatesConfig{
+			CheckAutomatically: true,
 		},
 	}
 }
