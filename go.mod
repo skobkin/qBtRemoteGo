@@ -5,6 +5,7 @@ go 1.26
 require (
 	fyne.io/fyne/v2 v2.7.4
 	fyne.io/systray v1.12.1
+	github.com/skobkin/go4updates v0.1.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/sys v0.44.0
 )
@@ -40,6 +41,7 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
 	golang.org/x/image v0.40.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

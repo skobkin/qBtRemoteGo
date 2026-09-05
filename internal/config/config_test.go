@@ -150,6 +150,7 @@ func TestSaveLoadRoundTripUpdatesDisabled(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
+	// #nosec G304 -- test reads back a temp config file written in this test.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read saved config: %v", err)
