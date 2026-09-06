@@ -1,12 +1,10 @@
 # Arch Linux / AUR packaging
 
-This directory contains the packaging inputs for the `qbtremotego` AUR
-package. Nothing here is a directly buildable `PKGBUILD`: the package on the
-AUR is rendered from the `PKGBUILD.in` template for each stable `X.Y.Z`
-release tag by the Woodpecker workflow in `.woodpecker/aur.yaml`, and the
-rendered result lives at `https://aur.archlinux.org/packages/qbtremotego`.
-
-Files in this directory:
+Packaging inputs for the `qbtremotego` AUR package. Nothing here is a
+directly buildable `PKGBUILD`: the package on the AUR is rendered from
+`PKGBUILD.in` for each stable `X.Y.Z` release tag by the Woodpecker workflow
+`.woodpecker/aur.yaml` and lives at
+https://aur.archlinux.org/packages/qbtremotego.
 
 | File | Role |
 | --- | --- |
@@ -21,77 +19,51 @@ root `LICENSE`); the 0BSD files cover only the packaging sources themselves.
 
 ## Canonical inputs
 
-- **Source archive**: `https://git.skobk.in/api/v1/repos/skobkin/qBtRemoteGo/archive/<tag>.tar`
-  (Forgejo API route). Web routes and release-asset downloads of
-  `git.skobk.in` are gated for anonymous clients, but the API route is not.
-  The plain `.tar` is byte-deterministic across requests — verified by
-  downloading it repeatedly and comparing sha256 — while the `.tar.gz`
-  variant is not (its gzip layer varies), so the package pins the `.tar`
-  with a real `sha256sums` entry.
-- The Forgejo archive extracts to a single non-versioned top-level directory
-  `qbtremotego/`. To prevent stale files from surviving between successive
-  package versions, the template marks the tarball `noextract` and
+- **Source archive**:
+  `https://git.skobk.in/api/v1/repos/skobkin/qBtRemoteGo/archive/<tag>.tar`
+  (Forgejo API route). Web routes of `git.skobk.in` are gated for anonymous
+  clients, but the API route is not. The plain `.tar` is byte-deterministic
+  across requests (verified by repeated downloads), while the `.tar.gz`
+  variant is not — its gzip layer varies — so the checksum pin uses `.tar`.
+- The archive extracts to a single non-versioned top-level directory
+  `qbtremotego/`. The template therefore marks it `noextract`, and
   `prepare()` extracts it explicitly with `bsdtar --strip-components=1`
-  into a fresh `$srcdir/qbtremotego-$pkgver` directory. All build functions
-  operate on that versioned directory.
-- A GitHub mirror exists, but its archive root is `qBtRemoteGo-<tag>/` and it
-  is not the canonical origin; it is documented here only as a fallback
-  (harmless under `--strip-components=1`, but the URL and checksum should
-  always come from the Forgejo API route).
-- **Desktop file** `packaging/linux/qbtremotego.desktop` →
-  `/usr/share/applications/qbtremotego.desktop` and **icon**
-  `internal/resources/assets/app_light.svg` →
-  `/usr/share/icons/hicolor/scalable/apps/qbtremotego.svg` are installed
-  0644; the binary goes to `/usr/bin/qbtremotego` 0755 and the upstream MIT
-  license text to `/usr/share/licenses/qbtremotego/LICENSE`. See
-  `packaging/linux/README.md` for the desktop-integration rationale: the
-  package must not register MIME defaults or touch user desktop entries, so
-  there is no `.install` script and no `MimeType=` in the launcher.
+  into a fresh `$srcdir/qbtremotego-$pkgver` so stale files cannot survive
+  between package versions.
+- A GitHub mirror exists (`archive/refs/tags/<tag>.tar.gz`, archive root
+  `qBtRemoteGo-<tag>/`); it is documented as a fallback only — URL and
+  checksum always come from the canonical route above.
+- Install paths are in `package()`. The package deliberately registers no
+  MIME defaults and ships no `.install` script; see
+  `packaging/linux/README.md` for the desktop-integration rationale.
 
 ## Rendered fields
 
 | Placeholder | Rendered from | Notes |
 | --- | --- | --- |
 | `@PKGVER@` | `CI_COMMIT_TAG` | Only plain `X.Y.Z` tags pass the workflow's gate |
-| `@SHA256SUM@` | sha256 of the downloaded source `.tar` | Real checksum, verified end-to-end by `makepkg --verifysource` |
-| `@BUILDDATE@` | `date -u -d "@$CI_COMMIT_TIMESTAMP" +%Y-%m-%dT%H:%M:%SZ` | RFC3339 UTC of the tagged commit. `CI_COMMIT_TIMESTAMP` is stable across workflow re-runs, which a release `created_at` is not guaranteed to be. |
+| `@SHA256SUM@` | sha256 of the downloaded source `.tar` | Verified end-to-end by `makepkg --verifysource` |
+| `@BUILDDATE@` | `CI_COMMIT_TIMESTAMP` as RFC3339 UTC | Stable across workflow re-runs, unlike a release `created_at` |
 
-`pkgrel` is pinned to `1` in the template. Any manual AUR-side `pkgrel`
-bump gets reverted by the automation on the next release — mirror such
-changes into `PKGBUILD.in` instead.
+`pkgrel` is pinned to `1`. A manual AUR-side bump gets reverted by the
+automation on the next release — mirror such changes into `PKGBUILD.in`.
 
-## Dependency determination record
+## Dependencies
 
 Derived empirically in a clean Arch chroot (`pkgctl build -c`, so only
-declared dependencies are ever present), iterated from
-`makedepends=('go')` with `depends=()` until the build converged. Each
-iteration failed on exactly one missing piece:
+declared dependencies are ever present): starting from `depends=()` and
+`makedepends=('go')`, one package was added per failed build — the X11 and
+X11-extension headers (`libx11`, `libxrandr`, `libxcursor`, `libxinerama`,
+`libxi`), then GL headers, which current Arch ships in `libglvnd` (so
+`mesa` is not needed at all).
 
-1. `X11/Xlib.h` → `libx11`
-2. `X11/extensions/Xrandr.h` → `libxrandr`
-3. `X11/Xcursor/Xcursor.h` → `libxcursor`
-4. `X11/extensions/Xinerama.h` → `libxinerama`
-5. `X11/extensions/XInput2.h` → `libxi`
-6. `GL/glx.h` → `libglvnd` (on current Arch, `libglvnd` ships the GL
-   headers and `gl.pc` — `mesa` is not needed at all)
-7. build + headless `go test ./...` succeeded with only these declared
-
-Post-build analysis of the resulting binary:
-
-- `ldd` resolves `libGL.so.1` / `libGLdispatch.so.0` / `libGLX.so.0`
-  (`libglvnd`), `libX11.so.6` (`libx11`), plus `libxcb`/`libXau`/`libXdmcp`,
-  which are transitive through `libx11` and therefore not listed
-  (`glibc`/`gcc-libs` are base and never listed).
-- The embedded GLFW (go-gl/glfw v3.4 X11 backend) **dlopen**s its X11
-  extension libraries at runtime — `strings` on the binary shows
-  `libXcursor.so.1`, `libXi.so.6`, `libXinerama.so.1`, `libXrandr.so.2`
-  (and non-critical `libXxf86vm.so.1`, `libXrender.so.1`), invisible to
-  `ldd` and namcap. They are declared in `depends` because cursor themes,
-  monitor enumeration and input handling degrade without them. `libXxf86vm`
-  is intentionally not declared: it is only consulted for gamma adjustment
-  and is designed to be optional.
-
-Final arrays:
+The embedded GLFW (go-gl/glfw v3.4 X11 backend) also **dlopen**s its X11
+extension libraries at runtime — `libXcursor.so.1`, `libXi.so.6`,
+`libXinerama.so.1`, `libXrandr.so.2` — which is invisible to `ldd` and
+namcap (`strings <binary>` shows them). They are declared because cursor
+themes, monitor enumeration and input handling degrade without them.
+`libXxf86vm` is intentionally not declared: it is only consulted for gamma
+adjustment and is designed to be optional.
 
 ```sh
 depends=(
@@ -106,43 +78,37 @@ optdepends=(
 )
 ```
 
-`optdepends` rationale (from the source audit in
-`internal/platform/integration_linux.go`): the app executes `xdg-mime`
-(`xdg-utils`) and `update-desktop-database` (`desktop-file-utils`) at
-runtime but treats both as best-effort — failures are logged and ignored.
-Credential storage uses `zalando/go-keyring` over the D-Bus Secret Service
-API (pure Go, no ELF linkage), expressed as the `org.freedesktop.secrets`
-virtual provider so any compatible keyring satisfies it. The app functions
-without all three, hence optdepends rather than depends.
+`optdepends` rationale (source audit in
+`internal/platform/integration_linux.go`): the app runs `xdg-mime`
+(`xdg-utils`) and `update-desktop-database` (`desktop-file-utils`)
+best-effort, logging and ignoring failures, and stores credentials over the
+D-Bus Secret Service API (pure Go, no ELF linkage) — expressed as the
+`org.freedesktop.secrets` virtual provider so any compatible keyring
+satisfies it. The app functions without all three.
 
-Re-run the derivation when the Fyne/glfw stack changes: render a minimal
-`PKGBUILD` (`depends=()`, `makedepends=('go')`), `pkgctl build -c`, add the
-mapped missing piece, repeat, then re-check `ldd` + `strings <binary> |
-grep '^libX'` against the arrays above.
+Re-derive when the Fyne/glfw stack changes: render a minimal `PKGBUILD`
+(`depends=()`, `makedepends=('go')`), `pkgctl build -c`, add the mapped
+missing package, repeat, then re-check `strings <binary> | grep '^libX'`.
 
 ## Packaging-source licensing
 
-The AUR submission guidelines license package sources 0BSD; this matches the
-current Arch scheme (`pkgctl license`): a root `LICENSE` carrying the
-canonical Arch 0BSD text byte-for-byte (the tool compares it against its
-embedded copy, so the copyright holder is not edited there — the packaging
-files' copyright is declared in `REUSE.toml` instead), `LICENSES/0BSD.txt`
-as a symlink to it, and `REUSE.toml` declaring
-`SPDX-License-Identifier = "0BSD"` for the packaging files. `REUSE.toml`
-also covers the AUR-side names (`PKGBUILD`, `.SRCINFO`) — paths that do not
-exist in a given layout are ignored per the REUSE specification, so the
-same file is valid in this directory and in the published AUR repository.
-
-Validate with:
+Arch's current scheme (`pkgctl license`): a root `LICENSE` carrying the
+canonical Arch 0BSD text byte-for-byte (the tool compares against its
+embedded copy — the packaging files' copyright is declared in `REUSE.toml`
+instead), `LICENSES/0BSD.txt` as a symlink to it, and `REUSE.toml` declaring
+`SPDX-License-Identifier = "0BSD"`. The annotations also cover the AUR-side
+names (`PKGBUILD`, `.SRCINFO`); paths missing from a given layout are
+ignored per the REUSE specification, so one file serves both. Validate in a
+directory holding `PKGBUILD` + `LICENSE` + `LICENSES/` + `REUSE.toml`:
 
 ```sh
-pkgctl license check   # in a directory holding PKGBUILD + LICENSE + LICENSES/ + REUSE.toml
+pkgctl license check
 ```
 
 ## Local validation
 
-The template can be exercised locally without touching the AUR. The fake
-version `0.0.0` and the rendered artifacts are throwaway — never committed.
+The fake version `0.0.0` and rendered artifacts are throwaway — never
+committed.
 
 ```sh
 WORK=/tmp/qbtremotego-pkgtest
@@ -154,42 +120,36 @@ sed -e 's|@PKGVER@|0.0.0|g' -e "s|@SHA256SUM@|$SHA|g" \
     -e 's|@BUILDDATE@|1970-01-01T00:00:00Z|g' \
     /path/to/qBtRemoteGo/packaging/arch/PKGBUILD.in > PKGBUILD
 bash -n PKGBUILD
-# The pre-seeded tar matches the source alias filename, so makepkg skips the
-# network download and verifies the local file against the rendered checksum.
+# The pre-seeded tar matches the source alias filename, so makepkg verifies
+# the local file against the rendered checksum without downloading.
 makepkg --printsrcinfo > .SRCINFO
 makepkg --verifysource
 pkgctl build -c     # authoritative: clean chroot, declared deps only
-namcap PKGBUILD
-namcap qbtremotego-0.0.0-1-x86_64.pkg.tar.zst
+namcap PKGBUILD qbtremotego-0.0.0-1-x86_64.pkg.tar.zst
 bsdtar -tvf qbtremotego-0.0.0-1-x86_64.pkg.tar.zst usr/bin usr/share
 ```
 
-`pkgctl build` requires `devtools` and rebuilds the chroot copy with `-c`.
-A plain `makepkg -sf` on a developer workstation is NOT sufficient for
-dependency work: the host typically has the X11/GL stack installed already,
-which hides undeclared dependencies.
+A plain `makepkg -sf` on a workstation is **not** sufficient for dependency
+work: the host typically has the X11/GL stack installed already, which hides
+undeclared dependencies.
 
 ## AUR publication flow
 
-`.woodpecker/aur.yaml` publishes the package automatically:
+`.woodpecker/aur.yaml` runs on `tag` events only, after `ci` passed for the
+same commit (`depends_on: [ci]`), and refuses tags that are not plain
+`X.Y.Z`. It downloads the source archive for the tag, renders the template
+(tag → `@PKGVER@`, real checksum → `@SHA256SUM@`, `CI_COMMIT_TIMESTAMP` →
+`@BUILDDATE@`), generates `.SRCINFO` and verifies the checksum end-to-end as
+an unprivileged build user, then pushes `PKGBUILD`, `.SRCINFO`, `LICENSE`,
+`REUSE.toml` and the `LICENSES/0BSD.txt` symlink to
+`ssh://aur@aur.archlinux.org/qbtremotego.git` (`master` only). If the
+rendered output already matches the AUR, nothing is committed.
 
-- Runs only on `tag` events, only after the `ci` workflow has passed for the
-  same commit (`depends_on: [ci]`), and its first step refuses any tag that
-  is not a plain `X.Y.Z` release.
-- Downloads the source archive for the tag from the canonical URL, renders
-  `PKGBUILD.in` (`@PKGVER@` ← tag, `@SHA256SUM@` ← real checksum,
-  `@BUILDDATE@` ← `CI_COMMIT_TIMESTAMP` as RFC3339 UTC), generates
-  `.SRCINFO` and verifies the source checksum end-to-end as an unprivileged
-  build user.
-- Pushes `PKGBUILD`, `.SRCINFO`, `LICENSE`, `REUSE.toml` and the
-  `LICENSES/0BSD.txt` symlink to `ssh://aur@aur.archlinux.org/qbtremotego.git`
-  (`master` only). If the rendered output already matches the AUR, nothing
-  is committed.
-- Commits are deterministic: message `qbtremotego <tag>-<pkgrel>`, author
-  hardcoded in the workflow, author/committer dates derived from
-  `CI_COMMIT_TIMESTAMP`. The AUR host key is pinned by fingerprint — SSH
-  host-key verification is never disabled, and the private key is only ever
-  passed through a Woodpecker secret.
+Commits are deterministic: message `qbtremotego <tag>-<pkgrel>`, author
+hardcoded in the workflow, author/committer dates derived from
+`CI_COMMIT_TIMESTAMP`. The AUR host key is pinned by fingerprint — SSH
+host-key verification is never disabled — and the private key only ever
+passes through a Woodpecker secret.
 
 ### Manual one-time setup
 
