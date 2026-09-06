@@ -1,0 +1,16 @@
+version = 1
+
+# Licensing for the Arch Linux / AUR packaging sources. This file is copied
+# verbatim to the AUR repository next to the rendered PKGBUILD, where the
+# "PKGBUILD" and ".SRCINFO" entries below resolve; in this source repository
+# the template and documentation names resolve instead. Paths that do not
+# exist in a given repository layout are ignored per the REUSE specification.
+[[annotations]]
+path = [
+	"PKGBUILD.in",
+	"README.md",
+	"PKGBUILD",
+	".SRCINFO",
+]
+SPDX-FileCopyrightText = "2026 Alexey Skobkin <skobkin@proton.me>"
+SPDX-License-Identifier = "0BSD"

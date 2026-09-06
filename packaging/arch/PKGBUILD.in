@@ -1,0 +1,69 @@
+# Maintainer: Alexey Skobkin <skobkin@proton.me>
+# Rendered from packaging/arch/PKGBUILD.in by .woodpecker/aur.yaml on stable
+# release tags. Packaging sources are 0BSD (see LICENSE and REUSE.toml);
+# the upstream program this package builds is MIT-licensed.
+
+pkgname=qbtremotego
+pkgver=@PKGVER@
+pkgrel=1
+pkgdesc='Native desktop client for remotely controlling qBittorrent through its Web API'
+arch=('x86_64')
+url='https://git.skobk.in/skobkin/qBtRemoteGo'
+license=('MIT')
+depends=(
+	'libx11'
+	'libxcursor'
+	'libxrandr'
+	'libxinerama'
+	'libxi'
+	'libglvnd'
+	'hicolor-icon-theme'
+)
+optdepends=(
+	'xdg-utils: registering magnet and torrent file associations at runtime'
+	'desktop-file-utils: refreshing the desktop database for the runtime handler'
+	'org.freedesktop.secrets: storing connection credentials in the system keyring'
+)
+makedepends=('go')
+source=("$pkgname-$pkgver.tar::https://git.skobk.in/api/v1/repos/skobkin/qBtRemoteGo/archive/$pkgver.tar")
+noextract=("$pkgname-$pkgver.tar")
+sha256sums=('@SHA256SUM@')
+# BuildDate below is the RFC3339 UTC timestamp of the tagged commit, rendered
+# by CI at package build time. It must never be the moment of a local build.
+
+prepare() {
+	rm -rf "$pkgname-$pkgver"
+	mkdir "$pkgname-$pkgver"
+	bsdtar -xf "$pkgname-$pkgver.tar" --strip-components=1 -C "$pkgname-$pkgver"
+	cd "$pkgname-$pkgver"
+	export GOPATH="$srcdir"
+	go mod download -modcacherw
+}
+
+build() {
+	cd "$pkgname-$pkgver"
+	export CGO_CPPFLAGS="${CPPFLAGS}"
+	export CGO_CFLAGS="${CFLAGS}"
+	export CGO_CXXFLAGS="${CXXFLAGS}"
+	export CGO_LDFLAGS="${LDFLAGS}"
+	export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+	export GOPATH="$srcdir"
+	go build -o "$pkgname" \
+		-ldflags "-linkmode external -extldflags \"${LDFLAGS}\" -X github.com/skobkin/qbtremotego/internal/app.Version=${pkgver} -X github.com/skobkin/qbtremotego/internal/app.BuildDate=@BUILDDATE@" \
+		./cmd/qbtremotego
+}
+
+check() {
+	cd "$pkgname-$pkgver"
+	export GOFLAGS="-mod=readonly -modcacherw"
+	export GOPATH="$srcdir"
+	go test ./...
+}
+
+package() {
+	cd "$pkgname-$pkgver"
+	install -Dm755 "$pkgname" "$pkgdir"/usr/bin/qbtremotego
+	install -Dm644 packaging/linux/qbtremotego.desktop "$pkgdir"/usr/share/applications/qbtremotego.desktop
+	install -Dm644 internal/resources/assets/app_light.svg "$pkgdir"/usr/share/icons/hicolor/scalable/apps/qbtremotego.svg
+	install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/qbtremotego/LICENSE
+}
