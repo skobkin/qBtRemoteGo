@@ -83,7 +83,8 @@ steps:
         cp packaging/arch/LICENSE aur/LICENSE
         cp packaging/arch/REUSE.toml aur/REUSE.toml
         # Arch scheme: LICENSES/0BSD.txt is a symlink to the root LICENSE
-        ln -s ../LICENSE aur/LICENSES/0BSD.txt
+        # (-f replaces whatever is there, -n never dereferences it).
+        ln -sfn ../LICENSE aur/LICENSES/0BSD.txt
 
         # SSH setup for the builder user. The private key is never echoed;
         # the AUR host key is pinned by fingerprint and verification is
@@ -127,7 +128,9 @@ steps:
           cd "$HOME/aur-repo"
           cp "$1/PKGBUILD" "$1/.SRCINFO" "$1/LICENSE" "$1/REUSE.toml" .
           mkdir -p LICENSES
-          ln -s ../LICENSE LICENSES/0BSD.txt
+          # -f: after the first release the repo already contains this
+          # symlink; replace it idempotently instead of failing under set -e.
+          ln -sfn ../LICENSE LICENSES/0BSD.txt
           git add -A
           if git diff --cached --quiet; then
             echo "Nothing to publish: the AUR repository already matches the rendered package."
