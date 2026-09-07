@@ -25,6 +25,7 @@ type stubUpdateChecker struct {
 	running  bool
 	started  int
 	stopped  int
+	loggers  []*slog.Logger
 	checkNow func(context.Context) (updates.Result, error)
 }
 
@@ -46,6 +47,12 @@ func (s *stubUpdateChecker) Stop() {
 	defer s.mu.Unlock()
 	s.stopped++
 	s.running = false
+}
+
+func (s *stubUpdateChecker) SetLogger(logger *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loggers = append(s.loggers, logger)
 }
 
 func (s *stubUpdateChecker) CheckNow(ctx context.Context) (updates.Result, error) {

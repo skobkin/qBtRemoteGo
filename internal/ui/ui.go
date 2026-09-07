@@ -578,6 +578,11 @@ func (a *application) openSettingsWindow() {
 			}
 			a.logger = a.logManager.Logger("ui")
 			a.controller.SetLogger(a.logManager.Logger("controller"))
+			if a.updateChecker != nil {
+				// The checker captured the startup logger; Configure has
+				// closed the file behind it, so point it at the fresh one.
+				a.updateChecker.SetLogger(a.logManager.Logger("updates"))
+			}
 			a.logger.Info(
 				"updated log settings from settings",
 				"level", updated.Logging.Level,

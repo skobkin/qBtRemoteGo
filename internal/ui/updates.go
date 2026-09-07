@@ -25,6 +25,7 @@ type updateChecker interface {
 	Running() bool
 	Start()
 	Stop()
+	SetLogger(logger *slog.Logger)
 	CheckNow(ctx context.Context) (updates.Result, error)
 }
 

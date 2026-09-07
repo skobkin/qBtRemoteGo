@@ -70,7 +70,6 @@ type Options struct {
 // Manager owns the update source, the checker, and the periodic watcher
 // lifecycle. It is safe for concurrent use.
 type Manager struct {
-	logger         *slog.Logger
 	source         updates.Source
 	checker        *updates.Checker
 	currentVersion string
@@ -78,9 +77,12 @@ type Manager struct {
 	timeout        time.Duration
 	handler        func(updates.Result)
 
-	// mu guards the watcher generation below and the dedupe state. The
-	// immutable fields above need no guard.
+	// mu guards the fields below: the watcher generation, the dedupe state,
+	// and the logger, which SetLogger swaps while the watcher goroutine logs.
 	mu sync.Mutex
+	// logger receives check failures and notifications. SetLogger refreshes
+	// it when the application reconfigures logging at runtime.
+	logger *slog.Logger
 	// watcher is the current generation. watch.Watcher is single-use, so
 	// every Start builds a fresh one; nil when stopped.
 	watcher *watch.Watcher
@@ -138,6 +140,19 @@ func New(opts Options) (*Manager, error) {
 		timeout:        timeout,
 		handler:        opts.OnUpdateAvailable,
 	}, nil
+}
+
+// SetLogger swaps the logger used for check failures and notifications. It
+// lets the application follow runtime logging reconfiguration: without it the
+// manager would keep a stale level and, once Manager.Configure has closed the
+// previous log file, log into a closed file.
+func (m *Manager) SetLogger(logger *slog.Logger) {
+	if logger == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logger = logger
 }
 
 // Start begins periodic checks: an immediate first check, then one every
@@ -240,8 +255,14 @@ func (m *Manager) target() updates.Target {
 // handleEvent processes one watcher event: automatic failures are logged
 // only, and an available update is surfaced at most once per version.
 func (m *Manager) handleEvent(ev watch.Event) {
+	// Snapshot the logger so the whole event is logged through one
+	// generation even if SetLogger lands mid-event.
+	m.mu.Lock()
+	logger := m.logger
+	m.mu.Unlock()
+
 	if ev.State.LastError != nil {
-		m.logger.Warn("automatic update check failed", "error", ev.State.LastError)
+		logger.Warn("automatic update check failed", "error", ev.State.LastError)
 		return
 	}
 	result := ev.State.Result
@@ -251,7 +272,7 @@ func (m *Manager) handleEvent(ev watch.Event) {
 	if !m.claimVersion(result.Latest.Version) {
 		return
 	}
-	m.logger.Info("update available",
+	logger.Info("update available",
 		"version", result.Latest.Version,
 		"current", result.CurrentVersion,
 		"url", result.Latest.URL)

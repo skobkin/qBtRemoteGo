@@ -1,16 +1,20 @@
 package updates
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	updates "github.com/skobkin/go4updates"
+	"github.com/skobkin/go4updates/watch"
 )
 
 func newTestManager(t *testing.T, serverURL string, currentVersion string, handler func(updates.Result)) *Manager {
@@ -338,4 +342,59 @@ func TestCheckNowHonorsParentContextCancellation(t *testing.T) {
 	if _, err := manager.CheckNow(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context canceled", err)
 	}
+}
+
+// SetLogger must take effect for subsequent events: handleEvent runs on the
+// watcher goroutine, and a settings save that reconfigures logging closes the
+// previous log file behind the manager's startup logger.
+func TestSetLoggerUsedByHandleEvent(t *testing.T) {
+	fake := newForgejoFake(t, stableRelease("0.9.0", "2026-09-01T00:00:00Z"))
+	manager := newTestManager(t, fake.url(), "0.8.0", nil)
+
+	var buf bytes.Buffer
+	manager.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	manager.handleEvent(watch.Event{State: watch.State{LastError: errors.New("boom")}})
+	if !strings.Contains(buf.String(), "boom") {
+		t.Fatalf("log output = %q, want the check failure", buf.String())
+	}
+
+	buf.Reset()
+	manager.handleEvent(watch.Event{State: watch.State{Result: &updates.Result{
+		Status:         updates.StatusUpdateAvailable,
+		CurrentVersion: "0.8.0",
+		Latest:         &updates.Release{Version: "0.9.0"},
+	}}})
+	if !strings.Contains(buf.String(), "update available") {
+		t.Fatalf("log output = %q, want the update notification", buf.String())
+	}
+}
+
+// A logger swap concurrent with event handling must be race-free: events are
+// handled on the watcher goroutine while settings saves run on the UI thread.
+func TestSetLoggerConcurrentWithHandleEvent(t *testing.T) {
+	fake := newForgejoFake(t, stableRelease("0.9.0", "2026-09-01T00:00:00Z"))
+	manager := newTestManager(t, fake.url(), "0.8.0", nil)
+
+	const swaps = 4
+	loggers := make([]*slog.Logger, swaps)
+	for i := range loggers {
+		loggers[i] = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for _, logger := range loggers {
+			manager.SetLogger(logger)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			manager.handleEvent(watch.Event{State: watch.State{LastError: errors.New("boom")}})
+		}
+	}()
+	wg.Wait()
 }
