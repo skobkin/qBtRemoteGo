@@ -58,7 +58,10 @@ func (a *application) startUpdateChecks() {
 		return
 	}
 	if !updateChecksEnabled(a.controller.Config(), appcore.BuildVersion()) {
-		a.logger.Debug("automatic update checks disabled",
+		// Info, not debug: at the default level this is the only evidence
+		// that update checking exists, and it explains the silence on dev
+		// builds and user-disabled configs alike.
+		a.logger.Info("automatic update checks disabled",
 			"version", appcore.BuildVersion(),
 			"configured", a.controller.Config().Updates.CheckAutomatically)
 		return

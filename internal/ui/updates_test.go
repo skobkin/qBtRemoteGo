@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -210,8 +212,9 @@ func TestStartUpdateChecksGuards(t *testing.T) {
 
 			test.NewTempApp(t)
 			stub := &stubUpdateChecker{}
+			var buf bytes.Buffer
 			app := &application{
-				logger:        slog.New(slog.DiscardHandler),
+				logger:        slog.New(slog.NewTextHandler(&buf, nil)),
 				window:        fyne.CurrentApp().NewWindow("start"),
 				updateChecker: stub,
 			}
@@ -224,6 +227,11 @@ func TestStartUpdateChecksGuards(t *testing.T) {
 			stub.mu.Unlock()
 			if started != tc.wantStarts {
 				t.Fatalf("starts = %d, want %d", started, tc.wantStarts)
+			}
+			// The skipped paths must say so at info level: with the handler at
+			// its default level this fails if the notice regresses to debug.
+			if tc.wantStarts == 0 && !strings.Contains(buf.String(), "automatic update checks disabled") {
+				t.Fatalf("log output = %q, want the disabled notice", buf.String())
 			}
 		})
 	}
