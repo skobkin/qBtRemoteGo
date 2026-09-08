@@ -175,8 +175,12 @@ func (m *Manager) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	m.watcher, m.cancel, m.done, m.running = w, cancel, done, true
+	logger := m.logger
 	m.mu.Unlock()
 
+	// The startup line is the only launch-time evidence that checks are on;
+	// a completed check with nothing newer found logs at debug only.
+	logger.Info("periodic update checks started", "interval", m.interval)
 	go m.runWatcher(ctx, w, events, unsubscribe, done)
 }
 
@@ -252,8 +256,9 @@ func (m *Manager) target() updates.Target {
 	}
 }
 
-// handleEvent processes one watcher event: automatic failures are logged
-// only, and an available update is surfaced at most once per version.
+// handleEvent processes one watcher event: failures log at warn, every
+// completed check logs its outcome at debug, and an available update is
+// surfaced at most once per version.
 func (m *Manager) handleEvent(ev watch.Event) {
 	// Snapshot the logger so the whole event is logged through one
 	// generation even if SetLogger lands mid-event.
@@ -266,7 +271,12 @@ func (m *Manager) handleEvent(ev watch.Event) {
 		return
 	}
 	result := ev.State.Result
-	if result == nil || result.Status != updates.StatusUpdateAvailable || result.Latest == nil {
+	if result == nil {
+		logger.Debug("automatic update check completed", "status", updates.StatusUnknown.String())
+		return
+	}
+	logger.Debug("automatic update check completed", "status", result.Status.String())
+	if result.Status != updates.StatusUpdateAvailable || result.Latest == nil {
 		return
 	}
 	if !m.claimVersion(result.Latest.Version) {

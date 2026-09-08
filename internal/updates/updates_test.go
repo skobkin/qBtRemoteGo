@@ -344,6 +344,46 @@ func TestCheckNowHonorsParentContextCancellation(t *testing.T) {
 	}
 }
 
+// Start must announce itself: at the default info level it is the only
+// launch-time evidence that periodic checks are active.
+func TestStartLogsStartupLine(t *testing.T) {
+	fake := newForgejoFake(t, stableRelease("0.9.0", "2026-09-01T00:00:00Z"))
+	manager := newTestManager(t, fake.url(), "0.9.0", nil)
+
+	var buf bytes.Buffer
+	manager.SetLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	manager.Start()
+	if !strings.Contains(buf.String(), "periodic update checks started") {
+		t.Fatalf("log output = %q, want the startup line", buf.String())
+	}
+	if !strings.Contains(buf.String(), "interval=20ms") {
+		t.Fatalf("log output = %q, want the check interval", buf.String())
+	}
+}
+
+// Every completed automatic check is logged at debug level, so a debug-level
+// log shows the checker ran even when nothing newer was found.
+func TestHandleEventLogsCompletedCheck(t *testing.T) {
+	fake := newForgejoFake(t, stableRelease("0.9.0", "2026-09-01T00:00:00Z"))
+	manager := newTestManager(t, fake.url(), "0.9.0", nil)
+
+	var buf bytes.Buffer
+	manager.SetLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	manager.handleEvent(watch.Event{State: watch.State{Result: &updates.Result{
+		Status:         updates.StatusUpToDate,
+		CurrentVersion: "0.9.0",
+		Latest:         &updates.Release{Version: "0.9.0"},
+	}}})
+	if !strings.Contains(buf.String(), "automatic update check completed") {
+		t.Fatalf("log output = %q, want the completion line", buf.String())
+	}
+	if !strings.Contains(buf.String(), "status=up_to_date") {
+		t.Fatalf("log output = %q, want the check status", buf.String())
+	}
+}
+
 // SetLogger must take effect for subsequent events: handleEvent runs on the
 // watcher goroutine, and a settings save that reconfigures logging closes the
 // previous log file behind the manager's startup logger.
