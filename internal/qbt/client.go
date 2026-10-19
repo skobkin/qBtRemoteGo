@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -40,6 +41,11 @@ type ClientConfig struct {
 	Password             string
 	APIKey               string
 	SkipCertificateCheck bool
+	// HostOverride optionally redirects the raw TCP connection to this host
+	// or IP (optionally with ":port") while the URL host keeps supplying the
+	// HTTP Host header and the TLS server name/certificate validation. Empty
+	// means connect to the URL host directly.
+	HostOverride string
 }
 
 const (
@@ -64,6 +70,81 @@ func ValidateAPIKey(key string) error {
 
 func isASCIIAlphanumeric(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+}
+
+// parseHostOverride parses the host-override setting: a bare host, an IP
+// (bare or bracketed IPv6), or host[:port]. Returns the dial host and the
+// explicit port; an empty port keeps the URL's effective port. An empty
+// (or whitespace-only) value disables the override.
+func parseHostOverride(value string) (host, port string, err error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", "", nil
+	}
+	if strings.ContainsFunc(value, func(r rune) bool {
+		return r <= ' ' || r == 0x7f || strings.ContainsRune(`/\?#@%`, r)
+	}) {
+		return "", "", errors.New(`connection host override must be a host name or IP address, optionally with ":port", not a URL`)
+	}
+
+	if strings.HasPrefix(value, "[") {
+		end := strings.Index(value, "]")
+		if end < 0 {
+			return "", "", errors.New(`connection host override must close the bracketed IPv6 address, e.g. "[::1]"`)
+		}
+		host, port = value[1:end], ""
+		if rest := value[end+1:]; rest != "" {
+			if !strings.HasPrefix(rest, ":") {
+				return "", "", errors.New(`connection host override after a bracketed IPv6 address may only add ":port", e.g. "[::1]:8080"`)
+			}
+			port = rest[1:]
+			if port == "" {
+				return "", "", fmt.Errorf("connection host override port %q must be a number between 1 and 65535", port)
+			}
+		}
+	} else if h, p, splitErr := net.SplitHostPort(value); splitErr == nil {
+		host, port = h, p
+		// Only "host:" splits successfully with an empty port; "host" fails
+		// above, so this rejects a dangling trailing colon.
+		if port == "" {
+			return "", "", fmt.Errorf("connection host override port %q must be a number between 1 and 65535", port)
+		}
+	} else if strings.Contains(value, ":") {
+		// Not host:port — either a bare IPv6 literal (e.g. "::1", which is a
+		// complete address on its own) or an invalid value.
+		if net.ParseIP(value) == nil {
+			return "", "", errors.New(`connection host override must wrap IPv6 addresses in brackets, e.g. "[::1]" or "[::1]:8080"`)
+		}
+		host = value
+	} else {
+		host = value
+	}
+
+	if host == "" {
+		return "", "", errors.New(`connection host override must not be empty, e.g. "internal.example" or "192.168.0.5"`)
+	}
+	if port != "" {
+		if n, convErr := strconv.Atoi(port); convErr != nil || n < 1 || n > 65535 {
+			return "", "", fmt.Errorf("connection host override port %q must be a number between 1 and 65535", port)
+		}
+	}
+
+	return host, port, nil
+}
+
+// overrideDialAddr rewrites a transport dial address for the connection host
+// override: when addr targets the configured URL host, its host part (and the
+// port, when the override carries an explicit one) is replaced. Any other
+// address (a proxy, a redirect target) is returned unchanged.
+func overrideDialAddr(addr, urlHost, overrideHost, overridePort string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || !strings.EqualFold(host, urlHost) {
+		return addr
+	}
+	if overridePort != "" {
+		port = overridePort
+	}
+	return net.JoinHostPort(overrideHost, port)
 }
 
 func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
@@ -91,6 +172,31 @@ func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if cfg.SkipCertificateCheck {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+	}
+
+	// The override only rewrites the dial address: net/http derives the Host
+	// header and the TLS server name from the request URL before DialContext
+	// runs, so both stay bound to the URL host. The rewrite is conditional on
+	// the dialed host being the URL host so proxy dials (the dialed address is
+	// then the proxy's) and redirect targets pass through untouched.
+	overrideHost, overridePort, err := parseHostOverride(cfg.HostOverride)
+	if err != nil {
+		return nil, err
+	}
+	if overrideHost != "" {
+		urlHost := base.Hostname()
+		origDial := transport.DialContext // DefaultTransport's dialer: timeouts and keepalives preserved.
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			addr = overrideDialAddr(addr, urlHost, overrideHost, overridePort)
+			if origDial != nil {
+				return origDial(ctx, network, addr)
+			}
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, network, addr)
+		}
+		if logger != nil {
+			logger.Info("connection host override active", "url_host", urlHost, "override_host", overrideHost)
+		}
 	}
 
 	apiKey := strings.TrimSpace(cfg.APIKey)

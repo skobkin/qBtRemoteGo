@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,6 +71,391 @@ func TestNewClientRejectsUnsupportedURLs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseHostOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		value     string
+		wantHost  string
+		wantPort  string
+		wantError string
+	}{
+		{name: "empty disables override", value: "", wantHost: "", wantPort: ""},
+		{name: "whitespace disables override", value: "   ", wantHost: "", wantPort: ""},
+		{name: "hostname", value: "internal.domain.tld", wantHost: "internal.domain.tld", wantPort: ""},
+		{name: "hostname trimmed", value: " internal.domain.tld\n", wantHost: "internal.domain.tld", wantPort: ""},
+		{name: "ipv4", value: "192.168.0.5", wantHost: "192.168.0.5", wantPort: ""},
+		{name: "bare ipv6", value: "::1", wantHost: "::1", wantPort: ""},
+		{name: "bare full ipv6", value: "::1:8080", wantHost: "::1:8080", wantPort: ""},
+		{name: "bracketed ipv6", value: "[::1]", wantHost: "::1", wantPort: ""},
+		{name: "bracketed ipv6 with port", value: "[::1]:8083", wantHost: "::1", wantPort: "8083"},
+		{name: "hostname with port", value: "internal.domain.tld:8080", wantHost: "internal.domain.tld", wantPort: "8080"},
+		{name: "ipv4 with port", value: "192.168.0.5:8080", wantHost: "192.168.0.5", wantPort: "8080"},
+		{
+			name:      "pasted URL rejected",
+			value:     "https://internal.example",
+			wantError: "not a URL",
+		},
+		{
+			name:      "path rejected",
+			value:     "internal.example/api",
+			wantError: "not a URL",
+		},
+		{
+			name:      "userinfo rejected",
+			value:     "user@internal.example",
+			wantError: "not a URL",
+		},
+		{
+			name:      "space rejected",
+			value:     "internal example",
+			wantError: "not a URL",
+		},
+		{
+			name:      "port only rejected",
+			value:     ":8080",
+			wantError: "must not be empty",
+		},
+		{
+			name:      "trailing colon rejected",
+			value:     "192.168.0.5:",
+			wantError: "must be a number",
+		},
+		{
+			name:      "bracketed trailing colon rejected",
+			value:     "[::1]:",
+			wantError: "must be a number",
+		},
+		{
+			name:      "non-numeric port rejected",
+			value:     "192.168.0.5:notaport",
+			wantError: "must be a number",
+		},
+		{
+			name:      "zero port rejected",
+			value:     "192.168.0.5:0",
+			wantError: "must be a number",
+		},
+		{
+			name:      "port out of range rejected",
+			value:     "192.168.0.5:70000",
+			wantError: "must be a number",
+		},
+		{
+			name:      "bracketed port out of range rejected",
+			value:     "[::1]:70000",
+			wantError: "must be a number",
+		},
+		{
+			name:      "unclosed bracket rejected",
+			value:     "[::1",
+			wantError: "must close the bracketed IPv6 address",
+		},
+		{
+			name:      "text after bracket rejected",
+			value:     "[::1]8083",
+			wantError: `may only add ":port"`,
+		},
+		{
+			name:      "unbracketed multi-colon host rejected",
+			value:     "internal:example:8080",
+			wantError: "must wrap IPv6 addresses in brackets",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			host, port, err := parseHostOverride(tc.value)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("expected error containing %q, got %v", tc.wantError, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if host != tc.wantHost || port != tc.wantPort {
+				t.Fatalf("parseHostOverride(%q) = (%q, %q), want (%q, %q)", tc.value, host, port, tc.wantHost, tc.wantPort)
+			}
+		})
+	}
+}
+
+func TestOverrideDialAddr(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		addr         string
+		urlHost      string
+		overrideHost string
+		overridePort string
+		want         string
+	}{
+		{
+			name:         "bare override keeps scheme default port",
+			addr:         "torrent.example:443",
+			urlHost:      "torrent.example",
+			overrideHost: "192.168.0.5",
+			want:         "192.168.0.5:443",
+		},
+		{
+			name:         "bare override keeps explicit URL port",
+			addr:         "torrent.example:8080",
+			urlHost:      "torrent.example",
+			overrideHost: "internal.example",
+			want:         "internal.example:8080",
+		},
+		{
+			name:         "override port replaces URL port",
+			addr:         "torrent.example:443",
+			urlHost:      "torrent.example",
+			overrideHost: "192.168.0.5",
+			overridePort: "8443",
+			want:         "192.168.0.5:8443",
+		},
+		{
+			name:         "ipv6 override host is bracketed",
+			addr:         "torrent.example:443",
+			urlHost:      "torrent.example",
+			overrideHost: "2001:db8::1",
+			want:         "[2001:db8::1]:443",
+		},
+		{
+			name:         "host match is case-insensitive",
+			addr:         "Torrent.Example:443",
+			urlHost:      "torrent.example",
+			overrideHost: "192.168.0.5",
+			want:         "192.168.0.5:443",
+		},
+		{
+			name:         "ipv6 URL host matches",
+			addr:         "[2001:db8::2]:443",
+			urlHost:      "2001:db8::2",
+			overrideHost: "192.168.0.5",
+			want:         "192.168.0.5:443",
+		},
+		{
+			name:         "other host passes through unchanged",
+			addr:         "proxy.example:3128",
+			urlHost:      "torrent.example",
+			overrideHost: "192.168.0.5",
+			want:         "proxy.example:3128",
+		},
+		{
+			name:         "malformed addr passes through unchanged",
+			addr:         "noport",
+			urlHost:      "noport",
+			overrideHost: "192.168.0.5",
+			want:         "noport",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := overrideDialAddr(tc.addr, tc.urlHost, tc.overrideHost, tc.overridePort)
+			if got != tc.want {
+				t.Fatalf("overrideDialAddr(%q, %q, %q, %q) = %q, want %q", tc.addr, tc.urlHost, tc.overrideHost, tc.overridePort, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewClientRejectsInvalidHostOverrides(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		hostOverride string
+		want         string
+	}{
+		{
+			name:         "URL value",
+			hostOverride: "https://internal.example",
+			want:         "not a URL",
+		},
+		{
+			name:         "unclosed bracket",
+			hostOverride: "[::1",
+			want:         "must close the bracketed IPv6 address",
+		},
+		{
+			name:         "bad port",
+			hostOverride: "192.168.0.5:notaport",
+			want:         "must be a number between 1 and 65535",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewClient(ClientConfig{URL: "https://torrent.example", HostOverride: tc.hostOverride}, slog.Default())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// Regression guard for the unset case: an empty host override must leave the
+// transport's dialer exactly as the cloned DefaultTransport provides it, so
+// dialing behaves as before the feature existed.
+func TestHostOverrideEmptyKeepsDefaultDial(t *testing.T) {
+	t.Parallel()
+
+	plain, err := NewClient(ClientConfig{URL: "https://torrent.example"}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client without override: %v", err)
+	}
+	plainDial := reflect.ValueOf(plain.httpClient.Transport.(*http.Transport).DialContext).Pointer()
+
+	withOverride, err := NewClient(ClientConfig{URL: "https://torrent.example", HostOverride: "192.168.0.5"}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client with override: %v", err)
+	}
+	overrideDial := reflect.ValueOf(withOverride.httpClient.Transport.(*http.Transport).DialContext).Pointer()
+
+	if plainDial != reflect.ValueOf(http.DefaultTransport.(*http.Transport).DialContext).Pointer() {
+		t.Fatal("expected empty host override to keep the default transport dialer")
+	}
+	if overrideDial == plainDial {
+		t.Fatal("expected host override to replace the transport dialer")
+	}
+}
+
+func TestHostOverrideDialsOverrideHost(t *testing.T) {
+	t.Parallel()
+
+	newServer := func(t *testing.T, record *[]string) *httptest.Server {
+		t.Helper()
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			*record = append(*record, r.Host)
+			switch r.URL.Path {
+			case "/api/v2/auth/login":
+				_, _ = io.WriteString(w, "Ok.")
+			case "/api/v2/app/version":
+				_, _ = io.WriteString(w, "5.1.2")
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+	}
+
+	// Control: with no override configured, dialing works exactly as before —
+	// the request reaches the URL host and carries its Host header.
+	t.Run("no override dials the URL host as usual", func(t *testing.T) {
+		t.Parallel()
+
+		var hosts []string
+		server := newServer(t, &hosts)
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{URL: server.URL, Username: "user", Password: "pass"}, slog.Default())
+		if err != nil {
+			t.Fatalf("new client: %v", err)
+		}
+		if err := client.TestConnection(context.Background()); err != nil {
+			t.Fatalf("test connection: %v", err)
+		}
+		serverHost := server.Listener.Addr().String()
+		if len(hosts) != 2 || hosts[0] != serverHost || hosts[1] != serverHost {
+			t.Fatalf("expected every request to carry the URL host %q, got %q", serverHost, hosts)
+		}
+	})
+
+	// torrent.invalid never resolves, so any successful request must have been
+	// dialed through the override while r.Host still carries the URL host.
+	t.Run("override dials override host and keeps URL host header", func(t *testing.T) {
+		t.Parallel()
+
+		var hosts []string
+		server := newServer(t, &hosts)
+		defer server.Close()
+
+		_, port, err := net.SplitHostPort(server.Listener.Addr().String())
+		if err != nil {
+			t.Fatalf("split server address: %v", err)
+		}
+		publicURL := fmt.Sprintf("http://torrent.invalid:%s", port)
+
+		client, err := NewClient(ClientConfig{URL: publicURL, Username: "user", Password: "pass", HostOverride: "127.0.0.1"}, slog.Default())
+		if err != nil {
+			t.Fatalf("new client: %v", err)
+		}
+		if err := client.TestConnection(context.Background()); err != nil {
+			t.Fatalf("test connection: %v", err)
+		}
+		wantHost := "torrent.invalid:" + port
+		if len(hosts) != 2 || hosts[0] != wantHost || hosts[1] != wantHost {
+			t.Fatalf("expected every request to carry the URL host %q, got %q", wantHost, hosts)
+		}
+	})
+
+	t.Run("override with explicit port", func(t *testing.T) {
+		t.Parallel()
+
+		var hosts []string
+		server := newServer(t, &hosts)
+		defer server.Close()
+
+		serverAddr := server.Listener.Addr().String()
+		_, port, err := net.SplitHostPort(serverAddr)
+		if err != nil {
+			t.Fatalf("split server address: %v", err)
+		}
+
+		client, err := NewClient(ClientConfig{
+			URL:          fmt.Sprintf("http://torrent.invalid:%s", port),
+			Username:     "user",
+			Password:     "pass",
+			HostOverride: serverAddr,
+		}, slog.Default())
+		if err != nil {
+			t.Fatalf("new client: %v", err)
+		}
+		if err := client.TestConnection(context.Background()); err != nil {
+			t.Fatalf("test connection: %v", err)
+		}
+		wantHost := "torrent.invalid:" + port
+		if len(hosts) != 2 || hosts[0] != wantHost || hosts[1] != wantHost {
+			t.Fatalf("expected every request to carry the URL host %q, got %q", wantHost, hosts)
+		}
+	})
+
+	// Negative control for the tests above: without an override the unresolvable
+	// URL host must fail, proving nothing silently redirects traffic.
+	t.Run("no override to unresolvable host fails", func(t *testing.T) {
+		t.Parallel()
+
+		var hosts []string
+		server := newServer(t, &hosts)
+		defer server.Close()
+
+		_, port, err := net.SplitHostPort(server.Listener.Addr().String())
+		if err != nil {
+			t.Fatalf("split server address: %v", err)
+		}
+
+		client, err := NewClient(ClientConfig{URL: fmt.Sprintf("http://torrent.invalid:%s", port), Username: "user", Password: "pass"}, slog.Default())
+		if err != nil {
+			t.Fatalf("new client: %v", err)
+		}
+		if err := client.TestConnection(context.Background()); err == nil {
+			t.Fatal("expected the unresolvable URL host to fail without an override")
+		}
+		if len(hosts) != 0 {
+			t.Fatalf("expected no request to reach the server, got %q", hosts)
+		}
+	})
 }
 
 func TestExecuteRejectsUnexpectedRequestTarget(t *testing.T) {

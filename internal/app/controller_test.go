@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -902,6 +903,63 @@ func TestClientCacheInvalidatedOnConnectionChange(t *testing.T) {
 
 	if got := logins.Load(); got != 2 {
 		t.Fatalf("expected one auth/login per server, got %d", got)
+	}
+}
+
+// Changing only the host override must rebuild the cached client even when the
+// effective connection target is identical: the override is part of the cache
+// key, like the URL and credentials.
+func TestClientCacheInvalidatedOnHostOverrideChange(t *testing.T) {
+	var logins atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			logins.Add(1)
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/info":
+			_, _ = io.WriteString(w, "[]")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	_, port, err := net.SplitHostPort(server.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split server address: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Connection.URL = fmt.Sprintf("http://torrent.invalid:%s", port)
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
+	cfg.Connection.HostOverride = "127.0.0.1"
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	ctx := context.Background()
+	if _, err := controller.FetchTorrents(ctx); err != nil {
+		t.Fatalf("fetch torrents with bare override: %v", err)
+	}
+
+	updated := controller.Config()
+	updated.Connection.HostOverride = fmt.Sprintf("127.0.0.1:%s", port)
+	if _, err := controller.SaveSettings(ctx, updated, credentials.Credentials{
+		Username: "demo",
+		Password: "secret",
+	}, CredentialFallbackUnspecified); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+
+	if _, err := controller.FetchTorrents(ctx); err != nil {
+		t.Fatalf("fetch torrents with explicit-port override: %v", err)
+	}
+
+	if got := logins.Load(); got != 2 {
+		t.Fatalf("expected one auth/login per client rebuild, got %d", got)
 	}
 }
 

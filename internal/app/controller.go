@@ -189,6 +189,7 @@ func (c *Controller) SaveSettings(
 		dst.Connection.URL = cfg.Connection.URL
 		dst.Connection.AuthMethod = cfg.Connection.AuthMethod
 		dst.Connection.SkipCertificateCheck = cfg.Connection.SkipCertificateCheck
+		dst.Connection.HostOverride = cfg.Connection.HostOverride
 		dst.UI = cfg.UI
 		dst.Integration = cfg.Integration
 		dst.Logging = cfg.Logging
@@ -1234,6 +1235,7 @@ func connectionClientConfig(cfg config.ConnectionConfig, creds credentials.Crede
 		Username:             strings.TrimSpace(creds.Username),
 		Password:             creds.Password,
 		SkipCertificateCheck: cfg.SkipCertificateCheck,
+		HostOverride:         cfg.HostOverride,
 	}
 	if cfg.AuthMethod == config.AuthMethodAPIKey {
 		key := strings.TrimSpace(creds.APIKey)

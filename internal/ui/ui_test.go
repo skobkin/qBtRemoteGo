@@ -250,8 +250,8 @@ func TestBuildAddTorrentFormSections(t *testing.T) {
 	}
 }
 
-func TestNewAddTorrentAdvancedAccordion(t *testing.T) {
-	accordion, item := newAddTorrentAdvancedAccordion(widget.NewLabel("advanced"), true)
+func TestNewAdvancedAccordion(t *testing.T) {
+	accordion, item := newAdvancedAccordion(widget.NewLabel("advanced"), true)
 
 	if item.Title != "Advanced" {
 		t.Fatalf("unexpected title: %q", item.Title)

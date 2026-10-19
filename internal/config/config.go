@@ -33,6 +33,13 @@ type ConnectionConfig struct {
 	Password               string `json:"password,omitempty"` //nolint:gosec // User-managed qBittorrent credential persisted in the local app config.
 	APIKey                 string `json:"api_key,omitempty"`  //nolint:gosec // User-managed qBittorrent API key persisted in the local app config.
 	SkipCertificateCheck   bool   `json:"skip_certificate_check"`
+	// HostOverride optionally redirects the raw TCP connection to this host or
+	// IP (optionally with ":port") while the URL host keeps supplying the HTTP
+	// Host header and the TLS server name/certificate validation. It covers
+	// VPN/LAN setups where the URL host resolves publicly to a different
+	// address than on the local network. Empty means connect to the URL host
+	// directly.
+	HostOverride string `json:"host_override,omitempty"`
 }
 
 type AuthMethod string
@@ -129,6 +136,7 @@ func Normalize(cfg *AppConfig) {
 	cfg.Connection.CredentialStorage = normalizeCredentialStorage(cfg.Connection.CredentialStorage)
 	cfg.Connection.AuthMethod = normalizeAuthMethod(cfg.Connection.AuthMethod)
 	cfg.Connection.APIKey = strings.TrimSpace(cfg.Connection.APIKey)
+	cfg.Connection.HostOverride = strings.TrimSpace(cfg.Connection.HostOverride)
 
 	if cfg.UI.RememberPathCount <= 0 {
 		cfg.UI.RememberPathCount = def.UI.RememberPathCount

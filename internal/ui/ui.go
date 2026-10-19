@@ -423,6 +423,9 @@ func (a *application) openSettingsWindow() {
 	apiKeyEntry.SetText(session.APIKey)
 	skipTLS := widget.NewCheck("", nil)
 	skipTLS.SetChecked(cfg.Connection.SkipCertificateCheck)
+	hostOverrideEntry := widget.NewEntry()
+	hostOverrideEntry.SetPlaceHolder("internal.example, 192.168.0.5, [::1] — :port optional")
+	hostOverrideEntry.SetText(cfg.Connection.HostOverride)
 	testStatus := widget.NewLabel("")
 	credentialSummary := widget.NewLabel(connectionCredentialStorageText(cfg.Connection, credStatus, session, retryActive))
 	credentialWarning := widget.NewLabel(connectionCredentialWarningText(cfg.Connection, credStatus, session, retryActive))
@@ -486,6 +489,16 @@ func (a *application) openSettingsWindow() {
 	}
 	connectionForm := widget.NewForm(authFormItems(cfg.Connection.AuthMethod)...)
 
+	// The advanced section sits outside connectionForm: updateAuthFields
+	// replaces only the form element below, so the accordion and its entry
+	// survive auth-method switches untouched.
+	hostOverrideHint := widget.NewLabel("Connect to this host or IP instead of the URL host (VPN or LAN setups). The URL host is still used for the HTTP Host header and the TLS certificate. Add \":port\" to also override the port. Leave empty to connect normally.")
+	hostOverrideHint.Wrapping = fyne.TextWrapWord
+	connectionAdvanced, _ := newAdvancedAccordion(container.NewVBox(
+		hostOverrideHint,
+		widget.NewForm(widget.NewFormItem("Host override", hostOverrideEntry)),
+	), false)
+
 	uiForm := widget.NewForm(
 		widget.NewFormItem("Number of paths to remember", rememberEntry),
 		widget.NewFormItem("Remember last save location", rememberLastSaveLocation),
@@ -530,6 +543,7 @@ func (a *application) openSettingsWindow() {
 				URL:                  urlEntry.Text,
 				AuthMethod:           authMethodKey(authMethod.Selected),
 				SkipCertificateCheck: skipTLS.Checked,
+				HostOverride:         strings.TrimSpace(hostOverrideEntry.Text),
 			}, testedCreds)
 			fyne.Do(func() {
 				if err != nil {
@@ -544,7 +558,7 @@ func (a *application) openSettingsWindow() {
 	// Connection tab rows are swapped by replacing the whole form: reassigning
 	// Form.Items misrenders on Fyne v2.7 because the renderer keeps the original
 	// row widgets and only updates label texts positionally.
-	connectionTabContent := container.NewVBox(connectionForm, credentialWarning, testButton, testStatus)
+	connectionTabContent := container.NewVBox(connectionForm, connectionAdvanced, credentialWarning, testButton, testStatus)
 	updateAuthFields := func() {
 		method := authMethodKey(authMethod.Selected)
 		connectionTabContent.Objects[0] = widget.NewForm(authFormItems(method)...)
@@ -626,6 +640,7 @@ func (a *application) openSettingsWindow() {
 		updated.Connection.URL = urlEntry.Text
 		updated.Connection.AuthMethod = authMethodKey(authMethod.Selected)
 		updated.Connection.SkipCertificateCheck = skipTLS.Checked
+		updated.Connection.HostOverride = strings.TrimSpace(hostOverrideEntry.Text)
 		updated.UI.RememberPathCount = rememberCount
 		updated.UI.RememberLastSaveLocation = rememberLastSaveLocation.Checked
 		updated.UI.PathAutocomplete = autocomplete.Checked
@@ -1128,7 +1143,7 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	})
 	basicForm := widget.NewForm(basicItems...)
 	advancedForm := widget.NewForm(advancedItems...)
-	advancedAccordion, advancedItem := newAddTorrentAdvancedAccordion(advancedForm, cfg.UI.AddTorrentAdvancedExpanded)
+	advancedAccordion, advancedItem := newAdvancedAccordion(advancedForm, cfg.UI.AddTorrentAdvancedExpanded)
 	formContent := container.NewVBox(
 		basicForm,
 		advancedAccordion,
@@ -1280,7 +1295,7 @@ func buildAddTorrentFormSections(controls addTorrentFormControls) (basic []*widg
 	return basic, advanced
 }
 
-func newAddTorrentAdvancedAccordion(detail fyne.CanvasObject, open bool) (*widget.Accordion, *widget.AccordionItem) {
+func newAdvancedAccordion(detail fyne.CanvasObject, open bool) (*widget.Accordion, *widget.AccordionItem) {
 	item := widget.NewAccordionItem("Advanced", detail)
 	item.Open = open
 	return widget.NewAccordion(item), item

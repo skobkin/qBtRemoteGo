@@ -61,6 +61,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg.Connection.Username = "demo"
 	cfg.Connection.Password = "secret"
 	cfg.Connection.APIKey = "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	cfg.Connection.HostOverride = "192.168.0.5:8080"
 	cfg.UI.AddTorrentAdvancedExpanded = true
 	cfg.UI.ColumnWidths = map[string]float32{"name": 480, "progress": 160}
 	cfg.UI.RecentSavePaths = []string{"/data/one", "/data/two"}
@@ -90,6 +91,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.Connection.APIKey != "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("unexpected API key: %q", loaded.Connection.APIKey)
+	}
+	if loaded.Connection.HostOverride != "192.168.0.5:8080" {
+		t.Fatalf("unexpected host override: %q", loaded.Connection.HostOverride)
 	}
 	if !loaded.UI.AddTorrentAdvancedExpanded {
 		t.Fatal("expected advanced add-torrent state to round-trip")
@@ -215,6 +219,17 @@ func TestNormalizeTrimsAPIKey(t *testing.T) {
 
 	if cfg.Connection.APIKey != "qbt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("unexpected trimmed API key: %q", cfg.Connection.APIKey)
+	}
+}
+
+func TestNormalizeTrimsHostOverride(t *testing.T) {
+	cfg := Default()
+	cfg.Connection.HostOverride = "  192.168.0.5\n"
+
+	Normalize(&cfg)
+
+	if cfg.Connection.HostOverride != "192.168.0.5" {
+		t.Fatalf("unexpected trimmed host override: %q", cfg.Connection.HostOverride)
 	}
 }
 

@@ -37,3 +37,19 @@ The app never revokes or rotates the key server-side. Only the active method's c
 kept — switching methods means re-entering them. Passwords and keys are stored in the system
 keychain (default), in the plain-text config file, or for the current session only.
 
+### Host override (advanced)
+
+*Settings → Connection → Advanced → Host override* connects to a different host or IP than the
+one in the URL — useful when the URL host resolves publicly to another address, e.g.
+`https://torrent.domain.tld` points at your public IP, but over VPN the same server lives at
+`192.168.0.5` or `internal.domain.tld`.
+
+- Accepts a host name, an IP (`192.168.0.5`, `[::1]`), or either with an explicit port
+  (`internal.domain.tld:8080`). Without a port, the URL's port (including the scheme default,
+  e.g. 443 for HTTPS) is kept.
+- The URL host is still sent as the HTTP `Host` header and is used for the TLS server name and
+  certificate validation, so reverse-proxy setups keep working. An internal server presenting a
+  different certificate still needs *Skip certificate validation*.
+- Applies to direct connections. If `HTTP_PROXY`/`HTTPS_PROXY` is set, exclude the host with
+  `NO_PROXY` — the override does not apply to connections established through a proxy.
+
