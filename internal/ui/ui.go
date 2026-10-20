@@ -428,12 +428,7 @@ func (a *application) openSettingsWindow() {
 	hostOverrideEntry := widget.NewEntry()
 	hostOverrideEntry.SetPlaceHolder("internal.example, 192.168.0.5, [::1] — :port optional")
 	hostOverrideEntry.SetText(cfg.Connection.HostOverride)
-	testStatus := widget.NewLabel("")
-	testStatus.Wrapping = fyne.TextWrapWord
-	// The scroller pins the label's laid-out height to one line: a long
-	// wrapped error scrolls instead of resizing the window.
-	testStatusScroll := container.NewVScroll(testStatus)
-	testStatusScroll.SetMinSize(fyne.NewSize(0, testStatus.MinSize().Height))
+	testStatus, testStatusScroll := newConnectionTestStatus()
 	credentialSummary := widget.NewLabel(connectionCredentialStorageText(cfg.Connection, credStatus, session, retryActive))
 	credentialWarning := widget.NewLabel(connectionCredentialWarningText(cfg.Connection, credStatus, session, retryActive))
 	credentialWarning.Wrapping = fyne.TextWrapWord
@@ -1311,6 +1306,22 @@ func newAdvancedAccordion(detail fyne.CanvasObject, open bool) (*widget.Accordio
 	item := widget.NewAccordionItem("Advanced", detail)
 	item.Open = open
 	return widget.NewAccordion(item), item
+}
+
+// newConnectionTestStatus builds the connection test status label inside a
+// scroller that always shows two wrapped rows. The pinned viewport height
+// keeps a long error from resizing the window, while the label still wraps
+// and scrolls instead of truncating.
+func newConnectionTestStatus() (*widget.Label, *container.Scroll) {
+	status := widget.NewLabel("")
+	status.Wrapping = fyne.TextWrapWord
+	// The empty label measures one row, so measure a two-row text instead.
+	status.SetText("\n")
+	viewportHeight := status.MinSize().Height
+	status.SetText("")
+	scroll := container.NewVScroll(status)
+	scroll.SetMinSize(fyne.NewSize(0, viewportHeight))
+	return status, scroll
 }
 
 func addTorrentWindowSize(advancedExpanded bool) fyne.Size {

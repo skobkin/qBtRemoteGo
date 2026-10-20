@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
@@ -803,14 +802,11 @@ func equalStrings(got []string, want []string) bool {
 }
 
 // Long connection test errors must not grow the settings window: the status
-// label wraps inside a scroller whose minimum height stays at one line.
+// label wraps inside a scroller whose minimum height stays at two rows.
 func TestConnectionTestStatusScrollKeepsMinHeight(t *testing.T) {
 	test.NewApp()
 
-	status := widget.NewLabel("")
-	status.Wrapping = fyne.TextWrapWord
-	statusScroll := container.NewVScroll(status)
-	statusScroll.SetMinSize(fyne.NewSize(0, status.MinSize().Height))
+	status, statusScroll := newConnectionTestStatus()
 
 	idle := statusScroll.MinSize().Height
 
@@ -822,5 +818,13 @@ func TestConnectionTestStatusScrollKeepsMinHeight(t *testing.T) {
 	status.SetText("Connection test failed: " + strings.Repeat("very long error detail ", 60))
 	if got := statusScroll.MinSize().Height; got != idle {
 		t.Errorf("min height changed for long error: got %v, want %v", got, idle)
+	}
+
+	// The viewport must show two full rows: one row clips the second line
+	// mid-glyph, which reads as a rendering glitch.
+	single := widget.NewLabel("")
+	single.Wrapping = fyne.TextWrapWord
+	if idle <= single.MinSize().Height {
+		t.Errorf("viewport height %v should exceed one row %v", idle, single.MinSize().Height)
 	}
 }
