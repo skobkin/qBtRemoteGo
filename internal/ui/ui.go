@@ -289,7 +289,7 @@ func (a *application) buildMainWindow() {
 	a.detailsHost = newTorrentDetailsHost(a, center)
 	statusIcons := container.NewHBox(a.slowModeIcon, a.connectionIcon)
 	statusBar := container.NewBorder(nil, nil, nil, statusIcons, a.statusLabel)
-	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, container.NewPadded(statusBar))
+	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, statusBar)
 	content := container.NewBorder(toolbar, bottom, nil, nil, a.detailsHost.Root())
 	a.window.SetContent(container.NewStack(content, a.tooltipLayer))
 
