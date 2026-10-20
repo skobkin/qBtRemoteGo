@@ -429,8 +429,11 @@ func (a *application) openSettingsWindow() {
 	hostOverrideEntry.SetPlaceHolder("internal.example, 192.168.0.5, [::1] — :port optional")
 	hostOverrideEntry.SetText(cfg.Connection.HostOverride)
 	testStatus := widget.NewLabel("")
-	// Truncate instead of growing: a long error must not resize the window.
-	testStatus.Truncation = fyne.TextTruncateEllipsis
+	testStatus.Wrapping = fyne.TextWrapWord
+	// The scroller pins the label's laid-out height to one line: a long
+	// wrapped error scrolls instead of resizing the window.
+	testStatusScroll := container.NewVScroll(testStatus)
+	testStatusScroll.SetMinSize(fyne.NewSize(0, testStatus.MinSize().Height))
 	credentialSummary := widget.NewLabel(connectionCredentialStorageText(cfg.Connection, credStatus, session, retryActive))
 	credentialWarning := widget.NewLabel(connectionCredentialWarningText(cfg.Connection, credStatus, session, retryActive))
 	credentialWarning.Wrapping = fyne.TextWrapWord
@@ -567,7 +570,7 @@ func (a *application) openSettingsWindow() {
 	// Connection tab rows are swapped by replacing the whole form: reassigning
 	// Form.Items misrenders on Fyne v2.7 because the renderer keeps the original
 	// row widgets and only updates label texts positionally.
-	connectionTabContent := container.NewVBox(connectionForm, connectionAdvanced, credentialWarning, testButton, testStatus)
+	connectionTabContent := container.NewVBox(connectionForm, connectionAdvanced, credentialWarning, testButton, testStatusScroll)
 	updateAuthFields := func() {
 		method := authMethodKey(authMethod.Selected)
 		connectionTabContent.Objects[0] = widget.NewForm(authFormItems(method)...)

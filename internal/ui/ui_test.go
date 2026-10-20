@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
 	appcore "github.com/skobkin/qbtremotego/internal/app"
@@ -798,4 +800,27 @@ func equalStrings(got []string, want []string) bool {
 		}
 	}
 	return true
+}
+
+// Long connection test errors must not grow the settings window: the status
+// label wraps inside a scroller whose minimum height stays at one line.
+func TestConnectionTestStatusScrollKeepsMinHeight(t *testing.T) {
+	test.NewApp()
+
+	status := widget.NewLabel("")
+	status.Wrapping = fyne.TextWrapWord
+	statusScroll := container.NewVScroll(status)
+	statusScroll.SetMinSize(fyne.NewSize(0, status.MinSize().Height))
+
+	idle := statusScroll.MinSize().Height
+
+	status.SetText("Testing connection...")
+	if got := statusScroll.MinSize().Height; got != idle {
+		t.Errorf("min height changed for short text: got %v, want %v", got, idle)
+	}
+
+	status.SetText("Connection test failed: " + strings.Repeat("very long error detail ", 60))
+	if got := statusScroll.MinSize().Height; got != idle {
+		t.Errorf("min height changed for long error: got %v, want %v", got, idle)
+	}
 }
