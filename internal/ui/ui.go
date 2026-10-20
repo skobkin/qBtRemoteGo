@@ -288,7 +288,9 @@ func (a *application) buildMainWindow() {
 	center := a.buildTorrentTable()
 	a.detailsHost = newTorrentDetailsHost(a, center)
 	statusIcons := container.NewHBox(a.slowModeIcon, a.connectionIcon)
-	statusBar := container.NewBorder(nil, nil, nil, statusIcons, a.statusLabel)
+	// The override trims the label's inner padding so the row hugs the text.
+	statusBar := container.NewBorder(nil, nil, nil, statusIcons,
+		container.NewThemeOverride(a.statusLabel, newCompactStatusTheme()))
 	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, statusBar)
 	content := container.NewBorder(toolbar, bottom, nil, nil, a.detailsHost.Root())
 	a.window.SetContent(container.NewStack(content, a.tooltipLayer))
