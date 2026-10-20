@@ -494,7 +494,7 @@ func (a *application) openSettingsWindow() {
 	// The advanced section sits outside connectionForm: updateAuthFields
 	// replaces only the form element below, so the accordion and its entry
 	// survive auth-method switches untouched.
-	hostOverrideHint := widget.NewLabel("Connect to this host or IP instead of the URL host (VPN or LAN setups). The URL host is still used for the HTTP Host header and the TLS certificate. Add \":port\" to also override the port. Leave empty to connect normally.")
+	hostOverrideHint := widget.NewLabel("Connect via this host or IP instead of the URL host (VPN/LAN). The URL host still applies to the HTTP Host header and TLS certificate. Add \":port\" to override the port.")
 	hostOverrideHint.Wrapping = fyne.TextWrapWord
 	connectionAdvanced, _ := newAdvancedAccordion(container.NewVBox(
 		hostOverrideHint,
