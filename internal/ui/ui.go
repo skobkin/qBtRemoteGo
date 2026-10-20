@@ -429,6 +429,8 @@ func (a *application) openSettingsWindow() {
 	hostOverrideEntry.SetPlaceHolder("internal.example, 192.168.0.5, [::1] — :port optional")
 	hostOverrideEntry.SetText(cfg.Connection.HostOverride)
 	testStatus := widget.NewLabel("")
+	// Truncate instead of growing: a long error must not resize the window.
+	testStatus.Truncation = fyne.TextTruncateEllipsis
 	credentialSummary := widget.NewLabel(connectionCredentialStorageText(cfg.Connection, credStatus, session, retryActive))
 	credentialWarning := widget.NewLabel(connectionCredentialWarningText(cfg.Connection, credStatus, session, retryActive))
 	credentialWarning.Wrapping = fyne.TextWrapWord
@@ -549,6 +551,11 @@ func (a *application) openSettingsWindow() {
 			}, testedCreds)
 			fyne.Do(func() {
 				if err != nil {
+					// The status label truncates long errors, so log the
+					// full message with context for diagnosis.
+					a.logger.Warn("connection test failed",
+						"remote", strings.TrimSpace(urlEntry.Text),
+						"error", err)
 					testStatus.SetText("Connection test failed: " + err.Error())
 					return
 				}
