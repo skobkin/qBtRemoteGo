@@ -68,7 +68,7 @@ func newPathAutocompleteEntryWithDelay(recentPaths []string, delay time.Duration
 		selected:      -1,
 	}
 	entry.ExtendBaseWidget(entry)
-	entry.Wrapping = fyne.TextWrap(fyne.TextTruncateClip)
+	entry.Wrapping = fyne.TextWrapOff
 	entry.OnChanged = entry.handleChanged
 	entry.popupContent = container.NewVBox()
 	entry.popupScroll = container.NewVScroll(entry.popupContent)
