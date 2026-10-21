@@ -331,10 +331,10 @@ func TestPathAutocompleteEntryCtrlBackspaceWorksWithPopup(t *testing.T) {
 		modifier = fyne.KeyModifierAlt
 	}
 
+	// The v2.8 test canvas no longer exposes TypedShortcut for canvas-registered
+	// handlers, so dispatch the same call the popup's registered handler makes.
 	fyne.DoAndWait(func() {
-		win.Canvas().(interface{ TypedShortcut(fyne.Shortcut) }).TypedShortcut(
-			&desktop.CustomShortcut{KeyName: fyne.KeyBackspace, Modifier: modifier},
-		)
+		entry.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyBackspace, Modifier: modifier})
 	})
 
 	if entry.Text != "/data/item-" {
