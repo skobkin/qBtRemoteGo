@@ -342,6 +342,55 @@ func TestPathAutocompleteEntryCtrlBackspaceWorksWithPopup(t *testing.T) {
 	}
 }
 
+// TestPathAutocompleteEntryCanvasShortcutRegistration covers the shortcut
+// plumbing the ctrl+backspace test can no longer reach: since Fyne v2.8 the
+// test canvas does not deliver canvas-registered shortcuts, so that test
+// dispatches through the entry directly. This asserts the bookkeeping that
+// stays observable: shortcuts are installed on show, released on hide, and
+// re-installed when the popup reopens.
+func TestPathAutocompleteEntryCanvasShortcutRegistration(t *testing.T) {
+	test.NewTempApp(t)
+
+	entry := newPathAutocompleteEntryWithDelay(manyAutocompletePaths(), 0, nil, nil)
+	defer entry.Close()
+
+	win := test.NewWindow(entry)
+	defer win.Close()
+	win.Resize(fyne.NewSize(420, 300))
+	entry.Resize(fyne.NewSize(320, entry.MinSize().Height))
+	entry.Move(fyne.NewPos(20, 20))
+	entry.FocusGained()
+
+	fyne.DoAndWait(func() {
+		entry.SetText("/data/item")
+	})
+
+	if !entry.popupVisible() {
+		t.Fatalf("expected popup to be visible")
+	}
+	if entry.popupCanvas == nil {
+		t.Fatalf("expected canvas handlers to be installed while the popup is open")
+	}
+	want := len(entry.canvasShortcuts())
+	if got := len(entry.popupShortcuts); got != want {
+		t.Fatalf("expected %d canvas shortcuts registered while the popup is open, got %d", want, got)
+	}
+
+	fyne.DoAndWait(func() {
+		entry.hidePopup()
+	})
+	if entry.popupCanvas != nil || len(entry.popupShortcuts) != 0 {
+		t.Fatalf("expected shortcut registration released after hide, canvas=%v shortcuts=%d", entry.popupCanvas != nil, len(entry.popupShortcuts))
+	}
+
+	fyne.DoAndWait(func() {
+		entry.showPopup()
+	})
+	if got := len(entry.popupShortcuts); got != want {
+		t.Fatalf("expected %d canvas shortcuts re-registered after reopen, got %d", want, got)
+	}
+}
+
 func manyAutocompletePaths() []string {
 	const count = 12
 	paths := make([]string, 0, count)
