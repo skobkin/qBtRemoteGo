@@ -140,11 +140,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	}
 
 	fyApp := app.NewWithID(appcore.ID)
-	// Opt into Fyne's single-UI-goroutine model before the driver performs its
-	// once-only migration check. All goroutine-to-UI updates go through fyne.Do.
-	meta := fyApp.Metadata()
-	meta.Migrations = map[string]bool{"fyneDo": true}
-	app.SetMetadata(meta)
+	DeclareFyneDoMigration(fyApp)
 	fyApp.SetIcon(resources.AppIcon())
 
 	window := fyApp.NewWindow(mainWindowTitle(connectionStateUnknown, ""))

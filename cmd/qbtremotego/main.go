@@ -133,14 +133,6 @@ func initBootstrapLogger() (*logging.Manager, error) {
 	return manager, nil
 }
 
-// declareFyneDoMigration opts the app into Fyne's single-UI-goroutine model
-// before the driver performs its once-only migration check.
-func declareFyneDoMigration() {
-	meta := fyne.CurrentApp().Metadata()
-	meta.Migrations = map[string]bool{"fyneDo": true}
-	fyneapp.SetMetadata(meta)
-}
-
 func showActivationFailureDialog(err error) {
 	message := fmt.Sprintf("qBtRemoteGo is already running, but the handler request could not be delivered.\n\n%v", err)
 	_, _ = fmt.Fprintln(os.Stderr, message)
@@ -152,7 +144,7 @@ func showActivationFailureDialog(err error) {
 	}()
 
 	fyApp := fyneapp.New()
-	declareFyneDoMigration()
+	ui.DeclareFyneDoMigration(fyApp)
 	window := fyApp.NewWindow(appcore.Name)
 	window.Resize(fyne.NewSize(520, 200))
 
@@ -181,7 +173,7 @@ func showAlreadyRunningDialog(message string) {
 	}()
 
 	fyApp := fyneapp.New()
-	declareFyneDoMigration()
+	ui.DeclareFyneDoMigration(fyApp)
 	window := fyApp.NewWindow(appcore.Name)
 	window.Resize(fyne.NewSize(500, 160))
 
