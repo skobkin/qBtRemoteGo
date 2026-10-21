@@ -540,7 +540,7 @@ func (l *contentNameLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) 
 	expander, name := objects[0], objects[1]
 	x := float32(0)
 	if l.row != nil && l.row.current != nil {
-		x = float32(l.row.current.depth) * theme.IconInlineSize()
+		x = float32(l.row.current.depth) * theme.Size(theme.SizeNameInlineIcon)
 	}
 	// Always reserve the toggle width so file rows align with directory rows.
 	expander.Move(fyne.NewPos(x, 0))

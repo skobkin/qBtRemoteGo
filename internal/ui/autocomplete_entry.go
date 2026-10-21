@@ -351,11 +351,11 @@ func (e *pathAutocompleteEntry) popupLayout() (fyne.Position, fyne.Size) {
 
 	canvas := fyne.CurrentApp().Driver().CanvasForObject(e)
 	if canvas == nil {
-		return entryPos.Add(fyne.NewPos(0, e.Size().Height-theme.InputBorderSize())), fyne.NewSize(width, height)
+		return entryPos.Add(fyne.NewPos(0, e.Size().Height-theme.Size(theme.SizeNameInputBorder))), fyne.NewSize(width, height)
 	}
 
 	areaPos, areaSize := canvas.InteractiveArea()
-	anchorBelowY := entryPos.Y + e.Size().Height - theme.InputBorderSize()
+	anchorBelowY := entryPos.Y + e.Size().Height - theme.Size(theme.SizeNameInputBorder)
 	availableBelow := areaPos.Y + areaSize.Height - anchorBelowY
 	availableAbove := entryPos.Y - areaPos.Y
 	if availableBelow < 0 {
@@ -370,12 +370,12 @@ func (e *pathAutocompleteEntry) popupLayout() (fyne.Position, fyne.Size) {
 	y := anchorBelowY
 	if showAbove {
 		availableHeight = availableAbove
-		y = entryPos.Y - height + theme.InputBorderSize()
+		y = entryPos.Y - height + theme.Size(theme.SizeNameInputBorder)
 	}
 	if availableHeight > 0 && height > availableHeight {
 		height = availableHeight
 		if showAbove {
-			y = entryPos.Y - height + theme.InputBorderSize()
+			y = entryPos.Y - height + theme.Size(theme.SizeNameInputBorder)
 		}
 	}
 	if height < 0 {
@@ -394,7 +394,7 @@ func (e *pathAutocompleteEntry) popupHeight() float32 {
 		return 0
 	}
 	rowHeight := e.rowHeight()
-	height := float32(visibleItems)*rowHeight + theme.Padding()*2
+	height := float32(visibleItems)*rowHeight + theme.Size(theme.SizeNamePadding)*2
 	if height > maxAutocompletePopupHeight {
 		height = maxAutocompletePopupHeight
 	}

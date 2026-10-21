@@ -931,7 +931,7 @@ func (h *hoverLabel) MouseIn(*desktop.MouseEvent) {
 	if strings.TrimSpace(h.fullText) == "" {
 		return
 	}
-	textWidth := fyne.MeasureText(h.fullText, theme.TextSize(), fyne.TextStyle{}).Width
+	textWidth := fyne.MeasureText(h.fullText, theme.Size(theme.SizeNameText), fyne.TextStyle{}).Width
 	if textWidth <= h.Size().Width {
 		return
 	}

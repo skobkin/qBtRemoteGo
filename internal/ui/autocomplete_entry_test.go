@@ -208,7 +208,7 @@ func TestPathAutocompleteEntryPopupRespectsAvailableHeight(t *testing.T) {
 	entryPos := fyne.CurrentApp().Driver().AbsolutePositionForObject(entry)
 	_, size := entry.popupLayout()
 	canvasPos, canvasSize := win.Canvas().InteractiveArea()
-	maxBelow := canvasPos.Y + canvasSize.Height - (entryPos.Y + entry.Size().Height - theme.InputBorderSize())
+	maxBelow := canvasPos.Y + canvasSize.Height - (entryPos.Y + entry.Size().Height - theme.Size(theme.SizeNameInputBorder))
 	if size.Height > maxBelow {
 		t.Fatalf("expected popup height %v to fit below available space %v", size.Height, maxBelow)
 	}

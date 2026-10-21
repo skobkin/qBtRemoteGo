@@ -214,7 +214,7 @@ func newTextTooltip(text string, maxWidth float32) fyne.CanvasObject {
 
 	labelText := text
 	if maxWidth > 0 {
-		labelText = wrapTooltipText(text, maxWidth-theme.Padding()*2)
+		labelText = wrapTooltipText(text, maxWidth-theme.Size(theme.SizeNamePadding)*2)
 	}
 	label := widget.NewLabel(labelText)
 	padded := container.NewPadded(label)
@@ -260,7 +260,7 @@ func wrapTooltipText(text string, width float32) string {
 
 	paragraphs := strings.Split(strings.TrimSpace(text), "\n")
 	lines := make([]string, 0, len(paragraphs))
-	spaceWidth := fyne.MeasureText(" ", theme.TextSize(), fyne.TextStyle{}).Width
+	spaceWidth := fyne.MeasureText(" ", theme.Size(theme.SizeNameText), fyne.TextStyle{}).Width
 
 	for _, paragraph := range paragraphs {
 		paragraph = strings.TrimSpace(paragraph)
@@ -276,10 +276,10 @@ func wrapTooltipText(text string, width float32) string {
 		}
 
 		current := words[0]
-		currentWidth := fyne.MeasureText(current, theme.TextSize(), fyne.TextStyle{}).Width
+		currentWidth := fyne.MeasureText(current, theme.Size(theme.SizeNameText), fyne.TextStyle{}).Width
 
 		for _, word := range words[1:] {
-			wordWidth := fyne.MeasureText(word, theme.TextSize(), fyne.TextStyle{}).Width
+			wordWidth := fyne.MeasureText(word, theme.Size(theme.SizeNameText), fyne.TextStyle{}).Width
 			if currentWidth+spaceWidth+wordWidth <= width {
 				current = fmt.Sprintf("%s %s", current, word)
 				currentWidth += spaceWidth + wordWidth
@@ -304,14 +304,14 @@ func newTooltipBubble(content fyne.CanvasObject) *fyne.Container {
 	}
 
 	bg := canvas.NewRectangle(bgColor)
-	bg.CornerRadius = theme.Padding()
+	bg.CornerRadius = theme.Size(theme.SizeNamePadding)
 
 	return container.NewStack(bg, content)
 }
 
 func tooltipPopupPosition(anchorPos fyne.Position, anchorSize, popupSize, canvasSize fyne.Size) fyne.Position {
-	gap := theme.Padding()
-	edge := theme.Padding()
+	gap := theme.Size(theme.SizeNamePadding)
+	edge := theme.Size(theme.SizeNamePadding)
 	x := anchorPos.X
 	yBelow := anchorPos.Y + anchorSize.Height + gap
 	yAbove := anchorPos.Y - popupSize.Height - gap
