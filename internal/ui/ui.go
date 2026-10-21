@@ -496,9 +496,9 @@ func (a *application) openSettingsWindow() {
 	}
 	connectionForm := widget.NewForm(authFormItems(cfg.Connection.AuthMethod)...)
 
-	// The advanced section sits outside connectionForm: updateAuthFields
-	// replaces only the form element below, so the accordion and its entry
-	// survive auth-method switches untouched.
+	// The advanced section sits outside connectionForm so auth-method
+	// switches, which rebuild the form items, leave the accordion and its
+	// entry untouched.
 	hostOverrideHint := widget.NewLabel("Connect via this host or IP instead of the URL host (VPN/LAN). The URL host still applies to the HTTP Host header and TLS certificate. Add \":port\" to override the port.")
 	hostOverrideHint.Wrapping = fyne.TextWrapWord
 	connectionAdvanced, _ := newAdvancedAccordion(container.NewVBox(
@@ -567,14 +567,11 @@ func (a *application) openSettingsWindow() {
 		}()
 	})
 
-	// Connection tab rows are swapped by replacing the whole form: reassigning
-	// Form.Items misrenders on Fyne v2.7 because the renderer keeps the original
-	// row widgets and only updates label texts positionally.
 	connectionTabContent := container.NewVBox(connectionForm, connectionAdvanced, credentialWarning, testButton, testStatusScroll)
 	updateAuthFields := func() {
 		method := authMethodKey(authMethod.Selected)
-		connectionTabContent.Objects[0] = widget.NewForm(authFormItems(method)...)
-		connectionTabContent.Refresh()
+		connectionForm.Items = authFormItems(method)
+		connectionForm.Refresh()
 		credentialWarning.SetText(connectionCredentialWarningText(
 			config.ConnectionConfig{
 				AuthMethod:             method,
