@@ -5,10 +5,12 @@ import (
 	"fyne.io/fyne/v2/app"
 )
 
-// DeclareFyneDoMigration opts the app into Fyne's single-UI-goroutine model
-// before the driver performs its once-only migration check; call it right
-// after app creation and before the first window. All goroutine-to-UI updates
-// in this package go through fyne.Do.
+// DeclareFyneDoMigration opts the app into Fyne's single-UI-goroutine model.
+// Fyne latches the migration state in a package-level sync.Once
+// (internal/build.MigratedToFyneDo) that is first evaluated at the earliest
+// fyne.Do call, draw, or app.Run — not at window creation — so this must run
+// before any of those. All goroutine-to-UI updates in this package go through
+// fyne.Do.
 func DeclareFyneDoMigration(fyApp fyne.App) {
 	meta := fyApp.Metadata()
 	meta.Migrations = map[string]bool{"fyneDo": true}
