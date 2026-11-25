@@ -289,6 +289,7 @@ func (a *application) buildMainWindow() {
 	content := container.NewBorder(toolbar, bottom, nil, nil, a.detailsHost.Root())
 	a.window.SetContent(container.NewStack(content, a.tooltipLayer))
 	a.installMainShortcuts()
+	a.installFileDrop()
 
 	a.refreshVisibleTorrents()
 }
