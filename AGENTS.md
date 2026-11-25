@@ -15,6 +15,7 @@
 - `go run ./cmd/qbtremotego`: start the desktop app.
 - `go test ./...`: run unit tests.
 - `go vet ./...`: run baseline static checks used by CI.
+- CI runs `vet`, `test` and `golangci-lint` without cgo: `CGO_ENABLED=0 go vet -tags ci ./...`, `CGO_ENABLED=0 go test -tags ci ./...`, `CGO_ENABLED=0 golangci-lint run --build-tags ci ./...` (the `ci` tag selects Fyne's software driver). Only `build`/release need cgo and the X11/GL headers.
 - `golangci-lint run`: run the configured lint suite.
 - `goreleaser check`: validate the release config.
 - `goreleaser release --snapshot --clean`: build local snapshot release artifacts in `dist/`.
