@@ -466,10 +466,6 @@ func (a *application) openSettingsWindow() {
 	// maps a disabled panel to "off", and seeding that would silently rewrite
 	// the stored overlay choice to the default pane on the next save.
 	detailsMode.SetSelected(detailsModeSelectLabel(detailsPanelMode(cfg.UI.DetailsPanelMode)))
-	sortBy := widget.NewSelect(sortColumnLabels(), nil)
-	sortBy.SetSelected(sortColumnLabel(cfg.UI.SortColumn))
-	sortDescending := widget.NewCheck("", nil)
-	sortDescending.SetChecked(cfg.UI.SortDescending)
 	compactRows := widget.NewCheck("", nil)
 	compactRows.SetChecked(cfg.UI.CompactRows)
 	notifyOnComplete := widget.NewCheck("", nil)
@@ -514,22 +510,24 @@ func (a *application) openSettingsWindow() {
 		widget.NewForm(widget.NewFormItem("Host override", hostOverrideEntry)),
 	), false)
 
-	uiForm := widget.NewForm(
-		widget.NewFormItem("Number of paths to remember", rememberEntry),
-		widget.NewFormItem("Remember last save location", rememberLastSaveLocation),
-		widget.NewFormItem("Path autocompletion", autocomplete),
-		widget.NewFormItem("Torrent list update time (seconds)", activePoll),
-		widget.NewFormItem("Background update time (seconds)", backgroundPoll),
-		widget.NewFormItem("Start minimized to tray", startMinimized),
-		widget.NewFormItem("Enable details panel", detailsEnabled),
-		widget.NewFormItem("Details panel mode", detailsMode),
-		widget.NewFormItem("Sort by", sortBy),
-		widget.NewFormItem("Descending order", sortDescending),
-		widget.NewFormItem("Compact rows", compactRows),
-		widget.NewFormItem("Check for updates automatically", checkUpdates),
-		widget.NewFormItem("Log level", logLevel),
-		widget.NewFormItem("Log to file", logToFile),
-	)
+	torrentListContent := torrentListSettingsContent(torrentListSettingsControls{
+		compactRows:    compactRows,
+		detailsEnabled: detailsEnabled,
+		detailsMode:    detailsMode,
+		activePoll:     activePoll,
+		backgroundPoll: backgroundPoll,
+	})
+	addingContent := addingSettingsContent(addingSettingsControls{
+		rememberCount:    rememberEntry,
+		rememberLastPath: rememberLastSaveLocation,
+		pathAutocomplete: autocomplete,
+	})
+	applicationContent := applicationSettingsContent(applicationSettingsControls{
+		startMinimized: startMinimized,
+		checkUpdates:   checkUpdates,
+		logLevel:       logLevel,
+		logToFile:      logToFile,
+	})
 
 	integrationContent := integrationSettingsContent(integrationSettingsControls{
 		registerMagnet:   registerMagnet,
@@ -663,8 +661,6 @@ func (a *application) openSettingsWindow() {
 		// The enable checkbox is the sole on/off control; the select always
 		// stores a concrete mode so it survives disabled periods.
 		updated.UI.DetailsPanelMode = string(detailsModeFromLabel(detailsMode.Selected))
-		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
-		updated.UI.SortDescending = sortDescending.Checked
 		updated.UI.CompactRows = compactRows.Checked
 		updated.UI.NotifyOnComplete = notifyOnComplete.Checked
 		updated.Updates.CheckAutomatically = checkUpdates.Checked
@@ -729,8 +725,10 @@ func (a *application) openSettingsWindow() {
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Connection", container.NewPadded(connectionTabContent)),
-		container.NewTabItem("UI", container.NewPadded(uiForm)),
+		container.NewTabItem("Torrent list", container.NewPadded(torrentListContent)),
+		container.NewTabItem("Adding", container.NewPadded(addingContent)),
 		container.NewTabItem("Integration", container.NewPadded(integrationContent)),
+		container.NewTabItem("Application", container.NewPadded(applicationContent)),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
@@ -2132,38 +2130,4 @@ func mergeUnique(primary []string, secondary []string) []string {
 		out = append(out, item)
 	}
 	return out
-}
-
-// sortColumnLabels lists the Settings sort choices, one per table column.
-func sortColumnLabels() []string {
-	labels := make([]string, 0, len(torrentColumnSpecs))
-	for _, spec := range torrentColumnSpecs {
-		labels = append(labels, sortColumnLabel(spec.key))
-	}
-	return labels
-}
-
-// sortColumnLabel names a sort column in Settings. The speed columns get
-// longer names than their table headers.
-func sortColumnLabel(key string) string {
-	switch strings.TrimSpace(key) {
-	case "down":
-		return "Download speed"
-	case "up":
-		return "Upload speed"
-	}
-	if index := torrentColumnIndex(strings.TrimSpace(key)); index >= 0 {
-		return torrentColumnSpecs[index].label
-	}
-	return sortColumnLabel(config.Default().UI.SortColumn)
-}
-
-func sortColumnKey(label string) string {
-	label = strings.TrimSpace(label)
-	for _, spec := range torrentColumnSpecs {
-		if sortColumnLabel(spec.key) == label {
-			return spec.key
-		}
-	}
-	return config.Default().UI.SortColumn
 }

@@ -59,3 +59,74 @@ func integrationSettingsContent(c integrationSettingsControls) fyne.CanvasObject
 		)),
 	)
 }
+
+// torrentListSettingsControls are the Torrent list tab's inputs.
+type torrentListSettingsControls struct {
+	compactRows    fyne.CanvasObject
+	detailsEnabled fyne.CanvasObject
+	detailsMode    fyne.CanvasObject
+	activePoll     fyne.CanvasObject
+	backgroundPoll fyne.CanvasObject
+}
+
+// torrentListSettingsContent lays out how the list looks and how often it
+// refreshes. Sorting is set from the column headers.
+func torrentListSettingsContent(c torrentListSettingsControls) fyne.CanvasObject {
+	return container.NewVBox(
+		newSettingsSection("Display", widget.NewForm(
+			widget.NewFormItem("Compact rows", c.compactRows),
+			widget.NewFormItem("Enable details panel", c.detailsEnabled),
+			widget.NewFormItem("Details panel mode", c.detailsMode),
+		)),
+		widget.NewSeparator(),
+		newSettingsSection("Refresh", widget.NewForm(
+			widget.NewFormItem("Update interval (seconds)", c.activePoll),
+			widget.NewFormItem("Background interval (seconds)", c.backgroundPoll),
+		)),
+	)
+}
+
+// addingSettingsControls are the Adding tab's inputs.
+type addingSettingsControls struct {
+	rememberCount    fyne.CanvasObject
+	rememberLastPath fyne.CanvasObject
+	pathAutocomplete fyne.CanvasObject
+}
+
+// addingSettingsContent lays out the Add dialog's save location behaviour.
+func addingSettingsContent(c addingSettingsControls) fyne.CanvasObject {
+	return container.NewVBox(
+		newSettingsSection("Save location", widget.NewForm(
+			widget.NewFormItem("Number of paths to remember", c.rememberCount),
+			widget.NewFormItem("Remember last save location", c.rememberLastPath),
+			widget.NewFormItem("Path autocompletion", c.pathAutocomplete),
+		)),
+	)
+}
+
+// applicationSettingsControls are the Application tab's inputs.
+type applicationSettingsControls struct {
+	startMinimized fyne.CanvasObject
+	checkUpdates   fyne.CanvasObject
+	logLevel       fyne.CanvasObject
+	logToFile      fyne.CanvasObject
+}
+
+// applicationSettingsContent lays out app-wide behaviour: startup, update
+// checks and logging.
+func applicationSettingsContent(c applicationSettingsControls) fyne.CanvasObject {
+	return container.NewVBox(
+		newSettingsSection("Startup", widget.NewForm(
+			widget.NewFormItem("Start minimized to tray", c.startMinimized),
+		)),
+		widget.NewSeparator(),
+		newSettingsSection("Updates", widget.NewForm(
+			widget.NewFormItem("Check for updates automatically", c.checkUpdates),
+		)),
+		widget.NewSeparator(),
+		newSettingsSection("Logging", widget.NewForm(
+			widget.NewFormItem("Log level", c.logLevel),
+			widget.NewFormItem("Log to file", c.logToFile),
+		)),
+	)
+}

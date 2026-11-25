@@ -18,17 +18,6 @@ func TestColumnSpecKeysMatchConfig(t *testing.T) {
 	}
 }
 
-func TestSortColumnLabelsRoundTripEveryColumn(t *testing.T) {
-	for _, key := range config.ColumnKeys {
-		if got := sortColumnKey(sortColumnLabel(key)); got != key {
-			t.Errorf("sort label round trip for %q gave %q", key, got)
-		}
-	}
-	if len(sortColumnLabels()) != len(config.ColumnKeys) {
-		t.Fatalf("settings offers %d sort columns, want %d", len(sortColumnLabels()), len(config.ColumnKeys))
-	}
-}
-
 func TestOptionalColumnsHiddenByDefault(t *testing.T) {
 	app := newTorrentTableTestApp(t)
 	app.tableHeader.Refresh()
