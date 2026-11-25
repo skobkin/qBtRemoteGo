@@ -173,7 +173,7 @@ func TestServerSettingsReportsValuesTheServerIgnored(t *testing.T) {
 	backend.ignore["scheduler_days"] = true
 	w, rec := newTestServerSettings(t, backend)
 
-	days := w.form.editors[w.form.fieldByKey("scheduler_days")].(*enumEditor)
+	days := w.form.editors[w.form.fieldByKey("scheduler_days")].(*enumEditor[int64])
 	days.selector.SetSelected("Weekends")
 	w.startApply()
 	rec.onConfirm()

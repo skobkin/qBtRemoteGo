@@ -26,7 +26,7 @@ const unsupportedTabText = "Not supported by this server version."
 const maxRateLimitKiB = 2147483647 / 1024
 
 // prefValues holds decoded preference values keyed by wire key. Values are
-// bool, int64 or string, so they compare with ==.
+// bool, int64, float64 or string, so they compare with ==.
 type prefValues map[string]any
 
 // prefField describes one control in the Server settings window.
@@ -39,9 +39,9 @@ type prefField struct {
 	// reports and validation errors.
 	label string
 	name  string
-	// requires names a boolean key whose control must be on for this field to
-	// be editable (mirrors the WebUI's nested checkboxes).
-	requires string
+	// requires names boolean keys whose controls must all be on for this
+	// field to be editable (mirrors the WebUI's nested checkboxes).
+	requires []string
 	control  prefControl
 }
 
@@ -249,56 +249,74 @@ func (c timeControl) newEditor(f *prefField) prefEditor {
 
 // --- enum select ------------------------------------------------------------
 
-type prefOption struct {
-	value int64
+// prefOption is one choice of an enum preference; T is int64 or string,
+// matching the wire type.
+type prefOption[T comparable] struct {
+	value T
 	label string
 }
 
-type enumControl struct{ options []prefOption }
-
-func enumField(key, label, name string, options []prefOption) *prefField {
-	return &prefField{keys: []string{key}, label: label, name: name, control: enumControl{options: options}}
+type enumControl[T comparable] struct {
+	options     []prefOption[T]
+	decodeValue func(prefs qbt.Preferences, key string) (T, bool)
 }
 
-func (enumControl) decode(f *prefField, prefs qbt.Preferences) (prefValues, bool) {
-	return decodeInts(f.keys, prefs)
+// enumField is a select over an integer-coded preference.
+func enumField(key, label, name string, options []prefOption[int64]) *prefField {
+	control := enumControl[int64]{options: options, decodeValue: qbt.Preferences.Int}
+	return &prefField{keys: []string{key}, label: label, name: name, control: control}
 }
 
-func (c enumControl) format(f *prefField, values prefValues) string {
-	value, _ := values[f.keys[0]].(int64)
+// textEnumField is a select over a string-coded preference.
+func textEnumField(key, label, name string, options []prefOption[string]) *prefField {
+	control := enumControl[string]{options: options, decodeValue: qbt.Preferences.String}
+	return &prefField{keys: []string{key}, label: label, name: name, control: control}
+}
+
+func (c enumControl[T]) decode(f *prefField, prefs qbt.Preferences) (prefValues, bool) {
+	value, ok := c.decodeValue(prefs, f.keys[0])
+	if !ok {
+		return nil, false
+	}
+
+	return prefValues{f.keys[0]: value}, true
+}
+
+func (c enumControl[T]) format(f *prefField, values prefValues) string {
+	value, _ := values[f.keys[0]].(T)
 	for _, option := range c.options {
 		if option.value == value {
 			return option.label
 		}
 	}
 
-	return strconv.FormatInt(value, 10)
+	return fmt.Sprint(value)
 }
 
-func (c enumControl) newEditor(f *prefField) prefEditor {
+func (c enumControl[T]) newEditor(f *prefField) prefEditor {
 	labels := make([]string, 0, len(c.options))
 	for _, option := range c.options {
 		labels = append(labels, option.label)
 	}
 
-	return &enumEditor{field: f, options: c.options, selector: widget.NewSelect(labels, nil)}
+	return &enumEditor[T]{field: f, options: c.options, selector: widget.NewSelect(labels, nil)}
 }
 
 // enumEditor keeps a server value it has no label for unchanged until the
 // user picks an option, so unknown values from newer servers survive.
-type enumEditor struct {
+type enumEditor[T comparable] struct {
 	field    *prefField
-	options  []prefOption
+	options  []prefOption[T]
 	selector *widget.Select
-	loaded   int64
+	loaded   T
 }
 
-func (e *enumEditor) object() fyne.CanvasObject { return e.selector }
+func (e *enumEditor[T]) object() fyne.CanvasObject { return e.selector }
 
-func (e *enumEditor) load(values prefValues) {
-	e.loaded, _ = values[e.field.keys[0]].(int64)
+func (e *enumEditor[T]) load(values prefValues) {
+	e.loaded, _ = values[e.field.keys[0]].(T)
 	e.selector.ClearSelected()
-	e.selector.PlaceHolder = strconv.FormatInt(e.loaded, 10)
+	e.selector.PlaceHolder = fmt.Sprint(e.loaded)
 	for _, option := range e.options {
 		if option.value == e.loaded {
 			e.selector.SetSelected(option.label)
@@ -308,7 +326,7 @@ func (e *enumEditor) load(values prefValues) {
 	e.selector.Refresh()
 }
 
-func (e *enumEditor) store(values prefValues) error {
+func (e *enumEditor[T]) store(values prefValues) error {
 	value := e.loaded
 	for _, option := range e.options {
 		if option.label == e.selector.Selected {
@@ -321,8 +339,8 @@ func (e *enumEditor) store(values prefValues) error {
 	return nil
 }
 
-func (e *enumEditor) setEnabled(enabled bool) { setWidgetEnabled(e.selector, enabled) }
-func (e *enumEditor) disabled() bool          { return e.selector.Disabled() }
+func (e *enumEditor[T]) setEnabled(enabled bool) { setWidgetEnabled(e.selector, enabled) }
+func (e *enumEditor[T]) disabled() bool          { return e.selector.Disabled() }
 
 type disableable interface {
 	Enable()
@@ -545,62 +563,23 @@ func (f *prefForm) fieldByKey(key string) *prefField {
 	return nil
 }
 
-// syncEnablement enables fields whose required switch is on; a switch this
-// server does not report leaves its dependants enabled.
+// syncEnablement enables fields whose required switches are all on; a switch
+// this server does not report counts as on.
 func (f *prefForm) syncEnablement() {
 	for _, field := range f.fields {
-		if field.requires == "" {
+		if len(field.requires) == 0 {
 			continue
 		}
 		enabled := true
-		if switchField := f.fieldByKey(field.requires); switchField != nil {
-			if check, ok := f.editors[switchField].(*checkEditor); ok {
-				enabled = check.check.Checked
+		for _, key := range field.requires {
+			switchField := f.fieldByKey(key)
+			if switchField == nil {
+				continue
+			}
+			if check, ok := f.editors[switchField].(*checkEditor); ok && !check.check.Checked {
+				enabled = false
 			}
 		}
 		f.editors[field].setEnabled(enabled)
 	}
-}
-
-// --- tabs -------------------------------------------------------------------
-
-func schedulerDayOptions() []prefOption {
-	return []prefOption{
-		{0, "Every day"}, {1, "Weekdays"}, {2, "Weekends"},
-		{3, "Monday"}, {4, "Tuesday"}, {5, "Wednesday"}, {6, "Thursday"},
-		{7, "Friday"}, {8, "Saturday"}, {9, "Sunday"},
-	}
-}
-
-// serverPrefTabs lists the implemented tabs of the Server settings window,
-// mirroring the qBittorrent WebUI Options tabs.
-func serverPrefTabs() []prefTab {
-	return []prefTab{speedPrefTab()}
-}
-
-func speedPrefTab() prefTab {
-	requiresSchedule := func(field *prefField) *prefField {
-		field.requires = "scheduler_enabled"
-		return field
-	}
-
-	return prefTab{title: "Speed", sections: []prefSection{
-		{title: "Global Rate Limits", hint: "0 means unlimited", fields: []*prefField{
-			rateLimitField("up_limit", "Upload (KiB/s)", "Global upload limit"),
-			rateLimitField("dl_limit", "Download (KiB/s)", "Global download limit"),
-		}},
-		{title: "Alternative Rate Limits", hint: "0 means unlimited", fields: []*prefField{
-			rateLimitField("alt_up_limit", "Upload (KiB/s)", "Alternative upload limit"),
-			rateLimitField("alt_dl_limit", "Download (KiB/s)", "Alternative download limit"),
-			checkField("scheduler_enabled", "Use on a schedule", "Alternative limits schedule"),
-			requiresSchedule(timeField("schedule_from_hour", "schedule_from_min", "From", "Alternative limits schedule start")),
-			requiresSchedule(timeField("schedule_to_hour", "schedule_to_min", "To", "Alternative limits schedule end")),
-			requiresSchedule(enumField("scheduler_days", "When", "Alternative limits schedule days", schedulerDayOptions())),
-		}},
-		{title: "Rate Limits Settings", fields: []*prefField{
-			checkField("limit_utp_rate", "Apply rate limit to µTP protocol", "Rate limit µTP"),
-			checkField("limit_tcp_overhead", "Apply rate limit to transport overhead", "Rate limit transport overhead"),
-			checkField("limit_lan_peers", "Apply rate limit to peers on LAN", "Rate limit LAN peers"),
-		}},
-	}}
 }

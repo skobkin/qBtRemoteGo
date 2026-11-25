@@ -195,7 +195,7 @@ func TestPrefFieldFormatting(t *testing.T) {
 		{checkField("lsd", "", ""), prefValues{"lsd": false}, "Off"},
 		{timeField("h", "m", "", ""), prefValues{"h": int64(20), "m": int64(5)}, "20:05"},
 		{enumField("scheduler_days", "", "", schedulerDayOptions()), prefValues{"scheduler_days": int64(2)}, "Weekends"},
-		{enumField("encryption", "", "", []prefOption{{0, "Allow"}, {1, "Require"}}), prefValues{"encryption": int64(42)}, "42"},
+		{enumField("encryption", "", "", []prefOption[int64]{{0, "Allow"}, {1, "Require"}}), prefValues{"encryption": int64(42)}, "42"},
 		{rateLimitField("dl_limit", "", ""), prefValues{}, "(not set)"},
 	}
 	for _, tt := range tests {
@@ -272,11 +272,13 @@ func TestPrefFormShowsPlaceholderForUnsupportedTab(t *testing.T) {
 	if len(form.fields) != 0 {
 		t.Fatalf("fields = %v", fieldNames(form.fields))
 	}
-	if len(form.tabs.Items) != 1 || form.tabs.Items[0].Text != "Speed" {
+	if len(form.tabs.Items) != len(serverPrefTabs()) || form.tabs.Items[0].Text != "Speed" {
 		t.Fatalf("tabs = %d", len(form.tabs.Items))
 	}
-	if !slices.Contains(labelTexts(form.tabs.Items[0].Content), unsupportedTabText) {
-		t.Fatalf("placeholder %q not rendered", unsupportedTabText)
+	for _, item := range form.tabs.Items {
+		if !slices.Contains(labelTexts(item.Content), unsupportedTabText) {
+			t.Fatalf("placeholder %q not rendered on %s", unsupportedTabText, item.Text)
+		}
 	}
 }
 
