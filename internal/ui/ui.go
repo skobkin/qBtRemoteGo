@@ -61,6 +61,7 @@ type application struct {
 	windowVisible     atomic.Bool
 	trayAvailable     bool
 	settingsWindow    fyne.Window
+	serverSettings    *serverSettingsWindow
 	pendingInvocation appcore.InvocationBatch
 
 	// updateChecker is nil when the update manager failed to construct; every
@@ -126,9 +127,10 @@ type trayState struct {
 	speedItem  *fyne.MenuItem
 	// slowModeItem toggles the alternative speed limits; its check mark
 	// mirrors the server state (see syncTraySlowMode).
-	slowModeItem *fyne.MenuItem
-	updateItem   *fyne.MenuItem
-	quitItem     *fyne.MenuItem
+	slowModeItem       *fyne.MenuItem
+	serverSettingsItem *fyne.MenuItem
+	updateItem         *fyne.MenuItem
+	quitItem           *fyne.MenuItem
 }
 
 func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.InvocationBatch) error {
@@ -264,6 +266,9 @@ func (a *application) buildMainWindow() {
 	settingsButton := newButtonWithTooltip(a.tooltipManager, theme.SettingsIcon(), "Settings", func() {
 		a.openSettingsWindow()
 	})
+	serverSettingsButton := newButtonWithTooltip(a.tooltipManager, theme.StorageIcon(), "Server settings (qBittorrent preferences)", func() {
+		a.openServerSettingsWindow()
+	})
 
 	a.stateSelect = a.buildStateFilterSelect()
 	searchBox := a.buildSearchBox()
@@ -279,6 +284,7 @@ func (a *application) buildMainWindow() {
 		a.stateSelect,
 		searchBox,
 		newToolbarSeparator(),
+		serverSettingsButton,
 		settingsButton,
 	)
 
@@ -367,6 +373,9 @@ func (a *application) configureTray() {
 		slowModeItem: fyne.NewMenuItem("Slow mode", func() {
 			fyne.Do(a.toggleSlowMode)
 		}),
+		serverSettingsItem: fyne.NewMenuItem("Server settings…", func() {
+			fyne.Do(a.openServerSettingsWindow)
+		}),
 		updateItem: fyne.NewMenuItem("Check for updates…", func() {
 			fyne.Do(a.checkForUpdates)
 		}),
@@ -388,6 +397,7 @@ func (a *application) trayMenu() *fyne.Menu {
 		a.trayState.speedItem,
 		a.trayState.showItem,
 		a.trayState.slowModeItem,
+		a.trayState.serverSettingsItem,
 		a.trayState.updateItem,
 		a.trayState.quitItem)
 }
