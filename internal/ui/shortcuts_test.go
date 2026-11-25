@@ -151,3 +151,33 @@ func TestCtrlXDoesNotRemove(t *testing.T) {
 		t.Fatal("Ctrl+X must not open the remove confirmation")
 	}
 }
+
+// Plain keys reach the canvas even while a dialog is open; they must not
+// stack a second confirmation or act on the list behind it.
+func TestMainKeysIgnoredWhileDialogOpen(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	app.applyTorrentSelection("hash-a", 0)
+
+	typeMainKey(app, fyne.KeyDelete)
+	typeMainKey(app, fyne.KeyDelete)
+	if got := len(app.window.Canvas().Overlays().List()); got != 1 {
+		t.Fatalf("%d overlays after pressing Del twice, want 1", got)
+	}
+
+	typeMainKey(app, fyne.KeyEscape)
+	if len(app.selection) != 1 {
+		t.Fatal("Esc behind an open dialog cleared the selection")
+	}
+}
+
+func TestShiftDeleteIgnoredWhileDialogOpen(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	app.applyTorrentSelection("hash-a", 0)
+
+	typeMainShortcut(app, &fyne.ShortcutCut{Secondary: true})
+	typeMainShortcut(app, &fyne.ShortcutCut{Secondary: true})
+
+	if got := len(app.window.Canvas().Overlays().List()); got != 1 {
+		t.Fatalf("%d overlays after Shift+Del twice, want 1", got)
+	}
+}

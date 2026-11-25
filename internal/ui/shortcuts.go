@@ -81,13 +81,18 @@ func (a *application) installMainShortcuts() {
 // because it shares the shortcut name.
 func (a *application) handleCutShortcut(shortcut fyne.Shortcut) {
 	cut, ok := shortcut.(*fyne.ShortcutCut)
-	if !ok || !cut.Secondary || len(a.selection) == 0 {
+	if !ok || !cut.Secondary || len(a.selection) == 0 || a.window.Canvas().Overlays().Top() != nil {
 		return
 	}
 	a.confirmDeleteWith(true)
 }
 
 func (a *application) handleMainKey(event *fyne.KeyEvent) {
+	// An open dialog or popup menu owns the keyboard; without this, Del would
+	// stack confirmations and Esc/Enter would act on the list behind it.
+	if a.window.Canvas().Overlays().Top() != nil {
+		return
+	}
 	switch mainKeyActionFor(event.Name) {
 	case keyActionRemove:
 		if len(a.selection) > 0 {
