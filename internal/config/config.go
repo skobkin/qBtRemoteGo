@@ -69,6 +69,8 @@ type UIConfig struct {
 	DetailsPanelMode           string             `json:"details_panel_mode"`
 	FilterBy                   string             `json:"filter_by"`
 	StateFilter                string             `json:"state_filter"`
+	WindowWidth                float32            `json:"window_width,omitempty"`
+	WindowHeight               float32            `json:"window_height,omitempty"`
 	SortColumn                 string             `json:"sort_column"`
 	SortDescending             bool               `json:"sort_descending"`
 	CompactRows                bool               `json:"compact_rows"`
@@ -156,6 +158,8 @@ func Normalize(cfg *AppConfig) {
 		cfg.UI.FilterBy = def.UI.FilterBy
 	}
 	cfg.UI.StateFilter = normalizeStateFilter(cfg.UI.StateFilter)
+	cfg.UI.WindowWidth = normalizeWindowDimension(cfg.UI.WindowWidth, MinWindowWidth)
+	cfg.UI.WindowHeight = normalizeWindowDimension(cfg.UI.WindowHeight, MinWindowHeight)
 	if !isValidSortColumn(cfg.UI.SortColumn) {
 		cfg.UI.SortColumn = def.UI.SortColumn
 	}
@@ -377,4 +381,20 @@ func normalizeStateFilter(raw string) string {
 	default:
 		return "all"
 	}
+}
+
+// Smallest remembered main window size; anything smaller is clamped so a bad
+// value can't restore an unusably tiny window.
+const (
+	MinWindowWidth  float32 = 640
+	MinWindowHeight float32 = 400
+)
+
+// normalizeWindowDimension keeps 0 ("use the default size"), drops negative
+// values and clamps tiny ones to the minimum.
+func normalizeWindowDimension(value float32, minimum float32) float32 {
+	if value <= 0 {
+		return 0
+	}
+	return max(value, minimum)
 }

@@ -166,7 +166,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	fyApp.SetIcon(resources.AppIcon())
 
 	window := fyApp.NewWindow(mainWindowTitle(connectionStateUnknown, ""))
-	window.Resize(fyne.NewSize(1120, 680))
+	window.Resize(mainWindowSize(controller.Config().UI))
 	window.SetIcon(resources.AppIcon())
 
 	ui := &application{
@@ -227,6 +227,9 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 	ui.startUpdateChecks()
 	go ui.pollLoop()
 	fyApp.Run()
+	// The canvas keeps its last size after the window is gone, so the size
+	// is remembered on every exit path (window close, tray quit).
+	ui.persistWindowSize()
 	if ui.updateChecker != nil {
 		ui.updateChecker.Stop()
 	}
@@ -312,6 +315,7 @@ func (a *application) showMainWindow() {
 // hideMainWindow tucks the main window into the tray and records visibility
 // for the poll interval.
 func (a *application) hideMainWindow() {
+	a.persistWindowSize()
 	a.windowVisible.Store(false)
 	a.window.Hide()
 }

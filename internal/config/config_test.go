@@ -535,3 +535,26 @@ func TestNormalizeStateFilter(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeWindowSize(t *testing.T) {
+	tests := []struct {
+		name          string
+		width, height float32
+		wantW, wantH  float32
+	}{
+		{"unset stays default", 0, 0, 0, 0},
+		{"negative resets", -5, -1, 0, 0},
+		{"too small is clamped", 100, 50, MinWindowWidth, MinWindowHeight},
+		{"normal size kept", 1400, 900, 1400, 900},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.UI.WindowWidth, cfg.UI.WindowHeight = tt.width, tt.height
+			Normalize(&cfg)
+			if cfg.UI.WindowWidth != tt.wantW || cfg.UI.WindowHeight != tt.wantH {
+				t.Fatalf("window %.0fx%.0f, want %.0fx%.0f", cfg.UI.WindowWidth, cfg.UI.WindowHeight, tt.wantW, tt.wantH)
+			}
+		})
+	}
+}
