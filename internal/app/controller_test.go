@@ -87,6 +87,14 @@ func TestStatusLabel(t *testing.T) {
 	}
 }
 
+func TestStatusLabelUsesStoppedForPausedAndStoppedStates(t *testing.T) {
+	for _, state := range []string{"pausedDL", "pausedUP", "stoppedDL", "stoppedUP"} {
+		if got := StatusLabel(state); got != "Stopped" {
+			t.Fatalf("StatusLabel(%q) = %q, want Stopped", state, got)
+		}
+	}
+}
+
 func TestHumanSpeedLimit(t *testing.T) {
 	if got := HumanSpeedLimit(0); got != "∞" {
 		t.Fatalf("unexpected unlimited label: %q", got)

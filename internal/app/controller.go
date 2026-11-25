@@ -668,7 +668,7 @@ func StatusLabel(state string) string {
 	case "checkingdl", "checkingup", "checkingresume":
 		return "Checking"
 	case "pauseddl", "pausedup", "stoppeddl", "stoppedup":
-		return "Paused"
+		return "Stopped"
 	case "moving":
 		return "Moving"
 	case "missingfiles":

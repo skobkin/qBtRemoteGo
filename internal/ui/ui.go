@@ -1984,7 +1984,7 @@ func statusColor(state string) color.Color {
 		return color.NRGBA{R: 0x0b, G: 0x84, B: 0xf3, A: 0xff}
 	case "Seeding", "Completed":
 		return color.NRGBA{R: 0x20, G: 0x96, B: 0x4c, A: 0xff}
-	case "Paused":
+	case "Stopped":
 		return color.NRGBA{R: 0x7c, G: 0x85, B: 0x90, A: 0xff}
 	case "Checking", "Metadata", "Queued":
 		return color.NRGBA{R: 0xe0, G: 0x9f, B: 0x1f, A: 0xff}
