@@ -77,6 +77,10 @@ type application struct {
 	statusLabel    *widget.Label
 	connectionIcon *hoverIcon
 	slowModeIcon   *hoverIcon
+	// emptyState replaces an empty torrent list with a message and an action.
+	emptyState        *fyne.Container
+	emptyStateMessage *widget.Label
+	emptyStateAction  *widget.Button
 	// Toolbar actions that need a selection; see syncSelectionActions.
 	removeButton      *buttonWithTooltip
 	startButton       *buttonWithTooltip
@@ -272,7 +276,7 @@ func (a *application) buildMainWindow() {
 
 	toolbar := container.NewBorder(nil, nil, leftTools, rightTools)
 
-	center := a.buildTorrentTable()
+	center := container.NewStack(a.buildTorrentTable(), a.buildEmptyState())
 	a.detailsHost = newTorrentDetailsHost(a, center)
 	statusIcons := container.NewHBox(a.slowModeIcon, a.connectionIcon)
 	// The override trims the label's inner padding so the row hugs the text.
@@ -1337,6 +1341,7 @@ func (a *application) refreshVisibleTorrents() {
 	a.statusLabel.SetText(a.statusText())
 	a.refreshStatusIcons()
 	a.syncSelectionActions()
+	a.syncEmptyState()
 }
 
 func (a *application) statusText() string {
