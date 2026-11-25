@@ -61,7 +61,6 @@
 - Keep commits scoped and explain behavioral impact in the subject.
 - PRs should include a clear summary of user-visible changes.
 - PRs should include testing performed (`go test ./...`, manual GUI checks, release validation when relevant).
-- PRs should include screenshots or GIFs for UI changes.
 - If a PR changes protocol/file-handler registration, autostart behavior, or release/CI settings, call that out explicitly in the description.
 
 ## Configuration & Data Paths
