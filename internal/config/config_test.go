@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -556,5 +557,40 @@ func TestNormalizeWindowSize(t *testing.T) {
 				t.Fatalf("window %.0fx%.0f, want %.0fx%.0f", cfg.UI.WindowWidth, cfg.UI.WindowHeight, tt.wantW, tt.wantH)
 			}
 		})
+	}
+}
+
+func TestNormalizeVisibleColumns(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"unset keeps defaults", nil, nil},
+		{"unknown and duplicate keys dropped", []string{"size", "bogus", "ratio", "size"}, []string{"name", "size", "ratio"}},
+		{"name always kept first", []string{"ratio", "name"}, []string{"name", "ratio"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.UI.VisibleColumns = tt.in
+			Normalize(&cfg)
+			if !slices.Equal(cfg.UI.VisibleColumns, tt.want) {
+				t.Fatalf("visible columns %v, want %v", cfg.UI.VisibleColumns, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtraColumnsAreValidSortAndWidthKeys(t *testing.T) {
+	cfg := Default()
+	cfg.UI.SortColumn = "ratio"
+	cfg.UI.ColumnWidths = map[string]float32{"uploaded": 120}
+	Normalize(&cfg)
+	if cfg.UI.SortColumn != "ratio" {
+		t.Fatalf("sort column %q, want ratio", cfg.UI.SortColumn)
+	}
+	if cfg.UI.ColumnWidths["uploaded"] != 120 {
+		t.Fatalf("column widths %v, want uploaded kept", cfg.UI.ColumnWidths)
 	}
 }

@@ -98,6 +98,8 @@ type application struct {
 	// tableWidth is the torrent table's laid-out width; the flexible Name
 	// column absorbs whatever the other columns leave of it.
 	tableWidth float32
+	// visibleColumns holds the enabled column keys; nil means the defaults.
+	visibleColumns map[string]bool
 	// stateSelect is the toolbar quick state filter; stateFilter is the bucket
 	// it selects (its option labels change with every poll's counts).
 	stateSelect          *widget.Select
@@ -2111,61 +2113,36 @@ func mergeUnique(primary []string, secondary []string) []string {
 	return out
 }
 
+// sortColumnLabels lists the Settings sort choices, one per table column.
 func sortColumnLabels() []string {
-	return []string{
-		"Name",
-		"Size",
-		"Progress",
-		"Status",
-		"Download speed",
-		"Upload speed",
-		"ETA",
-		"Added",
+	labels := make([]string, 0, len(torrentColumnSpecs))
+	for _, spec := range torrentColumnSpecs {
+		labels = append(labels, sortColumnLabel(spec.key))
 	}
+	return labels
 }
 
+// sortColumnLabel names a sort column in Settings. The speed columns get
+// longer names than their table headers.
 func sortColumnLabel(key string) string {
 	switch strings.TrimSpace(key) {
-	case "name":
-		return "Name"
-	case "size":
-		return "Size"
-	case "progress":
-		return "Progress"
-	case "status":
-		return "Status"
 	case "down":
 		return "Download speed"
 	case "up":
 		return "Upload speed"
-	case "eta":
-		return "ETA"
-	case "added":
-		return "Added"
-	default:
-		return "Added"
 	}
+	if index := torrentColumnIndex(strings.TrimSpace(key)); index >= 0 {
+		return torrentColumnSpecs[index].label
+	}
+	return sortColumnLabel(config.Default().UI.SortColumn)
 }
 
 func sortColumnKey(label string) string {
-	switch strings.TrimSpace(label) {
-	case "Name":
-		return "name"
-	case "Size":
-		return "size"
-	case "Progress":
-		return "progress"
-	case "Status":
-		return "status"
-	case "Download speed":
-		return "down"
-	case "Upload speed":
-		return "up"
-	case "ETA":
-		return "eta"
-	case "Added":
-		return "added"
-	default:
-		return config.Default().UI.SortColumn
+	label = strings.TrimSpace(label)
+	for _, spec := range torrentColumnSpecs {
+		if sortColumnLabel(spec.key) == label {
+			return spec.key
+		}
 	}
+	return config.Default().UI.SortColumn
 }

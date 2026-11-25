@@ -71,6 +71,7 @@ type UIConfig struct {
 	StateFilter                string             `json:"state_filter"`
 	WindowWidth                float32            `json:"window_width,omitempty"`
 	WindowHeight               float32            `json:"window_height,omitempty"`
+	VisibleColumns             []string           `json:"visible_columns,omitempty"`
 	SortColumn                 string             `json:"sort_column"`
 	SortDescending             bool               `json:"sort_descending"`
 	CompactRows                bool               `json:"compact_rows"`
@@ -164,6 +165,7 @@ func Normalize(cfg *AppConfig) {
 		cfg.UI.SortColumn = def.UI.SortColumn
 	}
 	cfg.UI.ColumnWidths = normalizeColumnWidths(cfg.UI.ColumnWidths)
+	cfg.UI.VisibleColumns = normalizeVisibleColumns(cfg.UI.VisibleColumns)
 	cfg.UI.RecentSavePaths = normalizePaths(cfg.UI.RecentSavePaths, cfg.UI.RememberPathCount)
 
 	cfg.Logging.Level = normalizeLogLevel(cfg.Logging.Level)
@@ -324,10 +326,32 @@ func normalizeCredentialStorage(mode CredentialStorageMode) CredentialStorageMod
 	}
 }
 
+// ColumnKeys lists every torrent table column. The table's column specs in
+// internal/ui use the same keys; a UI test keeps them aligned.
+var ColumnKeys = []string{
+	"name", "size", "progress", "status", "down", "up", "eta", "added",
+	"ratio", "seeds", "peers", "category", "tags", "save_path", "uploaded",
+}
+
 func isValidSortColumn(column string) bool {
-	return slices.Contains([]string{
-		"name", "size", "progress", "status", "down", "up", "eta", "added",
-	}, column)
+	return slices.Contains(ColumnKeys, column)
+}
+
+// normalizeVisibleColumns drops unknown and duplicate column keys and keeps
+// Name first. nil means "the default column set".
+func normalizeVisibleColumns(columns []string) []string {
+	if columns == nil {
+		return nil
+	}
+	out := []string{"name"}
+	for _, key := range columns {
+		key = strings.TrimSpace(key)
+		if !isValidSortColumn(key) || slices.Contains(out, key) {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
 }
 
 func isValidDetailsPanelMode(mode string) bool {

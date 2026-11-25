@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"image/color"
 	"strings"
 	"time"
@@ -83,6 +84,8 @@ type torrentColumnSpec struct {
 	// flexible marks the column that fills the table's spare width. It has
 	// no resize handle; its width follows the window instead.
 	flexible bool
+	// optional columns are hidden until enabled from the header menu.
+	optional bool
 }
 
 var torrentColumnSpecs = []torrentColumnSpec{
@@ -94,6 +97,13 @@ var torrentColumnSpecs = []torrentColumnSpec{
 	{key: "up", label: "Up", defaultWidth: 110, minWidth: 90, resizable: true},
 	{key: "eta", label: "ETA", defaultWidth: 90, minWidth: 80, resizable: true},
 	{key: "added", label: "Added", defaultWidth: 90, minWidth: 80, resizable: true},
+	{key: "ratio", label: "Ratio", defaultWidth: 80, minWidth: 60, resizable: true, optional: true},
+	{key: "seeds", label: "Seeds", defaultWidth: 100, minWidth: 80, resizable: true, optional: true},
+	{key: "peers", label: "Peers", defaultWidth: 100, minWidth: 80, resizable: true, optional: true},
+	{key: "category", label: "Category", defaultWidth: 120, minWidth: 80, resizable: true, optional: true},
+	{key: "tags", label: "Tags", defaultWidth: 140, minWidth: 80, resizable: true, optional: true},
+	{key: "save_path", label: "Save path", defaultWidth: 220, minWidth: 120, resizable: true, optional: true},
+	{key: "uploaded", label: "Uploaded", defaultWidth: 110, minWidth: 90, resizable: true, optional: true},
 }
 
 type torrentHeaderRow struct {
@@ -122,6 +132,13 @@ type torrentListRow struct {
 	up            *hoverLabel
 	eta           *hoverLabel
 	added         *hoverLabel
+	ratio         *hoverLabel
+	seeds         *hoverLabel
+	peers         *hoverLabel
+	category      *hoverLabel
+	tags          *hoverLabel
+	savePath      *hoverLabel
+	uploaded      *hoverLabel
 	separator     *widget.Separator
 	hash          string
 	modifier      fyne.KeyModifier
@@ -186,6 +203,7 @@ type torrentTableLayout struct {
 func (a *application) buildTorrentTable() fyne.CanvasObject {
 	a.columnWidths = mergeColumnWidths(a.controller.Config().UI.ColumnWidths)
 	a.compactRows = a.controller.Config().UI.CompactRows
+	a.visibleColumns = visibleColumnSet(a.controller.Config().UI.VisibleColumns)
 	// The list is built once; drop any rows registered by an earlier build so
 	// the selection scan never touches dead widgets.
 	a.listRows = nil
@@ -281,6 +299,10 @@ func (a *application) columnBoundary(key string, widthOverride float32) float32 
 }
 
 func (a *application) columnWidth(spec torrentColumnSpec) float32 {
+	// Hidden columns take no space, so every width sum skips them.
+	if !a.columnVisible(spec) {
+		return 0
+	}
 	if spec.flexible {
 		return a.flexibleColumnWidth(spec)
 	}
@@ -413,6 +435,7 @@ func newTorrentHeaderRow(app *application) *torrentHeaderRow {
 		cell := newSortableHeaderCell(spec.label, func() {
 			app.sortByColumn(key)
 		})
+		cell.onSecondaryTapped = app.showColumnMenu
 		handle := newColumnResizeHandle(app)
 		handle.setColumn(spec)
 		row.cells = append(row.cells, cell)
@@ -445,6 +468,13 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row.up = newHoverLabel(app.tooltipManager, 0, row)
 	row.eta = newHoverLabel(app.tooltipManager, 0, row)
 	row.added = newHoverLabel(app.tooltipManager, 0, row)
+	row.ratio = newHoverLabel(app.tooltipManager, 0, row)
+	row.seeds = newHoverLabel(app.tooltipManager, 0, row)
+	row.peers = newHoverLabel(app.tooltipManager, 0, row)
+	row.category = newHoverLabel(app.tooltipManager, tooltipShowDelay, row)
+	row.tags = newHoverLabel(app.tooltipManager, tooltipShowDelay, row)
+	row.savePath = newHoverLabel(app.tooltipManager, tooltipShowDelay, row)
+	row.uploaded = newHoverLabel(app.tooltipManager, 0, row)
 	row.separator = widget.NewSeparator()
 
 	row.background.Hide()
@@ -455,6 +485,9 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row.up.label.Truncation = fyne.TextTruncateEllipsis
 	row.eta.label.Truncation = fyne.TextTruncateEllipsis
 	row.added.label.Truncation = fyne.TextTruncateEllipsis
+	for _, cell := range []*hoverLabel{row.ratio, row.seeds, row.peers, row.category, row.tags, row.savePath, row.uploaded} {
+		cell.label.Truncation = fyne.TextTruncateEllipsis
+	}
 	row.statusTx.Alignment = fyne.TextAlignCenter
 	row.statusTx.TextSize = theme.TextSize()
 	row.statusCt = container.NewStack(row.statusBG, container.NewCenter(row.statusTx))
@@ -467,6 +500,13 @@ func newTorrentListRow(app *application) *torrentListRow {
 		row.up,
 		row.eta,
 		row.added,
+		row.ratio,
+		row.seeds,
+		row.peers,
+		row.category,
+		row.tags,
+		row.savePath,
+		row.uploaded,
 		row.separator,
 	)
 	row.root = container.NewStack(row.background, row.hoverBG, row.content)
@@ -541,6 +581,35 @@ func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
 	}
 	r.added.SetAlignment(fyne.TextAlignTrailing)
 	r.added.SetText(added, hover)
+
+	r.setOptionalCells(torrent)
+}
+
+// setOptionalCells fills the optional columns; hidden ones are cheap to set
+// and stay current for when they are enabled.
+func (r *torrentListRow) setOptionalCells(torrent qbt.Torrent) {
+	ratio := fmt.Sprintf("%.2f", torrent.Ratio)
+	r.ratio.SetAlignment(fyne.TextAlignTrailing)
+	r.ratio.SetText(ratio, ratio)
+
+	seeds := fmt.Sprintf("%d (%d)", torrent.NumSeeds, torrent.NumComplete)
+	r.seeds.SetAlignment(fyne.TextAlignTrailing)
+	r.seeds.SetText(seeds, "Connected seeds (seeds in swarm)")
+
+	peers := fmt.Sprintf("%d (%d)", torrent.NumLeechs, torrent.NumIncomplete)
+	r.peers.SetAlignment(fyne.TextAlignTrailing)
+	r.peers.SetText(peers, "Connected peers (peers in swarm)")
+
+	r.category.SetAlignment(fyne.TextAlignLeading)
+	r.category.SetText(torrent.Category, torrent.Category)
+	r.tags.SetAlignment(fyne.TextAlignLeading)
+	r.tags.SetText(torrent.Tags, torrent.Tags)
+	r.savePath.SetAlignment(fyne.TextAlignLeading)
+	r.savePath.SetText(torrent.SavePath, torrent.SavePath)
+
+	uploaded := appcore.HumanBytes(torrent.Uploaded)
+	r.uploaded.SetAlignment(fyne.TextAlignTrailing)
+	r.uploaded.SetText(uploaded, uploaded)
 }
 
 func (r *torrentListRow) MinSize() fyne.Size {
@@ -622,6 +691,15 @@ func (l *torrentHeaderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size
 		width := l.app.columnWidth(spec)
 		label := objects[index*2]
 		handle := objects[index*2+1]
+		if !l.app.columnVisible(spec) {
+			label.Hide()
+			handle.Hide()
+			continue
+		}
+		label.Show()
+		if spec.resizable {
+			handle.Show()
+		}
 
 		labelRightPad := headerCellPadding
 		if spec.resizable {
@@ -650,6 +728,11 @@ func (l *torrentRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	for index, spec := range torrentColumnSpecs {
 		width := l.app.columnWidth(spec)
 		obj := objects[index]
+		if !l.app.columnVisible(spec) {
+			obj.Hide()
+			continue
+		}
+		obj.Show()
 
 		inset := rowCellPadding
 		if spec.key == "progress" || spec.key == "status" {

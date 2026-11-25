@@ -15,6 +15,16 @@ type Torrent struct {
 	ETASeconds int64     `json:"eta"`
 	AddedUnix  int64     `json:"added_on"`
 	AddedAt    time.Time `json:"-"`
+
+	// Optional table columns.
+	Ratio         float64 `json:"ratio"`
+	NumSeeds      int     `json:"num_seeds"`
+	NumComplete   int     `json:"num_complete"`
+	NumLeechs     int     `json:"num_leechs"`
+	NumIncomplete int     `json:"num_incomplete"`
+	Category      string  `json:"category"`
+	Tags          string  `json:"tags"`
+	Uploaded      int64   `json:"uploaded"`
 }
 
 // Category is a qBittorrent category and its save path (empty means the

@@ -34,6 +34,8 @@ type sortableHeaderCell struct {
 	widget.BaseWidget
 	label    *widget.Label
 	onTapped func()
+	// onSecondaryTapped opens the column menu on right-click.
+	onSecondaryTapped func(position fyne.Position)
 }
 
 func newSortableHeaderCell(text string, onTapped func()) *sortableHeaderCell {
@@ -56,6 +58,12 @@ func (c *sortableHeaderCell) setText(text string) {
 func (c *sortableHeaderCell) Tapped(*fyne.PointEvent) {
 	if c.onTapped != nil {
 		c.onTapped()
+	}
+}
+
+func (c *sortableHeaderCell) TappedSecondary(event *fyne.PointEvent) {
+	if c.onSecondaryTapped != nil {
+		c.onSecondaryTapped(event.AbsolutePosition)
 	}
 }
 

@@ -601,6 +601,20 @@ func compareTorrent(a qbt.Torrent, b qbt.Torrent, sortColumn string) int {
 		return cmpInt64(a.ETASeconds, b.ETASeconds)
 	case "added":
 		return cmpInt64(a.AddedUnix, b.AddedUnix)
+	case "ratio":
+		return cmpFloat(a.Ratio, b.Ratio)
+	case "seeds":
+		return cmpInt64(int64(a.NumSeeds), int64(b.NumSeeds))
+	case "peers":
+		return cmpInt64(int64(a.NumLeechs), int64(b.NumLeechs))
+	case "category":
+		return strings.Compare(strings.ToLower(a.Category), strings.ToLower(b.Category))
+	case "tags":
+		return strings.Compare(strings.ToLower(a.Tags), strings.ToLower(b.Tags))
+	case "save_path":
+		return strings.Compare(a.SavePath, b.SavePath)
+	case "uploaded":
+		return cmpInt64(a.Uploaded, b.Uploaded)
 	default:
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	}

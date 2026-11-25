@@ -1621,3 +1621,33 @@ func TestCategoriesDetailedReturnsSortedSavePaths(t *testing.T) {
 		t.Fatalf("category names = %v, want [iso movies]", names)
 	}
 }
+
+func TestTorrentsDecodesExtraColumnFields(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/info":
+			_, _ = io.WriteString(w, `[{"hash":"h","ratio":1.25,"num_seeds":5,"num_complete":120,"num_leechs":2,"num_incomplete":30,"category":"iso","tags":"linux, debian","uploaded":4096}]`)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{URL: server.URL, Username: "user", Password: "pass"}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	torrents, err := client.Torrents(context.Background())
+	if err != nil {
+		t.Fatalf("torrents: %v", err)
+	}
+	got := torrents[0]
+	if got.Ratio != 1.25 || got.NumSeeds != 5 || got.NumComplete != 120 || got.NumLeechs != 2 ||
+		got.NumIncomplete != 30 || got.Category != "iso" || got.Tags != "linux, debian" || got.Uploaded != 4096 {
+		t.Fatalf("decoded torrent %+v", got)
+	}
+}

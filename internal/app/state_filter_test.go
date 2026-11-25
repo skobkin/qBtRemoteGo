@@ -94,3 +94,25 @@ func TestFilterAndSortTorrentsAppliesStateFilter(t *testing.T) {
 		t.Fatalf("seeding filter = %+v, want b-seed, c-seed", got)
 	}
 }
+
+func TestFilterAndSortTorrentsByExtraColumns(t *testing.T) {
+	items := []qbt.Torrent{
+		{Name: "a", Ratio: 2, NumSeeds: 1, NumLeechs: 9, Category: "b", Tags: "z", SavePath: "/b", Uploaded: 10},
+		{Name: "b", Ratio: 1, NumSeeds: 3, NumLeechs: 1, Category: "a", Tags: "y", SavePath: "/a", Uploaded: 30},
+	}
+	tests := map[string]string{
+		"ratio":     "b",
+		"seeds":     "a",
+		"peers":     "b",
+		"category":  "b",
+		"tags":      "b",
+		"save_path": "b",
+		"uploaded":  "a",
+	}
+	for column, wantFirst := range tests {
+		got := FilterAndSortTorrents(items, "", "name", StateAll, column, false)
+		if got[0].Name != wantFirst {
+			t.Errorf("ascending %s: first %q, want %q", column, got[0].Name, wantFirst)
+		}
+	}
+}
