@@ -113,7 +113,7 @@ type torrentListRow struct {
 	size          *hoverLabel
 	progress      *widget.ProgressBar
 	statusBG      *canvas.Rectangle
-	statusTx      *widget.Label
+	statusTx      *canvas.Text
 	statusCt      *fyne.Container
 	down          *hoverLabel
 	up            *hoverLabel
@@ -407,7 +407,7 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row.size = newHoverLabel(app.tooltipManager, 0, row)
 	row.progress = widget.NewProgressBar()
 	row.statusBG = canvas.NewRectangle(color.Transparent)
-	row.statusTx = widget.NewLabel("")
+	row.statusTx = canvas.NewText("", color.White)
 	row.down = newHoverLabel(app.tooltipManager, 0, row)
 	row.up = newHoverLabel(app.tooltipManager, 0, row)
 	row.eta = newHoverLabel(app.tooltipManager, 0, row)
@@ -423,6 +423,7 @@ func newTorrentListRow(app *application) *torrentListRow {
 	row.eta.label.Truncation = fyne.TextTruncateEllipsis
 	row.added.label.Truncation = fyne.TextTruncateEllipsis
 	row.statusTx.Alignment = fyne.TextAlignCenter
+	row.statusTx.TextSize = theme.TextSize()
 	row.statusCt = container.NewStack(row.statusBG, container.NewCenter(row.statusTx))
 	row.content = container.New(&torrentRowLayout{app: app},
 		row.name,
@@ -481,8 +482,11 @@ func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
 
 	r.progress.SetValue(torrent.Progress)
 
-	r.statusTx.SetText(appcore.StatusLabel(torrent.State))
-	r.statusBG.FillColor = statusColor(torrent.State)
+	chip := statusColor(torrent.State)
+	r.statusTx.Text = appcore.StatusLabel(torrent.State)
+	r.statusTx.Color = statusTextColor(chip)
+	r.statusTx.Refresh()
+	r.statusBG.FillColor = chip
 	r.statusBG.Refresh()
 
 	down := appcore.HumanSpeed(torrent.DLSpeed)
