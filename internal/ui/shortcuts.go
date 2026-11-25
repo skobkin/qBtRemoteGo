@@ -90,7 +90,15 @@ func (a *application) handleCutShortcut(shortcut fyne.Shortcut) {
 func (a *application) handleMainKey(event *fyne.KeyEvent) {
 	// An open dialog or popup menu owns the keyboard; without this, Del would
 	// stack confirmations and Esc/Enter would act on the list behind it.
-	if a.window.Canvas().Overlays().Top() != nil {
+	// Fyne dialogs ignore Esc, so Esc closes the topmost one here. The
+	// overlay is Fyne's internal wrapper around the dialog's pop-up, so it is
+	// removed from the canvas; that dismisses the dialog without running its
+	// confirm callback, i.e. as a cancel.
+	overlays := a.window.Canvas().Overlays()
+	if top := overlays.Top(); top != nil {
+		if event.Name == fyne.KeyEscape {
+			overlays.Remove(top)
+		}
 		return
 	}
 	switch mainKeyActionFor(event.Name) {
@@ -99,6 +107,11 @@ func (a *application) handleMainKey(event *fyne.KeyEvent) {
 			a.confirmDeleteWith(false)
 		}
 	case keyActionClearSelection:
+		// Esc steps back one level: close the details first, then deselect.
+		if a.detailsState != nil && a.detailsState.Visible {
+			a.closeTorrentDetails()
+			return
+		}
 		a.clearSelection()
 	case keyActionOpenDetails:
 		if hashes := a.selectedHashes(); len(hashes) > 0 {

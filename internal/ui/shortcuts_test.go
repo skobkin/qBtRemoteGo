@@ -9,6 +9,8 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/skobkin/qbtremotego/internal/config"
 )
 
 func typeMainKey(app *application, name fyne.KeyName) {
@@ -179,5 +181,48 @@ func TestShiftDeleteIgnoredWhileDialogOpen(t *testing.T) {
 
 	if got := len(app.window.Canvas().Overlays().List()); got != 1 {
 		t.Fatalf("%d overlays after Shift+Del twice, want 1", got)
+	}
+}
+
+func TestEscapeClosesOpenDialog(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	app.applyTorrentSelection("hash-a", 0)
+	typeMainKey(app, fyne.KeyDelete)
+
+	typeMainKey(app, fyne.KeyEscape)
+
+	if top := app.window.Canvas().Overlays().Top(); top != nil {
+		t.Fatal("Esc did not close the remove confirmation")
+	}
+	if len(app.selection) != 1 {
+		t.Fatal("Esc that closed a dialog also cleared the selection")
+	}
+}
+
+func TestEscapeClosesDetailsBeforeClearingSelection(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	if err := app.controller.SaveLocalUI(func(cfg *config.AppConfig) {
+		cfg.UI.DetailsPanelEnabled = true
+		cfg.UI.DetailsPanelMode = "bottom_pane"
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	app.applyTorrentSelection("hash-a", 0)
+	app.openTorrentDetails("hash-a")
+	if !app.detailsState.Visible {
+		t.Fatal("details did not open")
+	}
+
+	typeMainKey(app, fyne.KeyEscape)
+	if app.detailsState.Visible {
+		t.Fatal("first Esc should close the details")
+	}
+	if len(app.selection) != 1 {
+		t.Fatal("first Esc should keep the selection")
+	}
+
+	typeMainKey(app, fyne.KeyEscape)
+	if len(app.selection) != 0 {
+		t.Fatal("second Esc should clear the selection")
 	}
 }
