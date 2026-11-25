@@ -74,22 +74,23 @@ func TestTrayMenuIncludesUpdateItem(t *testing.T) {
 	test.NewTempApp(t)
 	app := &application{}
 	app.trayState = trayState{
-		speedItem:  fyne.NewMenuItem("Down 0 B/s | Up 0 B/s", nil),
-		showItem:   fyne.NewMenuItem("Open main window", nil),
-		updateItem: fyne.NewMenuItem("Check for updates…", nil),
-		quitItem:   fyne.NewMenuItem("Quit application", nil),
+		speedItem:    fyne.NewMenuItem("Down 0 B/s | Up 0 B/s", nil),
+		showItem:     fyne.NewMenuItem("Open main window", nil),
+		slowModeItem: fyne.NewMenuItem("Slow mode", nil),
+		updateItem:   fyne.NewMenuItem("Check for updates…", nil),
+		quitItem:     fyne.NewMenuItem("Quit application", nil),
 	}
 
 	menu := app.trayMenu()
 	items := menu.Items
-	if len(items) != 4 {
-		t.Fatalf("menu items = %d, want 4", len(items))
+	if len(items) != 5 {
+		t.Fatalf("menu items = %d, want 5", len(items))
 	}
-	if items[2].Label != "Check for updates…" {
-		t.Fatalf("item[2] = %q, want the update action", items[2].Label)
+	if items[3].Label != "Check for updates…" {
+		t.Fatalf("item[3] = %q, want the update action", items[3].Label)
 	}
-	if items[3].Label != "Quit application" {
-		t.Fatalf("item[3] = %q, want the quit action", items[3].Label)
+	if items[4].Label != "Quit application" {
+		t.Fatalf("item[4] = %q, want the quit action", items[4].Label)
 	}
 }
 

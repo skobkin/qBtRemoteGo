@@ -449,6 +449,16 @@ func (c *Controller) rememberSavePath(path string, trigger string) {
 	}
 }
 
+// ToggleSlowMode switches the server's alternative speed limits on or off.
+func (c *Controller) ToggleSlowMode(ctx context.Context) error {
+	client, err := c.client()
+	if err != nil {
+		return err
+	}
+
+	return client.ToggleSpeedLimitsMode(ctx)
+}
+
 func (c *Controller) StartTorrents(ctx context.Context, hashes []string) error {
 	client, err := c.client()
 	if err != nil {

@@ -13,6 +13,8 @@ type hoverIcon struct {
 	hoverTooltipOwner
 	icon    *widget.Icon
 	tooltip string
+	// onTapped makes the icon interactive when set (pointer cursor, taps).
+	onTapped func()
 }
 
 func newHoverIcon(manager *hoverTooltipManager, res fyne.Resource, tooltip string) *hoverIcon {
@@ -29,6 +31,24 @@ func (h *hoverIcon) SetState(res fyne.Resource, tooltip string) {
 	h.hideTooltip(h)
 	h.icon.SetResource(res)
 	h.tooltip = strings.TrimSpace(tooltip)
+}
+
+// SetOnTapped makes the icon clickable; nil makes it purely informational.
+func (h *hoverIcon) SetOnTapped(tapped func()) {
+	h.onTapped = tapped
+}
+
+func (h *hoverIcon) Tapped(*fyne.PointEvent) {
+	if h.onTapped != nil {
+		h.onTapped()
+	}
+}
+
+func (h *hoverIcon) Cursor() desktop.Cursor {
+	if h.onTapped != nil {
+		return desktop.PointerCursor
+	}
+	return desktop.DefaultCursor
 }
 
 func (h *hoverIcon) MouseIn(*desktop.MouseEvent) {

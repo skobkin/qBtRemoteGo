@@ -1352,3 +1352,38 @@ func newTestController(t *testing.T, cfg config.AppConfig, store credentials.Sto
 
 	return controller
 }
+
+func TestControllerToggleSlowModeCallsServer(t *testing.T) {
+	var toggled int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/transfer/toggleSpeedLimitsMode":
+			toggled++
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server.URL
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
+	cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
+	cfg.Connection.Username = "demo"
+	cfg.Connection.Password = "secret"
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	if err := controller.ToggleSlowMode(context.Background()); err != nil {
+		t.Fatalf("toggle slow mode: %v", err)
+	}
+	if toggled != 1 {
+		t.Fatalf("toggle endpoint called %d times, want 1", toggled)
+	}
+}

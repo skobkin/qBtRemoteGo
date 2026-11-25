@@ -1551,3 +1551,35 @@ func TestTorrentDetailsEndpointsDecodeResponses(t *testing.T) {
 		t.Fatalf("unexpected peer payload: %#v", peer)
 	}
 }
+
+func TestToggleSpeedLimitsModePostsToTransferEndpoint(t *testing.T) {
+	t.Parallel()
+
+	var toggled int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/transfer/toggleSpeedLimitsMode":
+			if r.Method != http.MethodPost {
+				t.Errorf("method %s, want POST", r.Method)
+			}
+			toggled++
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{URL: server.URL, Username: "user", Password: "pass"}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if err := client.ToggleSpeedLimitsMode(context.Background()); err != nil {
+		t.Fatalf("toggle speed limits mode: %v", err)
+	}
+	if toggled != 1 {
+		t.Fatalf("toggle endpoint called %d times, want 1", toggled)
+	}
+}

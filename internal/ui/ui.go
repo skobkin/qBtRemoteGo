@@ -118,8 +118,11 @@ type trayState struct {
 	desktopApp desktop.App
 	showItem   *fyne.MenuItem
 	speedItem  *fyne.MenuItem
-	updateItem *fyne.MenuItem
-	quitItem   *fyne.MenuItem
+	// slowModeItem toggles the alternative speed limits; its check mark
+	// mirrors the server state (see syncTraySlowMode).
+	slowModeItem *fyne.MenuItem
+	updateItem   *fyne.MenuItem
+	quitItem     *fyne.MenuItem
 }
 
 func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.InvocationBatch) error {
@@ -273,6 +276,7 @@ func (a *application) buildMainWindow() {
 	a.statusLabel.Truncation = fyne.TextTruncateEllipsis
 	a.connectionIcon = newHoverIcon(a.tooltipManager, resources.ConnectionStatusIcon(""), "Connection status unavailable")
 	a.slowModeIcon = newHoverIcon(a.tooltipManager, resources.SlowModeIcon(false), "Slow mode: off")
+	a.slowModeIcon.SetOnTapped(a.toggleSlowMode)
 
 	toolbar := container.NewBorder(nil, nil, leftTools, rightTools)
 
@@ -348,6 +352,9 @@ func (a *application) configureTray() {
 		showItem: fyne.NewMenuItem("Open main window", func() {
 			fyne.Do(a.showMainWindow)
 		}),
+		slowModeItem: fyne.NewMenuItem("Slow mode", func() {
+			fyne.Do(a.toggleSlowMode)
+		}),
 		updateItem: fyne.NewMenuItem("Check for updates…", func() {
 			fyne.Do(a.checkForUpdates)
 		}),
@@ -368,6 +375,7 @@ func (a *application) trayMenu() *fyne.Menu {
 	return fyne.NewMenu(appcore.Name,
 		a.trayState.speedItem,
 		a.trayState.showItem,
+		a.trayState.slowModeItem,
 		a.trayState.updateItem,
 		a.trayState.quitItem)
 }
@@ -1429,9 +1437,9 @@ func (a *application) refreshStatusIcons() {
 		a.connectionIcon.SetState(resources.ConnectionStatusIcon(status), tooltip)
 	}
 	if a.slowModeIcon != nil {
-		tooltip := "Slow mode: off. Alternative speed limits are disabled."
+		tooltip := "Slow mode: off. Alternative speed limits are disabled. Click to turn on."
 		if a.serverState.UseAltSpeedLimits {
-			tooltip = "Slow mode: on. Alternative speed limits are enabled."
+			tooltip = "Slow mode: on. Alternative speed limits are enabled. Click to turn off."
 		}
 		a.slowModeIcon.SetState(resources.SlowModeIcon(a.serverState.UseAltSpeedLimits), tooltip)
 	}
@@ -1971,6 +1979,7 @@ func (a *application) updateTray() {
 	label := fmt.Sprintf("Down %s | Up %s", appcore.HumanSpeed(a.transfer.DownloadSpeed), appcore.HumanSpeed(a.transfer.UploadSpeed))
 	fyne.Do(func() {
 		a.trayState.speedItem.Label = label
+		a.syncTraySlowMode()
 		a.trayState.desktopApp.SetSystemTrayMenu(a.trayMenu())
 		systray.SetTooltip(label)
 	})

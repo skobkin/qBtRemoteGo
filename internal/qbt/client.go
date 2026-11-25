@@ -506,6 +506,12 @@ func (c *Client) buildAddTorrentBody(req AddRequest) (_ *bytes.Buffer, contentTy
 	return body, writer.FormDataContentType(), nil
 }
 
+// ToggleSpeedLimitsMode switches the server between its normal and
+// alternative ("slow mode") global speed limits.
+func (c *Client) ToggleSpeedLimitsMode(ctx context.Context) error {
+	return c.postForm(ctx, "transfer/toggleSpeedLimitsMode", url.Values{})
+}
+
 func (c *Client) Start(ctx context.Context, hashes []string) error {
 	return c.postHashes(ctx, "torrents/start", hashes, nil)
 }
