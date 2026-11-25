@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -527,23 +526,17 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Sort by", sortBy),
 		widget.NewFormItem("Descending order", sortDescending),
 		widget.NewFormItem("Compact rows", compactRows),
-		widget.NewFormItem("Notify when downloads finish", notifyOnComplete),
 		widget.NewFormItem("Check for updates automatically", checkUpdates),
 		widget.NewFormItem("Log level", logLevel),
 		widget.NewFormItem("Log to file", logToFile),
 	)
 
-	integrationForm := widget.NewForm(
-		widget.NewFormItem("Register magnet handler", registerMagnet),
-		widget.NewFormItem("Register .torrent handler", registerTorrent),
-		widget.NewFormItem("Start with the system", startWithSystem),
-	)
-	integrationContent := []fyne.CanvasObject{integrationForm}
-	if runtime.GOOS == "windows" {
-		integrationHint := widget.NewLabel(platform.WindowsDefaultAppsSelectionHint())
-		integrationHint.Wrapping = fyne.TextWrapWord
-		integrationContent = append(integrationContent, integrationHint)
-	}
+	integrationContent := integrationSettingsContent(integrationSettingsControls{
+		registerMagnet:   registerMagnet,
+		registerTorrent:  registerTorrent,
+		startWithSystem:  startWithSystem,
+		notifyOnComplete: notifyOnComplete,
+	})
 
 	testButton := widget.NewButton("Test connection", func() {
 		testStatus.SetText("Testing connection...")
@@ -737,7 +730,7 @@ func (a *application) openSettingsWindow() {
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Connection", container.NewPadded(connectionTabContent)),
 		container.NewTabItem("UI", container.NewPadded(uiForm)),
-		container.NewTabItem("Integration", container.NewPadded(container.NewVBox(integrationContent...))),
+		container.NewTabItem("Integration", container.NewPadded(integrationContent)),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
