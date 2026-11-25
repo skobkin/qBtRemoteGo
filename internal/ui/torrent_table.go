@@ -111,7 +111,7 @@ type torrentListRow struct {
 	content       *fyne.Container
 	name          *hoverLabel
 	size          *hoverLabel
-	progress      *widget.ProgressBar
+	progress      *stateProgressBar
 	statusBG      *canvas.Rectangle
 	statusTx      *canvas.Text
 	statusCt      *fyne.Container
@@ -405,7 +405,7 @@ func newTorrentListRow(app *application) *torrentListRow {
 	}
 	row.name = newHoverLabel(app.tooltipManager, tooltipShowDelay, row)
 	row.size = newHoverLabel(app.tooltipManager, 0, row)
-	row.progress = widget.NewProgressBar()
+	row.progress = newStateProgressBar()
 	row.statusBG = canvas.NewRectangle(color.Transparent)
 	row.statusTx = canvas.NewText("", color.White)
 	row.down = newHoverLabel(app.tooltipManager, 0, row)
@@ -480,7 +480,7 @@ func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
 	r.size.SetAlignment(fyne.TextAlignTrailing)
 	r.size.SetText(size, size)
 
-	r.progress.SetValue(torrent.Progress)
+	r.progress.SetProgress(torrent.Progress, progressFillColor(torrent.State, torrent.Progress))
 
 	chip := statusColor(torrent.State)
 	r.statusTx.Text = appcore.StatusLabel(torrent.State)
@@ -489,15 +489,15 @@ func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
 	r.statusBG.FillColor = chip
 	r.statusBG.Refresh()
 
-	down := appcore.HumanSpeed(torrent.DLSpeed)
+	down := tableSpeedText(torrent.DLSpeed)
 	r.down.SetAlignment(fyne.TextAlignTrailing)
 	r.down.SetText(down, down)
 
-	up := appcore.HumanSpeed(torrent.UPSpeed)
+	up := tableSpeedText(torrent.UPSpeed)
 	r.up.SetAlignment(fyne.TextAlignTrailing)
 	r.up.SetText(up, up)
 
-	eta := appcore.HumanETA(torrent.ETASeconds)
+	eta := tableETAText(torrent.ETASeconds)
 	r.eta.SetAlignment(fyne.TextAlignTrailing)
 	r.eta.SetText(eta, eta)
 
