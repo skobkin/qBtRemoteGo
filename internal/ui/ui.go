@@ -1343,6 +1343,9 @@ func (a *application) refreshVisibleTorrents() {
 	)
 	a.pruneSelectionToVisible()
 	a.ensureDetailsFocusForSelection()
+	if a.tableHeader != nil {
+		a.tableHeader.setSortIndicator(cfg.UI.SortColumn, cfg.UI.SortDescending)
+	}
 	if a.list != nil {
 		a.list.Refresh()
 	}

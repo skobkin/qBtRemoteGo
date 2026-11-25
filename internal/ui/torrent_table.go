@@ -100,7 +100,7 @@ type torrentHeaderRow struct {
 	widget.BaseWidget
 	app       *application
 	root      *fyne.Container
-	labels    []*widget.Label
+	cells     []*sortableHeaderCell
 	handles   []*columnResizeHandle
 	separator *widget.Separator
 }
@@ -403,24 +403,21 @@ func torrentColumnIndex(key string) int {
 func newTorrentHeaderRow(app *application) *torrentHeaderRow {
 	row := &torrentHeaderRow{
 		app:       app,
-		labels:    make([]*widget.Label, 0, len(torrentColumnSpecs)),
+		cells:     make([]*sortableHeaderCell, 0, len(torrentColumnSpecs)),
 		handles:   make([]*columnResizeHandle, 0, len(torrentColumnSpecs)),
 		separator: widget.NewSeparator(),
 	}
 	objects := make([]fyne.CanvasObject, 0, len(torrentColumnSpecs)*2+1)
 	for _, spec := range torrentColumnSpecs {
-		label := widget.NewLabel(spec.label)
-		label.TextStyle = fyne.TextStyle{Bold: true}
-		if strings.TrimSpace(spec.label) == "" {
-			label.Alignment = fyne.TextAlignCenter
-		} else {
-			label.Alignment = fyne.TextAlignLeading
-		}
+		key := spec.key
+		cell := newSortableHeaderCell(spec.label, func() {
+			app.sortByColumn(key)
+		})
 		handle := newColumnResizeHandle(app)
 		handle.setColumn(spec)
-		row.labels = append(row.labels, label)
+		row.cells = append(row.cells, cell)
 		row.handles = append(row.handles, handle)
-		objects = append(objects, label, handle)
+		objects = append(objects, cell, handle)
 	}
 	objects = append(objects, row.separator)
 	row.root = container.New(&torrentHeaderLayout{app: app}, objects...)
