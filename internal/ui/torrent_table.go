@@ -327,15 +327,7 @@ func (a *application) setColumnWidth(spec torrentColumnSpec, width float32, pers
 		a.columnWidths = make(map[string]float32, len(torrentColumnSpecs))
 	}
 	a.columnWidths[spec.key] = width
-	if a.tableHeader != nil {
-		a.tableHeader.Refresh()
-	}
-	if a.list != nil {
-		a.list.Refresh()
-	}
-	if a.tableScroll != nil {
-		a.tableScroll.Refresh()
-	}
+	a.refreshTableLayout()
 	if persist {
 		a.persistColumnWidths()
 	}

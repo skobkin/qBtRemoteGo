@@ -62,12 +62,20 @@ func (a *application) setColumnVisible(key string, visible bool) {
 
 // refreshTableLayout re-lays out the header, rows and scroller after the
 // column set or widths change.
+//
+// List.Refresh only rebinds the visible rows; a row is laid out again only
+// when its size changes. The flexible Name column keeps the total width
+// constant in a wide table, so the bound rows are re-laid out explicitly or
+// they keep their old cell positions until something (a hover) repaints them.
 func (a *application) refreshTableLayout() {
 	if a.tableHeader != nil {
 		a.tableHeader.Refresh()
 	}
 	if a.list != nil {
 		a.list.Refresh()
+	}
+	for _, row := range a.listRows {
+		row.content.Refresh()
 	}
 	if a.tableScroll != nil {
 		a.tableScroll.Refresh()

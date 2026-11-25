@@ -66,3 +66,26 @@ func TestNameColumnHasNoResizeHandle(t *testing.T) {
 		t.Fatal("expected the flexible name column to have no resize handle")
 	}
 }
+
+// Resizing a fixed column in a wide table leaves the total width unchanged
+// (Name absorbs the difference), so rows keep their size and the list never
+// re-lays them out. The resize must re-lay out the visible rows itself.
+func TestColumnResizeRelaysOutVisibleRows(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	app.tableScroll.Resize(fyne.NewSize(1600, 400))
+	row := app.rowForTest(t, "hash-a")
+	sizeX := row.size.Position().X
+	statusX := row.statusCt.Position().X
+
+	size := torrentColumnSpecs[torrentColumnIndex("size")]
+	app.setColumnWidth(size, app.columnWidth(size)+50, false)
+
+	// Name shrinks by 50, so the Size cell starts 50px earlier and the
+	// columns to its right stay where they were.
+	if got := row.size.Position().X; got != sizeX-50 {
+		t.Fatalf("size cell at x=%.0f after widening it by 50, want %.0f", got, sizeX-50)
+	}
+	if got := row.statusCt.Position().X; got != statusX {
+		t.Fatalf("status cell moved to x=%.0f, want %.0f", got, statusX)
+	}
+}
