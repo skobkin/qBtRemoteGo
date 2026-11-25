@@ -288,6 +288,7 @@ func (a *application) buildMainWindow() {
 	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, statusBar)
 	content := container.NewBorder(toolbar, bottom, nil, nil, a.detailsHost.Root())
 	a.window.SetContent(container.NewStack(content, a.tooltipLayer))
+	a.installMainShortcuts()
 
 	a.refreshVisibleTorrents()
 }
@@ -1012,7 +1013,17 @@ func (a *application) handleInvocation(batch appcore.InvocationBatch) {
 	}
 }
 
+// addWindowOptions tweak how the Add dialog opens.
+type addWindowOptions struct {
+	// browse opens the .torrent file picker as soon as the dialog shows.
+	browse bool
+}
+
 func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
+	a.openAddWindowWith(prefill, addWindowOptions{})
+}
+
+func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts addWindowOptions) {
 	win := a.fyApp.NewWindow("Add Torrent")
 
 	cfg := a.controller.Config()
@@ -1220,6 +1231,9 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 		}
 	})
 	win.Show()
+	if opts.browse {
+		browseButton.OnTapped()
+	}
 
 	if shouldFetchDefaultSavePath {
 		go func() {
@@ -1739,6 +1753,12 @@ func (a *application) selectedRenameTarget() (qbt.Torrent, bool) {
 }
 
 func (a *application) confirmDelete() {
+	a.confirmDeleteWith(false)
+}
+
+// confirmDeleteWith asks before removing the selected torrents; removeFiles
+// pre-ticks "Also remove content files" (Shift+Del).
+func (a *application) confirmDeleteWith(removeFiles bool) {
 	hashes := a.selectedHashes()
 	if len(hashes) == 0 {
 		dialog.ShowInformation("No selection", "Select at least one torrent first.", a.window)
@@ -1746,6 +1766,7 @@ func (a *application) confirmDelete() {
 	}
 
 	deleteFiles := widget.NewCheck("Also remove content files", nil)
+	deleteFiles.SetChecked(removeFiles)
 	message := fmt.Sprintf("Remove %d selected torrents?", len(hashes))
 	if len(hashes) == 1 {
 		if torrent, ok := a.findTorrentByHash(hashes[0]); ok {
