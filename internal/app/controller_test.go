@@ -1426,3 +1426,51 @@ func TestControllerFetchCategoriesAndTagsIncludesSavePaths(t *testing.T) {
 		t.Fatalf("tags = %v, want [iso]", tags)
 	}
 }
+
+func TestControllerPreferencesRoundTrip(t *testing.T) {
+	var posted string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/app/preferences":
+			_, _ = io.WriteString(w, `{"dl_limit":1024}`)
+		case "/api/v2/app/setPreferences":
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse form: %v", err)
+			}
+			posted = r.PostForm.Get("json")
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Connection.URL = server.URL
+	cfg.Connection.AuthMethod = config.AuthMethodPassword
+	cfg.Connection.CredentialStorage = config.CredentialStoragePlaintext
+	cfg.Connection.Username = "demo"
+	cfg.Connection.Password = "secret"
+
+	controller := newTestController(t, cfg, credentials.NewStoreForTests(
+		func(service, user string) (string, error) { return "", keyring.ErrNotFound },
+		func(service, user, password string) error { return nil },
+		func(service, user string) error { return nil },
+	))
+
+	prefs, err := controller.FetchPreferences(context.Background())
+	if err != nil {
+		t.Fatalf("fetch preferences: %v", err)
+	}
+	if v, ok := prefs.Int("dl_limit"); !ok || v != 1024 {
+		t.Fatalf("dl_limit = %d, %v", v, ok)
+	}
+
+	if err := controller.ApplyPreferences(context.Background(), map[string]any{"dl_limit": 2048}); err != nil {
+		t.Fatalf("apply preferences: %v", err)
+	}
+	if posted != `{"dl_limit":2048}` {
+		t.Fatalf("posted %q", posted)
+	}
+}

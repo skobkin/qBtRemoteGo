@@ -462,6 +462,40 @@ func (c *Controller) ToggleSlowMode(ctx context.Context) error {
 	return client.ToggleSpeedLimitsMode(ctx)
 }
 
+// FetchPreferences reads the server's application preferences.
+func (c *Controller) FetchPreferences(ctx context.Context) (qbt.Preferences, error) {
+	client, err := c.client()
+	if err != nil {
+		return nil, err
+	}
+
+	return client.Preferences(ctx)
+}
+
+// ApplyPreferences sends changed server preferences. They are global: every
+// client of the server sees the change.
+func (c *Controller) ApplyPreferences(ctx context.Context, changes map[string]any) error {
+	client, err := c.client()
+	if err != nil {
+		return err
+	}
+
+	keys := make([]string, 0, len(changes))
+	for key := range changes {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+
+	logger := c.currentLogger()
+	if err := client.SetPreferences(ctx, changes); err != nil {
+		logger.Warn("apply server preferences failed", "remote_url", c.Config().Connection.URL, "keys", keys, "error", err)
+		return err
+	}
+	logger.Info("applied server preferences", "remote_url", c.Config().Connection.URL, "keys", keys)
+
+	return nil
+}
+
 func (c *Controller) StartTorrents(ctx context.Context, hashes []string) error {
 	client, err := c.client()
 	if err != nil {
