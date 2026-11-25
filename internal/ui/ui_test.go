@@ -72,49 +72,85 @@ func TestMainWindowTitle(t *testing.T) {
 	}
 }
 
-func TestStatusTextUsesEmojiMarkers(t *testing.T) {
+func TestStatusModelSummarisesFilteredSelection(t *testing.T) {
 	app := &application{
-		allTorrents:     []qbt.Torrent{{Hash: "a"}, {Hash: "b"}},
-		visibleTorrents: []qbt.Torrent{{Hash: "a"}},
+		allTorrents:     []qbt.Torrent{{Hash: "a", Size: 2048}, {Hash: "b", Size: 1024}},
+		visibleTorrents: []qbt.Torrent{{Hash: "a", Size: 2048}},
+		selection:       map[string]bool{"a": true},
 		transfer: qbt.TransferInfo{
 			DownloadSpeed: 2048,
 			UploadSpeed:   1024,
 			DownloadLimit: 0,
 			UploadLimit:   1536,
 		},
-		serverState: qbt.ServerState{
-			FreeSpaceOnDisk: 2048,
-		},
+		serverState:      qbt.ServerState{FreeSpaceOnDisk: 2048},
 		serverStateKnown: true,
 		lastError:        "boom",
 	}
 
-	want := "📦 2 | 🔎 1 | ⬇️ 2.0 KiB/s | ⬆️ 1.0 KiB/s | Lim ⬇️:∞ ⬆️:1.5 KiB/s | Free 2.0 KiB | Last error: boom"
-	if got := app.statusText(); got != want {
-		t.Fatalf("unexpected status text:\n got: %q\nwant: %q", got, want)
+	want := statusBarModel{
+		Count:     "1 of 2 shown",
+		Selection: "1 selected · 2.0 KiB",
+		Down:      "2.0 KiB/s",
+		Up:        "1.0 KiB/s / 1.5 KiB/s",
+		Free:      "2.0 KiB free",
+		Error:     "boom",
+	}
+	if got := app.statusModel(); got != want {
+		t.Fatalf("unexpected status model:\n got: %+v\nwant: %+v", got, want)
 	}
 }
 
-func TestStatusTextShowsKeychainWait(t *testing.T) {
+func TestStatusModelHidesEmptySegments(t *testing.T) {
+	app := &application{
+		allTorrents:     []qbt.Torrent{{Hash: "a"}},
+		visibleTorrents: []qbt.Torrent{{Hash: "a"}},
+	}
+
+	want := statusBarModel{Count: "1 torrent", Down: "0 B/s", Up: "0 B/s"}
+	if got := app.statusModel(); got != want {
+		t.Fatalf("unexpected status model:\n got: %+v\nwant: %+v", got, want)
+	}
+
+	app.allTorrents = append(app.allTorrents, qbt.Torrent{Hash: "b"})
+	app.visibleTorrents = app.allTorrents
+	if got := app.statusModel().Count; got != "2 torrents" {
+		t.Fatalf("count %q, want 2 torrents", got)
+	}
+}
+
+func TestStatusModelShowsKeychainWait(t *testing.T) {
 	wait := "Waiting for system keychain (Secret Service)…"
 	app := &application{
 		allTorrents:     []qbt.Torrent{{Hash: "a"}},
 		visibleTorrents: []qbt.Torrent{{Hash: "a"}},
 		credentialWait:  wait,
-		lastError:       "boom",
 	}
 
-	got := app.statusText()
-	want := "📦 1 | 🔎 1 | ⬇️ 0 B/s | ⬆️ 0 B/s | Lim ⬇️:∞ ⬆️:∞ | Waiting for system keychain (Secret Service)… | Last error: boom"
-	if got != want {
-		t.Fatalf("unexpected status text:\n got: %q\nwant: %q", got, want)
+	got := app.statusModel()
+	if got.Notice != wait {
+		t.Fatalf("notice %q, want %q", got.Notice, wait)
+	}
+	if got.Error != "" {
+		t.Fatalf("error %q, want none", got.Error)
+	}
+}
+
+func TestStatusBarHidesEmptyGroups(t *testing.T) {
+	test.NewTempApp(t)
+	bar := newStatusBar(nil)
+
+	bar.update(statusBarModel{Count: "1 torrent", Down: "0 B/s", Up: "0 B/s"})
+	if bar.selectionGroup.Visible() || bar.freeGroup.Visible() || bar.noticeGroup.Visible() || bar.errorGroup.Visible() {
+		t.Fatal("empty segments should be hidden")
 	}
 
-	// The waiting hint renders without a trailing "Last error" when no
-	// connection failure was recorded alongside it.
-	app.lastError = ""
-	if strings.Contains(app.statusText(), "Last error") {
-		t.Fatalf("expected the waiting hint to replace the error, got %q", app.statusText())
+	bar.update(statusBarModel{Count: "1 torrent", Selection: "1 selected · 1 B", Down: "0 B/s", Up: "0 B/s", Error: "boom"})
+	if !bar.selectionGroup.Visible() || !bar.errorGroup.Visible() {
+		t.Fatal("non-empty segments should be visible")
+	}
+	if bar.errorIcon.tooltip != "boom" {
+		t.Fatalf("error tooltip %q, want the full error", bar.errorIcon.tooltip)
 	}
 }
 

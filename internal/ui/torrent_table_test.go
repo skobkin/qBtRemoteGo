@@ -6,7 +6,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
-	"fyne.io/fyne/v2/widget"
 
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
@@ -23,7 +22,6 @@ func newTorrentTableTestApp(t *testing.T) *application {
 		selection:    map[string]bool{},
 		detailsState: newTorrentDetailsState(),
 		rowTaps:      rowTapSequencer{interval: torrentDoubleTapInterval},
-		statusLabel:  widget.NewLabel(""),
 	}
 	app.buildMainWindow()
 	// The test canvas defaults to a size that only fits a couple of rows; size

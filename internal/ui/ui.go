@@ -74,7 +74,7 @@ type application struct {
 	tableHeader    *torrentHeaderRow
 	tablePreview   *canvas.Rectangle
 	tableScroll    *container.Scroll
-	statusLabel    *widget.Label
+	statusBar      *statusBar
 	connectionIcon *hoverIcon
 	slowModeIcon   *hoverIcon
 	// emptyState replaces an empty torrent list with a message and an action.
@@ -178,7 +178,6 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		selection:    map[string]bool{},
 		detailsState: newTorrentDetailsState(),
 		rowTaps:      rowTapSequencer{interval: torrentDoubleTapInterval},
-		statusLabel:  widget.NewLabel(""),
 	}
 	ui.windowVisible.Store(true)
 
@@ -273,7 +272,7 @@ func (a *application) buildMainWindow() {
 		settingsButton,
 	)
 
-	a.statusLabel.Truncation = fyne.TextTruncateEllipsis
+	a.statusBar = newStatusBar(a.tooltipManager)
 	a.connectionIcon = newHoverIcon(a.tooltipManager, resources.ConnectionStatusIcon(""), "Connection status unavailable")
 	a.slowModeIcon = newHoverIcon(a.tooltipManager, resources.SlowModeIcon(false), "Slow mode: off")
 	a.slowModeIcon.SetOnTapped(a.toggleSlowMode)
@@ -283,9 +282,9 @@ func (a *application) buildMainWindow() {
 	center := container.NewStack(a.buildTorrentTable(), a.buildEmptyState())
 	a.detailsHost = newTorrentDetailsHost(a, center)
 	statusIcons := container.NewHBox(a.slowModeIcon, a.connectionIcon)
-	// The override trims the label's inner padding so the row hugs the text.
+	// The override trims the labels' inner padding so the row hugs the text.
 	statusBar := container.NewBorder(nil, nil, nil, statusIcons,
-		container.NewThemeOverride(a.statusLabel, newCompactStatusTheme()))
+		container.NewThemeOverride(a.statusBar.root, newCompactStatusTheme()))
 	bottom := container.NewBorder(widget.NewSeparator(), nil, nil, nil, statusBar)
 	content := container.NewBorder(toolbar, bottom, nil, nil, a.detailsHost.Root())
 	a.window.SetContent(container.NewStack(content, a.tooltipLayer))
@@ -1346,30 +1345,12 @@ func (a *application) refreshVisibleTorrents() {
 	if a.list != nil {
 		a.list.Refresh()
 	}
-	a.statusLabel.SetText(a.statusText())
+	if a.statusBar != nil {
+		a.statusBar.update(a.statusModel())
+	}
 	a.refreshStatusIcons()
 	a.syncSelectionActions()
 	a.syncEmptyState()
-}
-
-func (a *application) statusText() string {
-	parts := []string{
-		fmt.Sprintf("📦 %d", len(a.allTorrents)),
-		fmt.Sprintf("🔎 %d", len(a.visibleTorrents)),
-		fmt.Sprintf("⬇️ %s", appcore.HumanSpeed(a.transfer.DownloadSpeed)),
-		fmt.Sprintf("⬆️ %s", appcore.HumanSpeed(a.transfer.UploadSpeed)),
-		fmt.Sprintf("Lim ⬇️:%s ⬆️:%s", appcore.HumanSpeedLimit(a.transfer.DownloadLimit), appcore.HumanSpeedLimit(a.transfer.UploadLimit)),
-	}
-	if a.serverStateKnown {
-		parts = append(parts, "Free "+appcore.HumanBytes(a.serverState.FreeSpaceOnDisk))
-	}
-	if strings.TrimSpace(a.credentialWait) != "" {
-		parts = append(parts, a.credentialWait)
-	}
-	if strings.TrimSpace(a.lastError) != "" {
-		parts = append(parts, "Last error: "+a.lastError)
-	}
-	return strings.Join(parts, " | ")
 }
 
 // keychainWaitingText renders the status-bar hint shown while the controller's
@@ -1934,6 +1915,9 @@ func (a *application) refreshTorrentSelection() {
 		row.setSelected(a.selection[row.hash])
 	}
 	a.syncSelectionActions()
+	if a.statusBar != nil {
+		a.statusBar.update(a.statusModel())
+	}
 }
 
 func (a *application) selectedHashes() []string {

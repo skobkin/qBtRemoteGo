@@ -30,3 +30,19 @@ func TestSelectionActionsFollowSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusBarSelectionFollowsSelection(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	if app.statusBar.selectionGroup.Visible() {
+		t.Fatal("selection segment visible with no selection")
+	}
+
+	app.applyTorrentSelection("hash-a", 0)
+
+	if !app.statusBar.selectionGroup.Visible() {
+		t.Fatal("selection segment hidden after selecting a torrent")
+	}
+	if got := app.statusBar.selection.Text; got != "1 selected · 0 B" {
+		t.Fatalf("selection text %q, want 1 selected · 0 B", got)
+	}
+}
