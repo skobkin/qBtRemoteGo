@@ -72,6 +72,7 @@ type UIConfig struct {
 	WindowWidth                float32            `json:"window_width,omitempty"`
 	WindowHeight               float32            `json:"window_height,omitempty"`
 	VisibleColumns             []string           `json:"visible_columns,omitempty"`
+	NotifyOnComplete           bool               `json:"notify_on_complete"`
 	SortColumn                 string             `json:"sort_column"`
 	SortDescending             bool               `json:"sort_descending"`
 	CompactRows                bool               `json:"compact_rows"`

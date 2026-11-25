@@ -28,6 +28,7 @@ import (
 	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/credentials"
 	"github.com/skobkin/qbtremotego/internal/logging"
+	"github.com/skobkin/qbtremotego/internal/notify"
 	"github.com/skobkin/qbtremotego/internal/platform"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 	"github.com/skobkin/qbtremotego/internal/resources"
@@ -100,6 +101,10 @@ type application struct {
 	tableWidth float32
 	// visibleColumns holds the enabled column keys; nil means the defaults.
 	visibleColumns map[string]bool
+	// notifier posts desktop notifications; completions decides when a
+	// torrent has just finished downloading.
+	notifier    notify.Notifier
+	completions completionTracker
 	// stateSelect is the toolbar quick state filter; stateFilter is the bucket
 	// it selects (its option labels change with every poll's counts).
 	stateSelect          *widget.Select
@@ -182,6 +187,7 @@ func Run(initialInvocation appcore.InvocationBatch, activations <-chan appcore.I
 		rowTaps:      rowTapSequencer{interval: torrentDoubleTapInterval},
 	}
 	ui.windowVisible.Store(true)
+	ui.notifier = newNotifier(ui.logger)
 
 	ui.setupUpdateChecker()
 
@@ -467,6 +473,8 @@ func (a *application) openSettingsWindow() {
 	sortDescending.SetChecked(cfg.UI.SortDescending)
 	compactRows := widget.NewCheck("", nil)
 	compactRows.SetChecked(cfg.UI.CompactRows)
+	notifyOnComplete := widget.NewCheck("", nil)
+	notifyOnComplete.SetChecked(cfg.UI.NotifyOnComplete)
 	checkUpdates := widget.NewCheck("", nil)
 	checkUpdates.SetChecked(cfg.Updates.CheckAutomatically)
 	logLevel := widget.NewSelect(logging.SupportedLevels(), nil)
@@ -519,6 +527,7 @@ func (a *application) openSettingsWindow() {
 		widget.NewFormItem("Sort by", sortBy),
 		widget.NewFormItem("Descending order", sortDescending),
 		widget.NewFormItem("Compact rows", compactRows),
+		widget.NewFormItem("Notify when downloads finish", notifyOnComplete),
 		widget.NewFormItem("Check for updates automatically", checkUpdates),
 		widget.NewFormItem("Log level", logLevel),
 		widget.NewFormItem("Log to file", logToFile),
@@ -664,6 +673,7 @@ func (a *application) openSettingsWindow() {
 		updated.UI.SortColumn = sortColumnKey(sortBy.Selected)
 		updated.UI.SortDescending = sortDescending.Checked
 		updated.UI.CompactRows = compactRows.Checked
+		updated.UI.NotifyOnComplete = notifyOnComplete.Checked
 		updated.Updates.CheckAutomatically = checkUpdates.Checked
 		updated.Logging.Level = logLevel.Selected
 		updated.Logging.LogToFile = logToFile.Checked
@@ -1548,6 +1558,7 @@ func (a *application) refreshNow() {
 	fyne.Do(func() {
 		if err == nil {
 			a.allTorrents = torrents
+			a.noteCompletions(torrents)
 			a.lastError = ""
 			a.credentialWait = ""
 			a.connectionState = connectionStateConnected
@@ -1558,6 +1569,7 @@ func (a *application) refreshNow() {
 			}
 		} else {
 			a.noteFetchError(err)
+			a.completions.reset()
 			a.connectionState = connectionStateDisconnected
 			a.serverVersion.Store("")
 		}
