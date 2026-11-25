@@ -84,8 +84,11 @@ type application struct {
 	columnWidths   map[string]float32
 	compactRows    bool
 	previewX       float32
-	detailsHost    *torrentDetailsHost
-	detailsState   *torrentDetailsState
+	// tableWidth is the torrent table's laid-out width; the flexible Name
+	// column absorbs whatever the other columns leave of it.
+	tableWidth   float32
+	detailsHost  *torrentDetailsHost
+	detailsState *torrentDetailsState
 
 	trayState trayState
 

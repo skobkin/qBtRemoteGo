@@ -80,10 +80,13 @@ type torrentColumnSpec struct {
 	defaultWidth float32
 	minWidth     float32
 	resizable    bool
+	// flexible marks the column that fills the table's spare width. It has
+	// no resize handle; its width follows the window instead.
+	flexible bool
 }
 
 var torrentColumnSpecs = []torrentColumnSpec{
-	{key: "name", label: "Name", defaultWidth: 420, minWidth: 220, resizable: true},
+	{key: "name", label: "Name", defaultWidth: 420, minWidth: 220, flexible: true},
 	{key: "size", label: "Size", defaultWidth: 110, minWidth: 90, resizable: true},
 	{key: "progress", label: "Progress", defaultWidth: 180, minWidth: 140, resizable: true},
 	{key: "status", label: "Status", defaultWidth: 140, minWidth: 110, resizable: true},
@@ -231,6 +234,36 @@ func (a *application) totalColumnWidth() float32 {
 	return total
 }
 
+// minTotalColumnWidth is the narrowest the table gets before it scrolls
+// horizontally: every fixed column at its width, the flexible one at its
+// minimum.
+func (a *application) minTotalColumnWidth() float32 {
+	total := float32(0)
+	for _, spec := range torrentColumnSpecs {
+		if spec.flexible {
+			total += spec.minWidth
+			continue
+		}
+		total += a.columnWidth(spec)
+	}
+	return total
+}
+
+// flexibleColumnWidth gives the flexible column the table width left over by
+// the fixed columns, floored at its minimum.
+func (a *application) flexibleColumnWidth(flex torrentColumnSpec) float32 {
+	width := a.tableWidth
+	for _, spec := range torrentColumnSpecs {
+		if !spec.flexible {
+			width -= a.columnWidth(spec)
+		}
+	}
+	if width < flex.minWidth {
+		return flex.minWidth
+	}
+	return width
+}
+
 func (a *application) columnBoundary(key string, widthOverride float32) float32 {
 	total := float32(0)
 	for _, spec := range torrentColumnSpecs {
@@ -248,6 +281,9 @@ func (a *application) columnBoundary(key string, widthOverride float32) float32 
 }
 
 func (a *application) columnWidth(spec torrentColumnSpec) float32 {
+	if spec.flexible {
+		return a.flexibleColumnWidth(spec)
+	}
 	if !spec.resizable {
 		return spec.defaultWidth
 	}
@@ -511,7 +547,7 @@ func (r *torrentListRow) setTorrent(torrent qbt.Torrent) {
 }
 
 func (r *torrentListRow) MinSize() fyne.Size {
-	return fyne.NewSize(r.app.totalColumnWidth(), r.app.torrentRowHeightValue())
+	return fyne.NewSize(r.app.minTotalColumnWidth(), r.app.torrentRowHeightValue())
 }
 
 func (r *torrentListRow) CreateRenderer() fyne.WidgetRenderer {
@@ -609,7 +645,7 @@ func (l *torrentHeaderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size
 }
 
 func (l *torrentHeaderLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
-	return fyne.NewSize(l.app.totalColumnWidth(), torrentHeaderHeight)
+	return fyne.NewSize(l.app.minTotalColumnWidth(), torrentHeaderHeight)
 }
 
 func (l *torrentRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
@@ -633,11 +669,12 @@ func (l *torrentRowLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 }
 
 func (l *torrentRowLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
-	return fyne.NewSize(l.app.totalColumnWidth(), l.app.torrentRowHeightValue())
+	return fyne.NewSize(l.app.minTotalColumnWidth(), l.app.torrentRowHeightValue())
 }
 
 func (l *torrentTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	headerHeight := objects[0].MinSize().Height
+	l.app.tableWidth = size.Width
 	totalWidth := l.app.totalColumnWidth()
 
 	objects[0].Move(fyne.NewPos(0, 0))
@@ -656,7 +693,7 @@ func (l *torrentTableLayout) Layout(objects []fyne.CanvasObject, size fyne.Size)
 func (l *torrentTableLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 	headerHeight := objects[0].MinSize().Height
 	listHeight := objects[1].MinSize().Height
-	return fyne.NewSize(l.app.totalColumnWidth(), headerHeight+listHeight)
+	return fyne.NewSize(l.app.minTotalColumnWidth(), headerHeight+listHeight)
 }
 
 func newColumnResizeHandle(app *application) *columnResizeHandle {
