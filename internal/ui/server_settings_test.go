@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
 
+	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
@@ -21,6 +22,13 @@ type fakePrefsBackend struct {
 	applyErr error
 	fetchErr error
 	applied  []map[string]any
+
+	loginMethod  config.AuthMethod
+	rotatedKey   string
+	rotateErr    error // with rotatedKey set: rotated, but saving failed
+	rotations    int
+	loginUpdates [][2]string
+	loginErr     error
 }
 
 func newFakePrefsBackend(t *testing.T) *fakePrefsBackend {
@@ -30,7 +38,24 @@ func newFakePrefsBackend(t *testing.T) *fakePrefsBackend {
 		t.Fatalf("decode prefs: %v", err)
 	}
 
-	return &fakePrefsBackend{prefs: prefs, ignore: map[string]bool{}}
+	// Like the real server, the fake never returns the WebUI password.
+	return &fakePrefsBackend{prefs: prefs, ignore: map[string]bool{"web_ui_password": true}, loginMethod: config.AuthMethodAPIKey}
+}
+
+func (b *fakePrefsBackend) LoginMethod() config.AuthMethod { return b.loginMethod }
+
+func (b *fakePrefsBackend) RotateAPIKey(context.Context) (string, error) {
+	b.rotations++
+	if b.rotatedKey != "" {
+		b.prefs["web_ui_api_key"] = b.rotatedKey
+	}
+
+	return b.rotatedKey, b.rotateErr
+}
+
+func (b *fakePrefsBackend) UpdateLoginCredentials(_ context.Context, username, password string) error {
+	b.loginUpdates = append(b.loginUpdates, [2]string{username, password})
+	return b.loginErr
 }
 
 func (b *fakePrefsBackend) FetchPreferences(context.Context) (qbt.Preferences, error) {

@@ -44,6 +44,9 @@ type prefField struct {
 	// checkboxes and type-dependent inputs).
 	requires []prefCondition
 	control  prefControl
+	// disconnects marks settings that can cut this app off from the server
+	// (WebUI address, port, HTTPS, Host header validation).
+	disconnects bool
 }
 
 // prefCondition tests the value another field's editor currently holds.
@@ -70,6 +73,9 @@ func notIn(key string, values ...any) prefCondition {
 }
 
 func (f *prefField) format(values prefValues) string {
+	if _, ok := f.control.(writeOnlyControl); ok {
+		return f.control.format(f, values)
+	}
 	for _, key := range f.keys {
 		if _, ok := values[key]; !ok {
 			return "(not set)"
@@ -85,6 +91,12 @@ type prefControl interface {
 	decode(f *prefField, prefs qbt.Preferences) (prefValues, bool)
 	format(f *prefField, values prefValues) string
 	newEditor(f *prefField) prefEditor
+}
+
+// writeOnlyControl is implemented by controls whose value the server never
+// returns (the WebUI password): their format handles a missing value.
+type writeOnlyControl interface {
+	writeOnly()
 }
 
 // prefEditor is a live widget for one field.

@@ -89,7 +89,7 @@ func TestUnappliedFieldsAcceptsRespelledPaths(t *testing.T) {
 
 func TestPasswordFieldNeverShowsTheSecret(t *testing.T) {
 	test.NewTempApp(t)
-	field := passwordField("mail_notification_password", "Password", "SMTP password")
+	field := passwordField("mail_notification_password", "SMTP password")
 
 	if got := field.format(prefValues{"mail_notification_password": "hunter2"}); got != "••••••••" {
 		t.Fatalf("format = %q", got)

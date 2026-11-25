@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 )
 
@@ -122,4 +123,28 @@ func (c *Client) SetPreferences(ctx context.Context, changes map[string]any) err
 	form.Set("json", string(payload))
 
 	return c.postForm(ctx, "app/setPreferences", form)
+}
+
+// RotateAPIKey generates a new WebAPI key on the server (or the first one)
+// and returns it. The previous key stops working immediately.
+func (c *Client) RotateAPIKey(ctx context.Context) (string, error) {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return "", err
+	}
+	req, err := c.newRequest(ctx, http.MethodPost, "app/rotateAPIKey", nil)
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		APIKey string `json:"apiKey"`
+	}
+	if err := c.doJSON(req, &result); err != nil {
+		return "", err
+	}
+	if err := ValidateAPIKey(result.APIKey); err != nil {
+		return "", fmt.Errorf("app/rotateAPIKey returned an unexpected key: %w", err)
+	}
+
+	return result.APIKey, nil
 }

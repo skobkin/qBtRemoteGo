@@ -9,7 +9,7 @@ package ui
 func serverPrefTabs(dirs autocompleteFetcher) []prefTab {
 	return []prefTab{
 		behaviorPrefTab(dirs), downloadsPrefTab(dirs), connectionPrefTab(dirs),
-		speedPrefTab(), bitTorrentPrefTab(), rssPrefTab(), advancedPrefTab(),
+		speedPrefTab(), bitTorrentPrefTab(), rssPrefTab(), webUIPrefTab(dirs), advancedPrefTab(),
 	}
 }
 
@@ -212,7 +212,7 @@ func downloadsPrefTab(dirs autocompleteFetcher) prefTab {
 			requiring(textEnumField("mail_notification_encryption_type", "SMTP encryption", "SMTP encryption", smtpEncryptionOptions()), mail),
 			requiring(checkField(mailAuth, "Authentication", "SMTP authentication"), mail),
 			requiring(textField("mail_notification_username", "Username", "SMTP username"), mail, mailAuth),
-			requiring(passwordField("mail_notification_password", "Password", "SMTP password"), mail, mailAuth),
+			requiring(passwordField("mail_notification_password", "SMTP password"), mail, mailAuth),
 		}},
 		{title: "Run external program", hint: autorunParametersHint, fields: []*prefField{
 			checkField(runOnAdded, "Run on torrent added", "Run program on torrent added"),
@@ -272,7 +272,7 @@ func connectionPrefTab(dirs autocompleteFetcher) prefTab {
 			requiringWhen(checkField("proxy_hostname_lookup", "Perform hostname lookup via proxy", "Proxy hostname lookup"), fullProxy),
 			requiringWhen(checkField(proxyAuth, "Authentication", "Proxy authentication"), fullProxy),
 			requiringWhen(textField("proxy_username", "Username", "Proxy username"), fullProxy, on(proxyAuth)),
-			requiringWhen(passwordField("proxy_password", "Password", "Proxy password"), fullProxy, on(proxyAuth)),
+			requiringWhen(passwordField("proxy_password", "Proxy password"), fullProxy, on(proxyAuth)),
 			requiringWhen(checkField(proxyBT, "Use proxy for BitTorrent purposes", "Proxy for BitTorrent"), anyProxy),
 			requiringWhen(checkField("proxy_peer_connections", "Use proxy for peer connections", "Proxy for peer connections"), anyProxy, on(proxyBT)),
 			requiringWhen(checkField("proxy_rss", "Use proxy for RSS purposes", "Proxy for RSS"), fullProxy),

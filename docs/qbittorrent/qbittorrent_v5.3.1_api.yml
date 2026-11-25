@@ -171,6 +171,27 @@ paths:
         "200": {description: Applied (unknown keys ignored). Empty body.}
         "400": {description: A validated key was rejected (plain-text reason). Earlier keys are already applied.}
 
+  /app/rotateAPIKey:
+    post:
+      tags: [app]
+      summary: Generate or rotate the WebAPI key
+      description: |
+        POST only (WebAPI 2.14.1+). Generates a new `qbt_` key (32 characters) and stores it as
+        `web_ui_api_key`, replacing any existing key; the old key stops authenticating
+        immediately. `web_ui_api_key` itself is read-only: `setPreferences` ignores it.
+        The companion `app/deleteAPIKey` (2.14.1+, POST, empty 200) removes the key; this
+        client does not use it.
+      responses:
+        "200":
+          description: The new key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [apiKey]
+                properties:
+                  apiKey: {type: string, example: qbt_0123456789abcdefghijklmnopqr}
+
   /sync/maindata:
     get:
       tags: [sync]
@@ -993,7 +1014,7 @@ components:
           readOnly: true
           description: |
             Current API key in clear text (empty = none). Change it only through
-            `app/rotateAPIKey` / `app/deleteAPIKey` (not documented here yet).
+            `app/rotateAPIKey` (documented above) or `app/deleteAPIKey`.
           x-webui: WebUI › Authentication › API Key
         bypass_local_auth: {type: boolean, x-webui: WebUI › Authentication › Bypass authentication for clients on localhost}
         bypass_auth_subnet_whitelist_enabled: {type: boolean, x-webui: WebUI › Authentication › Bypass authentication for clients in whitelisted IP subnets}

@@ -399,10 +399,10 @@ func textField(key, label, name string) *prefField {
 	return &prefField{keys: []string{key}, label: label, name: name, control: textControl{}}
 }
 
-// passwordField edits a secret. The server returns it in clear text, but the
-// UI masks it and summaries never show it.
-func passwordField(key, label, name string) *prefField {
-	return &prefField{keys: []string{key}, label: label, name: name, control: textControl{secret: true}}
+// passwordField edits a secret labelled "Password". The server returns it in
+// clear text, but the UI masks it and summaries never show it.
+func passwordField(key, name string) *prefField {
+	return &prefField{keys: []string{key}, label: "Password", name: name, control: textControl{secret: true}}
 }
 
 // textAreaField edits a multi-line string such as a tracker list.
@@ -516,10 +516,19 @@ func normalizeIPList(text string) []string {
 
 // pathControl edits a path on the qBittorrent server's filesystem, with
 // directory suggestions from the server.
-type pathControl struct{ dirs autocompleteFetcher }
+type pathControl struct {
+	dirs     autocompleteFetcher
+	required bool // must not be empty while the field is enabled
+}
 
 func pathField(key, label, name string, dirs autocompleteFetcher) *prefField {
 	return &prefField{keys: []string{key}, label: label, name: name, control: pathControl{dirs: dirs}}
+}
+
+// requiredPathField is a pathField that cannot be left empty while enabled
+// (the WebUI refuses to save HTTPS without a certificate, for example).
+func requiredPathField(key, label, name string, dirs autocompleteFetcher) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name, control: pathControl{dirs: dirs, required: true}}
 }
 
 func (pathControl) decode(f *prefField, prefs qbt.Preferences) (prefValues, bool) {
@@ -552,12 +561,13 @@ func (c pathControl) newEditor(f *prefField) prefEditor {
 	entry := newPathAutocompleteEntry(nil, c.dirs, nil)
 	entry.SetPlaceHolder("Path on the server")
 
-	return &pathEditor{field: f, entry: entry}
+	return &pathEditor{field: f, entry: entry, required: c.required}
 }
 
 type pathEditor struct {
-	field *prefField
-	entry *pathAutocompleteEntry
+	field    *prefField
+	entry    *pathAutocompleteEntry
+	required bool
 }
 
 func (e *pathEditor) object() fyne.CanvasObject { return e.entry }
@@ -572,6 +582,9 @@ func (e *pathEditor) load(values prefValues) {
 
 // store sends the path as typed; the server normalizes it.
 func (e *pathEditor) store(values prefValues) error {
+	if e.required && !e.disabled() && strings.TrimSpace(e.entry.Text) == "" {
+		return fmt.Errorf("%s: enter a path", e.field.name)
+	}
 	values[e.field.keys[0]] = e.entry.Text
 	return nil
 }

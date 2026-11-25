@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/skobkin/qbtremotego/internal/config"
 	"github.com/skobkin/qbtremotego/internal/qbt"
 )
 
@@ -26,6 +27,11 @@ type serverPrefsBackend interface {
 	FetchPreferences(ctx context.Context) (qbt.Preferences, error)
 	ApplyPreferences(ctx context.Context, changes map[string]any) error
 	SuggestDirectories(ctx context.Context, path string) ([]string, error)
+	// LoginMethod reports how the app logs in, which decides what a WebUI
+	// login change or an API key rotation means for it.
+	LoginMethod() config.AuthMethod
+	RotateAPIKey(ctx context.Context) (string, error)
+	UpdateLoginCredentials(ctx context.Context, username, password string) error
 }
 
 // serverSettingsWindow edits the qBittorrent server's global preferences.
@@ -177,6 +183,11 @@ func (w *serverSettingsWindow) load() {
 			return
 		}
 		w.form = newPrefForm(serverPrefTabs(w.backend.SuggestDirectories), prefs)
+		if field := w.form.fieldByKey(apiKeyPrefKey); field != nil {
+			if editor, ok := w.form.editors[field].(*apiKeyEditor); ok {
+				editor.setRotate(func() { w.requestRotateAPIKey(editor) })
+			}
+		}
 		w.setBody(w.form.tabs)
 		w.syncButtons()
 	})
@@ -277,6 +288,13 @@ func (w *serverSettingsWindow) startApply() {
 			content = append(content, warning)
 			confirmText = "Apply anyway"
 		}
+		if names := disconnectingNames(changed); len(names) > 0 {
+			warning := widget.NewLabelWithStyle(
+				fmt.Sprintf("Changing %s may disconnect this app from the server. If it does, update the connection URL in Settings.", strings.Join(names, ", ")),
+				fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			warning.Wrapping = fyne.TextWrapWord
+			content = append(content, warning)
+		}
 		w.confirm("Apply server settings", container.NewVBox(content...), confirmText, func() {
 			w.sendChanges(changed, edited)
 		})
@@ -331,6 +349,13 @@ func (w *serverSettingsWindow) sendChanges(changed []*prefField, edited prefValu
 			for key, value := range payload {
 				w.form.baseline[key] = value
 			}
+			if names := disconnectingNames(changed); len(names) > 0 {
+				w.confirm("Server not reachable", wrappedLabel(fmt.Sprintf(
+					"The settings were sent, but the server could not be reached afterwards: %v\n\n"+
+						"Changing %s probably moved the WebUI. Update the connection URL in Settings to reconnect.",
+					rereadErr, strings.Join(names, ", "))), "Connection settings", func() { w.openConfig() })
+				return
+			}
 			w.showError(fmt.Errorf("the settings were sent, but re-reading them failed: %w", rereadErr))
 			return
 		}
@@ -343,14 +368,145 @@ func (w *serverSettingsWindow) sendChanges(changed []*prefField, edited prefValu
 			w.showError(fmt.Errorf("the server rejected the changes (the form now shows its current settings): %w", applyErr))
 			return
 		}
-		if unapplied := unappliedFields(changed, edited, values); len(unapplied) > 0 {
+		unapplied := unappliedFields(changed, edited, values)
+		if len(unapplied) > 0 {
 			lines := make([]string, 0, len(unapplied))
 			for _, field := range unapplied {
 				lines = append(lines, fmt.Sprintf("%s: sent %s, server has %s", field.name, field.format(edited), field.format(values)))
 			}
 			w.notify("Some changes were not applied", strings.Join(lines, "\n"))
-			return
+		} else {
+			w.notify("Server settings applied", fmt.Sprintf("Applied %d change(s) to %s.", len(changed), w.host))
 		}
-		w.notify("Server settings applied", fmt.Sprintf("Applied %d change(s) to %s.", len(changed), w.host))
+		w.offerLoginUpdate(changed, unapplied, edited)
+	})
+}
+
+// disconnectingNames names the changed fields that can cut this app off.
+func disconnectingNames(changed []*prefField) []string {
+	var names []string
+	for _, field := range changed {
+		if field.disconnects {
+			names = append(names, field.name)
+		}
+	}
+
+	return names
+}
+
+func wrappedLabel(text string) *widget.Label {
+	label := widget.NewLabel(text)
+	label.Wrapping = fyne.TextWrapWord
+
+	return label
+}
+
+// WebUI login preference keys (names, not credentials).
+//
+//nolint:gosec // G101 misreads preference key names as hard-coded credentials.
+const (
+	usernamePrefKey = "web_ui_username"
+	passwordPrefKey = "web_ui_password"
+	apiKeyPrefKey   = "web_ui_api_key"
+)
+
+// offerLoginUpdate asks, after the server took a new WebUI username or
+// password, whether the app should save it too. Only an app that logs in
+// with a password is affected; open sessions stay valid until the next login.
+func (w *serverSettingsWindow) offerLoginUpdate(changed, unapplied []*prefField, edited prefValues) {
+	if w.backend.LoginMethod() != config.AuthMethodPassword {
+		return
+	}
+	notApplied := map[*prefField]bool{}
+	for _, field := range unapplied {
+		notApplied[field] = true
+	}
+	var username, password string
+	for _, field := range changed {
+		if notApplied[field] {
+			continue
+		}
+		switch field.keys[0] {
+		case usernamePrefKey:
+			username, _ = edited[usernamePrefKey].(string)
+		case passwordPrefKey:
+			password, _ = edited[passwordPrefKey].(string)
+		}
+	}
+	if username == "" && password == "" {
+		return
+	}
+
+	what := "password"
+	switch {
+	case username != "" && password != "":
+		what = "username and password"
+	case username != "":
+		what = "username"
+	}
+	message := fmt.Sprintf("The WebUI %s of %s changed. Save the new %s in this app so it can still log in? "+
+		"The app's current session stays valid until it logs in again.", what, w.host, what)
+	w.confirm("Update the app's login?", wrappedLabel(message), "Update login", func() {
+		var err error
+		w.run(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), serverPrefsTimeout)
+			defer cancel()
+			err = w.backend.UpdateLoginCredentials(ctx, username, password)
+		}, func() {
+			if err != nil {
+				w.showError(fmt.Errorf("save the new login in this app (update it in Settings): %w", err))
+			}
+		})
+	})
+}
+
+// requestRotateAPIKey confirms and then rotates (or first generates) the
+// server's API key. This is its own request, outside the batch Apply.
+func (w *serverSettingsWindow) requestRotateAPIKey(editor *apiKeyEditor) {
+	if w.busy {
+		return
+	}
+	verb, message := "Rotate", fmt.Sprintf("Rotate the API key of %s? The current key stops working immediately for every script and app that uses it.", w.host)
+	if editor.loaded == "" {
+		verb, message = "Generate", fmt.Sprintf("Generate an API key for %s?", w.host)
+	}
+	if w.backend.LoginMethod() == config.AuthMethodAPIKey {
+		message += " This app switches to the new key and saves it."
+	} else {
+		message += " This app logs in with a username and password and is not affected."
+	}
+	w.confirm(verb+" API key", wrappedLabel(message), verb, func() { w.rotateAPIKey(editor) })
+}
+
+func (w *serverSettingsWindow) rotateAPIKey(editor *apiKeyEditor) {
+	w.setBusy(true)
+	var key string
+	var err error
+	w.run(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), serverPrefsTimeout)
+		defer cancel()
+		key, err = w.backend.RotateAPIKey(ctx)
+	}, func() {
+		w.setBusy(false)
+		if key != "" {
+			editor.setKey(key)
+			if w.form != nil {
+				w.form.baseline[apiKeyPrefKey] = key
+			}
+		}
+		switch {
+		case err != nil && key != "":
+			message := fmt.Sprintf("The server's API key was changed, but this app could not save the new key: %v\n\n"+
+				"The app uses the new key until it quits. Copy it now and enter it in Settings.", err)
+			w.confirm("New API key not saved", wrappedLabel(message), "Copy key", func() {
+				fyne.CurrentApp().Clipboard().SetContent(key)
+			})
+		case err != nil:
+			w.showError(fmt.Errorf("rotate the API key: %w", err))
+		case w.backend.LoginMethod() == config.AuthMethodAPIKey:
+			w.notify("API key rotated", "The server has a new API key. This app now uses it and has saved it.")
+		default:
+			w.notify("API key rotated", "The server has a new API key. Update any scripts or apps that used the old one.")
+		}
 	})
 }
