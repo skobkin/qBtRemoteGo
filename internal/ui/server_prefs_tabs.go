@@ -9,7 +9,7 @@ package ui
 func serverPrefTabs(dirs autocompleteFetcher) []prefTab {
 	return []prefTab{
 		behaviorPrefTab(dirs), downloadsPrefTab(dirs), connectionPrefTab(dirs),
-		speedPrefTab(), bitTorrentPrefTab(), rssPrefTab(),
+		speedPrefTab(), bitTorrentPrefTab(), rssPrefTab(), advancedPrefTab(),
 	}
 }
 
@@ -345,6 +345,70 @@ func rssPrefTab() prefTab {
 		{title: "RSS Smart Episode Filter", hint: "Filters: one regular expression per line.", fields: []*prefField{
 			checkField("rss_download_repack_proper_episodes", "Download REPACK/PROPER episodes", "Download REPACK/PROPER episodes"),
 			textAreaField("rss_smart_episode_filters", "Filters", "Smart episode filters"),
+		}},
+	}}
+}
+
+func diskIOTypeOptions() []prefOption[int64] {
+	return []prefOption[int64]{
+		{0, "Default"}, {1, "Memory mapped files"}, {2, "POSIX-compliant"},
+		{3, "Simple pread/pwrite"}, {4, "Pread/pwrite (libtorrent 2.1+)"},
+	}
+}
+
+func diskIOReadModeOptions() []prefOption[int64] {
+	return []prefOption[int64]{{0, "Disable OS cache"}, {1, "Enable OS cache"}}
+}
+
+func diskIOWriteModeOptions() []prefOption[int64] {
+	return []prefOption[int64]{{0, "Disable OS cache"}, {1, "Enable OS cache"}, {2, "Write-through (libtorrent 2.x)"}}
+}
+
+func utpMixedModeOptions() []prefOption[int64] {
+	return []prefOption[int64]{{0, "Prefer TCP"}, {1, "Peer proportional (throttles TCP)"}}
+}
+
+// advancedPrefTab is a curated subset of the WebUI Advanced tab. Keys that
+// only matter for libtorrent 1.x (disk_cache, disk_cache_ttl,
+// enable_coalesce_read_write) are left out: the server reports them
+// regardless of its libtorrent version.
+func advancedPrefTab() prefTab {
+	return prefTab{title: "Advanced", sections: []prefSection{
+		{title: "Disk I/O", hint: "libtorrent tuning; see the libtorrent settings reference.", fields: []*prefField{
+			intField("async_io_threads", "Asynchronous I/O threads", "Asynchronous I/O threads", "", 1),
+			intField("hashing_threads", "Hashing threads", "Hashing threads", "", 1),
+			intField("file_pool_size", "File pool size", "File pool size", "", 1),
+			intField("checking_memory_use", "Outstanding memory when checking (MiB)", "Checking memory", "MiB", 1),
+			kibField("disk_queue_size", "Disk queue size (KiB)", "Disk queue size"),
+			enumField("disk_io_type", "Disk IO type (requires restart)", "Disk IO type", diskIOTypeOptions()),
+			enumField("disk_io_read_mode", "Disk IO read mode", "Disk IO read mode", diskIOReadModeOptions()),
+			enumField("disk_io_write_mode", "Disk IO write mode", "Disk IO write mode", diskIOWriteModeOptions()),
+			checkField("enable_piece_extent_affinity", "Use piece extent affinity", "Piece extent affinity"),
+		}},
+		{title: "Connections", fields: []*prefField{
+			intField("connection_speed", "Outgoing connections per second", "Outgoing connections per second", "", 0),
+			kibField("socket_send_buffer_size", "Socket send buffer size (KiB, 0: system default)", "Socket send buffer"),
+			kibField("socket_receive_buffer_size", "Socket receive buffer size (KiB, 0: system default)", "Socket receive buffer"),
+			intField("socket_backlog_size", "Socket backlog size", "Socket backlog size", "", 1),
+			portField("outgoing_ports_min", "Outgoing ports (Min) [0: disabled]", "Outgoing ports min", false),
+			portField("outgoing_ports_max", "Outgoing ports (Max) [0: disabled]", "Outgoing ports max", false),
+			enumField("utp_tcp_mixed_mode", "μTP-TCP mixed mode algorithm", "μTP-TCP mixed mode", utpMixedModeOptions()),
+			checkField("enable_multi_connections_from_same_ip", "Allow multiple connections from the same IP address", "Multiple connections per IP"),
+			checkField("block_peers_on_privileged_ports", "Disallow connection to peers on privileged ports", "Block privileged peer ports"),
+		}},
+		{title: "Trackers", fields: []*prefField{
+			checkField("reannounce_when_address_changed", "Reannounce to all trackers when IP or port changed", "Reannounce on address change"),
+			checkField("announce_to_all_trackers", "Always announce to all trackers in a tier", "Announce to all trackers"),
+			checkField("announce_to_all_tiers", "Always announce to all tiers", "Announce to all tiers"),
+			ipAddressField("announce_ip", "IP address reported to trackers (requires restart)", "Announce IP"),
+			portField("announce_port", "Port reported to trackers (requires restart) [0: listening port]", "Announce port", false),
+			intField("max_concurrent_http_announces", "Max concurrent HTTP announces", "Max concurrent HTTP announces", "", 1),
+			intField("stop_tracker_timeout", "Stop tracker timeout (s) [0: disabled]", "Stop tracker timeout", "s", 0),
+		}},
+		{title: "Peer Turnover", fields: []*prefField{
+			intRangeField("peer_turnover", "Peer turnover disconnect percentage", "Peer turnover", "%", 0, 100),
+			intRangeField("peer_turnover_cutoff", "Peer turnover threshold percentage", "Peer turnover threshold", "%", 0, 100),
+			intField("peer_turnover_interval", "Peer turnover disconnect interval (s)", "Peer turnover interval", "s", 0),
 		}},
 	}}
 }

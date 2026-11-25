@@ -113,6 +113,50 @@ func (c intControl) newEditor(f *prefField) prefEditor {
 	return e
 }
 
+// --- byte size shown in KiB --------------------------------------------------------
+
+// kibControl edits a non-negative byte count in whole KiB. A box left as
+// loaded keeps the server's exact byte value, so sizes that are not whole
+// KiB never show up as changes.
+type kibControl struct{}
+
+func kibField(key, label, name string) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name, control: kibControl{}}
+}
+
+func (kibControl) decode(f *prefField, prefs qbt.Preferences) (prefValues, bool) {
+	return decodeInts(f.keys, prefs)
+}
+
+func (kibControl) format(f *prefField, values prefValues) string {
+	bytes, _ := values[f.keys[0]].(int64)
+	return withUnit(strconv.FormatInt(bytes/1024, 10), "KiB")
+}
+
+func (kibControl) newEditor(f *prefField) prefEditor {
+	key := f.keys[0]
+	var loaded int64
+	show := func(values prefValues) string {
+		loaded, _ = values[key].(int64)
+		return strconv.FormatInt(loaded/1024, 10)
+	}
+	parse := func(text string, values prefValues) error {
+		kib, err := parsePrefIntRange(text, 0, maxPrefInt/1024)
+		if err != nil {
+			return err
+		}
+		if kib == loaded/1024 {
+			values[key] = loaded
+		} else {
+			values[key] = kib * 1024
+		}
+
+		return nil
+	}
+
+	return newEntryEditor(f, "KiB", show, parse)
+}
+
 // --- count with "Unlimited" (-1) ------------------------------------------------
 
 type unlimitedControl struct{ minValue int64 }
@@ -436,6 +480,12 @@ type ipListControl struct{ textControl }
 
 func ipListField(key, label, name string) *prefField {
 	return &prefField{keys: []string{key}, label: label, name: name, control: ipListControl{textControl{multiLine: true}}}
+}
+
+// ipAddressField edits a single IP address the server normalizes (or clears
+// when invalid).
+func ipAddressField(key, label, name string) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name, control: ipListControl{textControl{}}}
 }
 
 func (ipListControl) equivalent(f *prefField, a, b prefValues) bool {

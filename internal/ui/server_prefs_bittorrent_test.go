@@ -310,7 +310,7 @@ func TestServerPrefTabsFollowWebUIOrder(t *testing.T) {
 	for _, tab := range serverPrefTabs(nil) {
 		titles = append(titles, tab.title)
 	}
-	if want := []string{"Behavior", "Downloads", "Connection", "Speed", "BitTorrent", "RSS"}; !reflect.DeepEqual(titles, want) {
+	if want := []string{"Behavior", "Downloads", "Connection", "Speed", "BitTorrent", "RSS", "Advanced"}; !reflect.DeepEqual(titles, want) {
 		t.Fatalf("tabs = %v, want %v", titles, want)
 	}
 }
