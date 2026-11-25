@@ -1028,7 +1028,6 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 	win := a.fyApp.NewWindow("Add Torrent")
 
 	cfg := a.controller.Config()
-	win.Resize(addTorrentWindowSize(cfg.UI.AddTorrentAdvancedExpanded))
 	data := appcore.AddDialogData{
 		SourceType:     qbt.SourceMagnet,
 		ManagementMode: "Manual",
@@ -1041,6 +1040,9 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		data.SourceType = prefill.SourceType
 		data.TorrentFilePath = prefill.TorrentFilePath
 		data.MagnetText = strings.Join(prefill.MagnetLinks, "\n")
+	} else if clipboard := a.fyApp.Clipboard(); clipboard != nil {
+		// Opened by hand: offer magnet links the user just copied.
+		data.MagnetText = strings.Join(clipboardMagnets(clipboard.Content()), "\n")
 	}
 	var shouldFetchDefaultSavePath bool
 	data.SavePath, shouldFetchDefaultSavePath = initialAddDialogSavePath(cfg.UI)
@@ -1062,6 +1064,7 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 	}
 
 	sourceSelect := widget.NewRadioGroup([]string{addSourceTorrentFile, addSourceMagnet}, nil)
+	sourceSelect.Horizontal = true
 	if data.SourceType == qbt.SourceTorrentFile {
 		sourceSelect.SetSelected(addSourceTorrentFile)
 	} else {
@@ -1078,9 +1081,11 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 	}
 	closeWindow := func() { win.Close() }
 	fileEntry := newSubmitEntry(false, trySubmit, closeWindow)
+	fileEntry.SetPlaceHolder("Path to .torrent file")
 	fileEntry.SetText(data.TorrentFilePath)
 	magnetEntry := newSubmitEntry(true, trySubmit, closeWindow)
 	magnetEntry.SetMinRowsVisible(4)
+	magnetEntry.SetPlaceHolder("One magnet link per line")
 	magnetEntry.SetText(data.MagnetText)
 	sourceContainer := container.NewStack()
 
@@ -1237,18 +1242,15 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		trySubmit()
 	})
 
-	content := container.NewBorder(
-		nil,
-		container.NewVBox(status, buttons),
-		nil,
-		nil,
-		container.NewVScroll(formContent),
-	)
+	footer := container.NewVBox(status, buttons)
+	body := container.New(&cappedHeightLayout{maxHeight: addDialogMaxBodyHeight}, container.NewVScroll(formContent))
+	content := container.NewBorder(nil, footer, nil, nil, body)
 
 	defaultSavePathCtx, cancelDefaultSavePath := context.WithCancel(context.Background())
 	var addWindowClosed atomic.Bool
 
 	win.SetContent(content)
+	win.Resize(addTorrentWindowSize(formContent.MinSize(), footer.MinSize()))
 	win.SetOnClosed(func() {
 		addWindowClosed.Store(true)
 		cancelDefaultSavePath()
@@ -1377,13 +1379,6 @@ func newConnectionTestStatus() (*widget.Label, *container.Scroll) {
 	scroll := container.NewVScroll(status)
 	scroll.SetMinSize(fyne.NewSize(0, viewportHeight))
 	return status, scroll
-}
-
-func addTorrentWindowSize(advancedExpanded bool) fyne.Size {
-	if advancedExpanded {
-		return fyne.NewSize(720, 680)
-	}
-	return fyne.NewSize(720, 480)
 }
 
 func (a *application) refreshVisibleTorrents() {

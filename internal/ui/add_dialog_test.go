@@ -100,3 +100,29 @@ func TestAddDialogEscapeClosesWindow(t *testing.T) {
 		t.Fatal("Esc did not close the Add dialog")
 	}
 }
+
+func TestClipboardMagnets(t *testing.T) {
+	text := "see magnet:?xt=urn:btih:inline\nmagnet:?xt=urn:btih:aaa\r\n  MAGNET:?xt=urn:btih:bbb \n/tmp/a.torrent"
+	got := clipboardMagnets(text)
+	if len(got) != 2 || got[0] != "magnet:?xt=urn:btih:aaa" || got[1] != "MAGNET:?xt=urn:btih:bbb" {
+		t.Fatalf("clipboardMagnets = %v, want the two magnet lines", got)
+	}
+}
+
+func TestAddDialogPrefillsMagnetsFromClipboard(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	app.fyApp.Clipboard().SetContent("magnet:?xt=urn:btih:aaa")
+
+	d := app.openAddWindowWith(nil, addWindowOptions{})
+	t.Cleanup(d.win.Close)
+
+	if d.magnetEntry.Text != "magnet:?xt=urn:btih:aaa" {
+		t.Fatalf("magnet text %q, want the clipboard link", d.magnetEntry.Text)
+	}
+	if !d.sourceSelect.Horizontal {
+		t.Fatal("source options should sit on one row")
+	}
+	if d.magnetEntry.PlaceHolder == "" || d.fileEntry.PlaceHolder == "" {
+		t.Fatal("source entries need placeholders")
+	}
+}

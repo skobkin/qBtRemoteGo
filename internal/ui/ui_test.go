@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"image/color"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
@@ -301,12 +304,39 @@ func TestNewAdvancedAccordion(t *testing.T) {
 	}
 }
 
-func TestAddTorrentWindowSize(t *testing.T) {
-	if got := addTorrentWindowSize(false); got != fyne.NewSize(720, 480) {
-		t.Fatalf("unexpected collapsed size: %#v", got)
+func TestAddTorrentWindowSizeFitsContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content fyne.Size
+		footer  fyne.Size
+		want    fyne.Size
+	}{
+		{"short form keeps the minimum width", fyne.NewSize(500, 300), fyne.NewSize(200, 40), fyne.NewSize(720, 340)},
+		{"wide form widens the window", fyne.NewSize(800, 300), fyne.NewSize(200, 40), fyne.NewSize(800, 340)},
+		{"tall form is capped", fyne.NewSize(500, 2000), fyne.NewSize(200, 40), fyne.NewSize(720, addDialogMaxBodyHeight+40)},
 	}
-	if got := addTorrentWindowSize(true); got != fyne.NewSize(720, 680) {
-		t.Fatalf("unexpected expanded size: %#v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := addTorrentWindowSize(tt.content, tt.footer); got != tt.want {
+				t.Fatalf("addTorrentWindowSize = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCappedHeightLayoutFollowsContent(t *testing.T) {
+	test.NewTempApp(t)
+	rect := canvas.NewRectangle(color.Black)
+	rect.SetMinSize(fyne.NewSize(300, 200))
+	scroll := container.NewVScroll(rect)
+	layout := &cappedHeightLayout{maxHeight: 500}
+
+	if got := layout.MinSize([]fyne.CanvasObject{scroll}); got != fyne.NewSize(300, 200) {
+		t.Fatalf("min size %v, want content size", got)
+	}
+	rect.SetMinSize(fyne.NewSize(300, 900))
+	if got := layout.MinSize([]fyne.CanvasObject{scroll}); got != fyne.NewSize(300, 500) {
+		t.Fatalf("min size %v, want height capped at 500", got)
 	}
 }
 

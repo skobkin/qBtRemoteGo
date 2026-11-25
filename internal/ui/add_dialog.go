@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 )
@@ -78,4 +79,58 @@ func (e *submitEntry) TypedKey(event *fyne.KeyEvent) {
 		return
 	}
 	e.Entry.TypedKey(event)
+}
+
+const (
+	// addDialogMinWidth is the narrowest the Add dialog opens.
+	addDialogMinWidth = float32(720)
+	// addDialogMaxBodyHeight caps the form area; taller forms scroll.
+	addDialogMaxBodyHeight = float32(640)
+)
+
+// addTorrentWindowSize sizes the Add dialog to its form and footer, so it
+// opens without the empty space a fixed size left under a short form.
+func addTorrentWindowSize(content fyne.Size, footer fyne.Size) fyne.Size {
+	width := max(addDialogMinWidth, content.Width, footer.Width)
+	height := min(content.Height, addDialogMaxBodyHeight) + footer.Height
+	return fyne.NewSize(width, height)
+}
+
+// cappedHeightLayout gives a scroll container its content's natural size up
+// to maxHeight. Fyne grows the window when a child's minimum size outgrows
+// it, so expanding "Advanced" enlarges the dialog instead of scrolling inside
+// a window that stays too short.
+type cappedHeightLayout struct {
+	maxHeight float32
+}
+
+func (l *cappedHeightLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	for _, obj := range objects {
+		obj.Move(fyne.NewPos(0, 0))
+		obj.Resize(size)
+	}
+}
+
+func (l *cappedHeightLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	var out fyne.Size
+	for _, obj := range objects {
+		content := obj.MinSize()
+		if scroll, ok := obj.(*container.Scroll); ok && scroll.Content != nil {
+			content = scroll.Content.MinSize()
+		}
+		out = out.Max(fyne.NewSize(content.Width, min(content.Height, l.maxHeight)))
+	}
+	return out
+}
+
+// clipboardMagnets returns the clipboard lines that are magnet links.
+func clipboardMagnets(text string) []string {
+	var out []string
+	for _, line := range strings.FieldsFunc(text, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "magnet:") {
+			out = append(out, line)
+		}
+	}
+	return out
 }
