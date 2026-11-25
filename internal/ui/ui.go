@@ -69,14 +69,18 @@ type application struct {
 	updateChecker   updateChecker
 	checkingUpdates atomic.Bool
 
-	list              *widget.List
-	listRows          []*torrentListRow
-	tableHeader       *torrentHeaderRow
-	tablePreview      *canvas.Rectangle
-	tableScroll       *container.Scroll
-	statusLabel       *widget.Label
-	connectionIcon    *hoverIcon
-	slowModeIcon      *hoverIcon
+	list           *widget.List
+	listRows       []*torrentListRow
+	tableHeader    *torrentHeaderRow
+	tablePreview   *canvas.Rectangle
+	tableScroll    *container.Scroll
+	statusLabel    *widget.Label
+	connectionIcon *hoverIcon
+	slowModeIcon   *hoverIcon
+	// Toolbar actions that need a selection; see syncSelectionActions.
+	removeButton      *buttonWithTooltip
+	startButton       *buttonWithTooltip
+	stopButton        *buttonWithTooltip
 	filterEntry       *searchEntry
 	filterClear       *widget.Button
 	filterFieldButton *widget.Button
@@ -232,13 +236,13 @@ func (a *application) buildMainWindow() {
 	addButton := newButtonWithTooltip(a.tooltipManager, theme.ContentAddIcon(), "Add torrent", func() {
 		a.openAddWindow(nil)
 	})
-	removeButton := newButtonWithTooltip(a.tooltipManager, theme.DeleteIcon(), "Remove selected torrents", func() {
+	a.removeButton = newButtonWithTooltip(a.tooltipManager, theme.DeleteIcon(), "Remove selected torrents", func() {
 		a.confirmDelete()
 	})
-	startButton := newButtonWithTooltip(a.tooltipManager, theme.MediaPlayIcon(), "Start selected torrents", func() {
+	a.startButton = newButtonWithTooltip(a.tooltipManager, theme.MediaPlayIcon(), "Start selected torrents", func() {
 		a.startSelectedTorrents()
 	})
-	stopButton := newButtonWithTooltip(a.tooltipManager, theme.MediaStopIcon(), "Stop selected torrents", func() {
+	a.stopButton = newButtonWithTooltip(a.tooltipManager, theme.MediaStopIcon(), "Stop selected torrents", func() {
 		a.stopSelectedTorrents()
 	})
 	settingsButton := newButtonWithTooltip(a.tooltipManager, theme.SettingsIcon(), "Settings", func() {
@@ -249,14 +253,17 @@ func (a *application) buildMainWindow() {
 	searchBox := a.buildSearchBox()
 	leftTools := container.NewHBox(
 		addButton,
-		removeButton,
-		startButton,
-		stopButton,
-		settingsButton,
+		newToolbarSeparator(),
+		a.startButton,
+		a.stopButton,
+		newToolbarSeparator(),
+		a.removeButton,
 	)
 	rightTools := container.NewHBox(
 		a.stateSelect,
 		searchBox,
+		newToolbarSeparator(),
+		settingsButton,
 	)
 
 	a.statusLabel.Truncation = fyne.TextTruncateEllipsis
@@ -1329,6 +1336,7 @@ func (a *application) refreshVisibleTorrents() {
 	}
 	a.statusLabel.SetText(a.statusText())
 	a.refreshStatusIcons()
+	a.syncSelectionActions()
 }
 
 func (a *application) statusText() string {
@@ -1912,6 +1920,7 @@ func (a *application) refreshTorrentSelection() {
 	for _, row := range a.listRows {
 		row.setSelected(a.selection[row.hash])
 	}
+	a.syncSelectionActions()
 }
 
 func (a *application) selectedHashes() []string {
