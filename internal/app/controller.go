@@ -539,10 +539,13 @@ func (c *Controller) SuggestDirectories(ctx context.Context, path string) ([]str
 	return client.DirectorySuggestions(ctx, path)
 }
 
-func FilterAndSortTorrents(torrents []qbt.Torrent, query string, filterBy string, sortColumn string, descending bool) []qbt.Torrent {
+func FilterAndSortTorrents(torrents []qbt.Torrent, query string, filterBy string, state StateFilter, sortColumn string, descending bool) []qbt.Torrent {
 	filtered := make([]qbt.Torrent, 0, len(torrents))
 	query = strings.ToLower(strings.TrimSpace(query))
 	for _, torrent := range torrents {
+		if !StateMatches(state, torrent) {
+			continue
+		}
 		if query != "" {
 			candidate := torrent.Name
 			if filterBy == "location" {

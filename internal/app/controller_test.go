@@ -67,12 +67,12 @@ func TestFilterAndSortTorrents(t *testing.T) {
 		{Name: "Alpha", SavePath: "/data/main", AddedUnix: now.Unix(), AddedAt: now},
 	}
 
-	filtered := FilterAndSortTorrents(items, "main", "location", "name", false)
+	filtered := FilterAndSortTorrents(items, "main", "location", StateAll, "name", false)
 	if len(filtered) != 1 || filtered[0].Name != "Alpha" {
 		t.Fatalf("unexpected filtered list: %#v", filtered)
 	}
 
-	sorted := FilterAndSortTorrents(items, "", "name", "added", true)
+	sorted := FilterAndSortTorrents(items, "", "name", StateAll, "added", true)
 	if sorted[0].Name != "Alpha" {
 		t.Fatalf("unexpected sorted order: %#v", sorted)
 	}

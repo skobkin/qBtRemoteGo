@@ -515,3 +515,23 @@ func containsAny(text string, patterns ...string) bool {
 
 	return false
 }
+
+func TestNormalizeStateFilter(t *testing.T) {
+	tests := map[string]string{
+		"":            "all",
+		"bogus":       "all",
+		"Seeding":     "seeding",
+		"downloading": "downloading",
+		"completed":   "completed",
+		"stopped":     "stopped",
+		"errored":     "errored",
+	}
+	for raw, want := range tests {
+		cfg := Default()
+		cfg.UI.StateFilter = raw
+		Normalize(&cfg)
+		if cfg.UI.StateFilter != want {
+			t.Errorf("state filter %q normalized to %q, want %q", raw, cfg.UI.StateFilter, want)
+		}
+	}
+}

@@ -68,6 +68,7 @@ type UIConfig struct {
 	DetailsPanelEnabled        bool               `json:"details_panel_enabled"`
 	DetailsPanelMode           string             `json:"details_panel_mode"`
 	FilterBy                   string             `json:"filter_by"`
+	StateFilter                string             `json:"state_filter"`
 	SortColumn                 string             `json:"sort_column"`
 	SortDescending             bool               `json:"sort_descending"`
 	CompactRows                bool               `json:"compact_rows"`
@@ -107,6 +108,7 @@ func Default() AppConfig {
 			DetailsPanelEnabled:        false,
 			DetailsPanelMode:           "off",
 			FilterBy:                   "name",
+			StateFilter:                "all",
 			SortColumn:                 "added",
 			SortDescending:             true,
 			CompactRows:                false,
@@ -153,6 +155,7 @@ func Normalize(cfg *AppConfig) {
 	if cfg.UI.FilterBy != "name" && cfg.UI.FilterBy != "location" {
 		cfg.UI.FilterBy = def.UI.FilterBy
 	}
+	cfg.UI.StateFilter = normalizeStateFilter(cfg.UI.StateFilter)
 	if !isValidSortColumn(cfg.UI.SortColumn) {
 		cfg.UI.SortColumn = def.UI.SortColumn
 	}
@@ -362,4 +365,16 @@ func normalizeColumnWidths(widths map[string]float32) map[string]float32 {
 	}
 
 	return out
+}
+
+// normalizeStateFilter lowercases a stored quick-filter bucket and falls back
+// to "all" for anything unknown. The bucket names mirror app.StateFilter.
+func normalizeStateFilter(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch value {
+	case "all", "downloading", "seeding", "completed", "stopped", "errored":
+		return value
+	default:
+		return "all"
+	}
 }

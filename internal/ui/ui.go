@@ -86,9 +86,14 @@ type application struct {
 	previewX       float32
 	// tableWidth is the torrent table's laid-out width; the flexible Name
 	// column absorbs whatever the other columns leave of it.
-	tableWidth   float32
-	detailsHost  *torrentDetailsHost
-	detailsState *torrentDetailsState
+	tableWidth float32
+	// stateSelect is the toolbar quick state filter; stateFilter is the bucket
+	// it selects (its option labels change with every poll's counts).
+	stateSelect          *widget.Select
+	stateFilter          appcore.StateFilter
+	updatingStateOptions bool
+	detailsHost          *torrentDetailsHost
+	detailsState         *torrentDetailsState
 
 	trayState trayState
 
@@ -267,6 +272,7 @@ func (a *application) buildMainWindow() {
 		a.filterBy.SetSelected("Name")
 	}
 
+	a.stateSelect = a.buildStateFilterSelect()
 	filterLabel := widget.NewLabel("Filter by")
 	filterSelect := container.NewGridWrap(fyne.NewSize(140, a.filterBy.MinSize().Height), a.filterBy)
 	filterInput := container.NewGridWrap(fyne.NewSize(240, a.filterEntry.MinSize().Height), a.filterEntry)
@@ -278,6 +284,7 @@ func (a *application) buildMainWindow() {
 		settingsButton,
 	)
 	rightTools := container.NewHBox(
+		a.stateSelect,
 		filterLabel,
 		filterSelect,
 		filterInput,
@@ -1338,9 +1345,11 @@ func (a *application) refreshVisibleTorrents() {
 		a.allTorrents,
 		a.filterQuery,
 		strings.ToLower(a.filterBy.Selected),
+		a.stateFilter,
 		cfg.UI.SortColumn,
 		cfg.UI.SortDescending,
 	)
+	a.updateStateFilterOptions()
 	a.pruneSelectionToVisible()
 	a.ensureDetailsFocusForSelection()
 	if a.tableHeader != nil {
