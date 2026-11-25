@@ -7,12 +7,20 @@ package ui
 // serverPrefTabs lists the implemented tabs in WebUI order. dirs suggests
 // directories on the server for path fields (nil disables suggestions).
 func serverPrefTabs(dirs autocompleteFetcher) []prefTab {
-	return []prefTab{downloadsPrefTab(dirs), speedPrefTab(), bitTorrentPrefTab()}
+	return []prefTab{downloadsPrefTab(dirs), connectionPrefTab(dirs), speedPrefTab(), bitTorrentPrefTab()}
 }
 
-// requiring makes field editable only while all the given switches are on.
+// requiring makes field editable only while all the given checkboxes are on.
 func requiring(field *prefField, switches ...string) *prefField {
-	field.requires = switches
+	for _, key := range switches {
+		field.requires = append(field.requires, on(key))
+	}
+	return field
+}
+
+// requiringWhen makes field editable only while all conditions hold.
+func requiringWhen(field *prefField, conds ...prefCondition) *prefField {
+	field.requires = append(field.requires, conds...)
 	return field
 }
 
@@ -80,13 +88,13 @@ func bitTorrentPrefTab() prefTab {
 			checkField("anonymous_mode", "Enable anonymous mode", "Anonymous mode"),
 		}},
 		{title: "Torrent Checking", fields: []*prefField{
-			unlimitedIntField("max_active_checking_torrents", "Max active checking torrents", "Max active checking torrents"),
+			unlimitedIntField("max_active_checking_torrents", "Max active checking torrents", "Max active checking torrents", 0),
 		}},
 		{title: "Torrent Queueing", fields: []*prefField{
 			checkField(queueing, "Enable torrent queueing", "Torrent queueing"),
-			requiring(unlimitedIntField("max_active_downloads", "Maximum active downloads", "Maximum active downloads"), queueing),
-			requiring(unlimitedIntField("max_active_uploads", "Maximum active uploads", "Maximum active uploads"), queueing),
-			requiring(unlimitedIntField("max_active_torrents", "Maximum active torrents", "Maximum active torrents"), queueing),
+			requiring(unlimitedIntField("max_active_downloads", "Maximum active downloads", "Maximum active downloads", 0), queueing),
+			requiring(unlimitedIntField("max_active_uploads", "Maximum active uploads", "Maximum active uploads", 0), queueing),
+			requiring(unlimitedIntField("max_active_torrents", "Maximum active torrents", "Maximum active torrents", 0), queueing),
 			requiring(checkField(ignoreSlow, "Do not count slow torrents in these limits", "Ignore slow torrents in queue limits"), queueing),
 			requiring(intField("slow_torrent_dl_rate_threshold", "Download rate threshold (KiB/s)", "Slow torrent download threshold", "KiB/s", 1), queueing, ignoreSlow),
 			requiring(intField("slow_torrent_ul_rate_threshold", "Upload rate threshold (KiB/s)", "Slow torrent upload threshold", "KiB/s", 1), queueing, ignoreSlow),
@@ -208,6 +216,70 @@ func downloadsPrefTab(dirs autocompleteFetcher) prefTab {
 			requiring(textField("autorun_on_torrent_added_program", "Command", "Command on torrent added"), runOnAdded),
 			checkField(runOnFinished, "Run on torrent finished", "Run program on torrent finished"),
 			requiring(textField("autorun_program", "Command", "Command on torrent finished"), runOnFinished),
+		}},
+	}}
+}
+
+func btProtocolOptions() []prefOption[int64] {
+	return []prefOption[int64]{{0, "TCP and μTP"}, {1, "TCP"}, {2, "μTP"}}
+}
+
+func proxyTypeOptions() []prefOption[string] {
+	return []prefOption[string]{{"None", "(None)"}, {"SOCKS4", "SOCKS4"}, {"SOCKS5", "SOCKS5"}, {"HTTP", "HTTP"}}
+}
+
+// connectionPrefTab mirrors the WebUI Connection tab. The deprecated
+// random_port is never sent: it would override listen_port.
+func connectionPrefTab(dirs autocompleteFetcher) prefTab {
+	const (
+		i2p       = "i2p_enabled"
+		proxyType = "proxy_type"
+		proxyAuth = "proxy_auth_enabled"
+		proxyBT   = "proxy_bittorrent"
+		ipFilter  = "ip_filter_enabled"
+	)
+	anyProxy := notIn(proxyType, "None")
+	fullProxy := notIn(proxyType, "None", "SOCKS4") // SOCKS4 lacks auth and hostnames
+
+	return prefTab{title: "Connection", sections: []prefSection{
+		{title: "Protocol", fields: []*prefField{
+			enumField("bittorrent_protocol", "Peer connection protocol", "Peer connection protocol", btProtocolOptions()),
+		}},
+		{title: "Listening Port", hint: "Set the port to 0 to let the system pick an unused port.", fields: []*prefField{
+			portField("listen_port", "Port used for incoming connections", "Listening port", true),
+			checkField("upnp", "Use UPnP / NAT-PMP port forwarding from my router", "UPnP / NAT-PMP port forwarding"),
+		}},
+		{title: "Connections Limits", fields: []*prefField{
+			unlimitedIntField("max_connec", "Global maximum number of connections", "Global maximum connections", 1),
+			unlimitedIntField("max_connec_per_torrent", "Maximum number of connections per torrent", "Maximum connections per torrent", 1),
+			unlimitedIntField("max_uploads", "Global maximum number of upload slots", "Global maximum upload slots", 1),
+			unlimitedIntField("max_uploads_per_torrent", "Maximum number of upload slots per torrent", "Maximum upload slots per torrent", 1),
+		}},
+		{title: "I2P (Experimental)", fields: []*prefField{
+			checkField(i2p, "Enable I2P", "I2P"),
+			requiring(textField("i2p_address", "Host", "I2P host"), i2p),
+			requiring(portField("i2p_port", "Port", "I2P port", false), i2p),
+			requiring(checkField("i2p_mixed_mode", "Mixed mode", "I2P mixed mode"), i2p),
+			requiring(checkField("i2p_pex_enabled", "Enable I2P Peer Exchange (requires restart)", "I2P Peer Exchange"), i2p),
+		}},
+		{title: "Proxy Server", fields: []*prefField{
+			textEnumField(proxyType, "Type", "Proxy type", proxyTypeOptions()),
+			requiringWhen(textField("proxy_ip", "Host", "Proxy host"), anyProxy),
+			requiringWhen(portField("proxy_port", "Port", "Proxy port", false), anyProxy),
+			requiringWhen(checkField("proxy_hostname_lookup", "Perform hostname lookup via proxy", "Proxy hostname lookup"), fullProxy),
+			requiringWhen(checkField(proxyAuth, "Authentication", "Proxy authentication"), fullProxy),
+			requiringWhen(textField("proxy_username", "Username", "Proxy username"), fullProxy, on(proxyAuth)),
+			requiringWhen(passwordField("proxy_password", "Password", "Proxy password"), fullProxy, on(proxyAuth)),
+			requiringWhen(checkField(proxyBT, "Use proxy for BitTorrent purposes", "Proxy for BitTorrent"), anyProxy),
+			requiringWhen(checkField("proxy_peer_connections", "Use proxy for peer connections", "Proxy for peer connections"), anyProxy, on(proxyBT)),
+			requiringWhen(checkField("proxy_rss", "Use proxy for RSS purposes", "Proxy for RSS"), fullProxy),
+			requiringWhen(checkField("proxy_misc", "Use proxy for general purposes", "Proxy for general purposes"), fullProxy),
+		}},
+		{title: "IP Filtering", hint: "Banned IP addresses: one per line.", fields: []*prefField{
+			checkField(ipFilter, "Use an IP filter file", "IP filter"),
+			requiring(pathField("ip_filter_path", "Filter path (.dat, .p2p, .p2b)", "IP filter path", dirs), ipFilter),
+			checkField("ip_filter_trackers", "Apply to trackers", "IP filter for trackers"),
+			ipListField("banned_IPs", "Manually banned IP addresses", "Banned IP addresses"),
 		}},
 	}}
 }

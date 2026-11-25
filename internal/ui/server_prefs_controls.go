@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand/v2"
+	"net/netip"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -23,9 +26,13 @@ import (
 const maxPrefInt = math.MaxInt32
 
 func parsePrefInt(text string, minValue int64) (int64, error) {
+	return parsePrefIntRange(text, minValue, maxPrefInt)
+}
+
+func parsePrefIntRange(text string, minValue, maxValue int64) (int64, error) {
 	value, err := strconv.ParseInt(strings.TrimSpace(text), 10, 64)
-	if err != nil || value < minValue || value > maxPrefInt {
-		return 0, fmt.Errorf("enter a whole number from %d to %d", minValue, maxPrefInt)
+	if err != nil || value < minValue || value > maxValue {
+		return 0, fmt.Errorf("enter a whole number from %d to %d", minValue, maxValue)
 	}
 
 	return value, nil
@@ -44,12 +51,20 @@ func withUnit(value, unit string) string {
 type intControl struct {
 	unit     string
 	minValue int64
+	maxValue int64 // 0 means maxPrefInt
+	random   bool  // offer a Random button (ports)
 }
 
 // intField edits a whole number of at least minValue; unit is shown in
 // summaries ("5 KiB/s") and as the entry placeholder.
 func intField(key, label, name, unit string, minValue int64) *prefField {
 	return &prefField{keys: []string{key}, label: label, name: name, control: intControl{unit: unit, minValue: minValue}}
+}
+
+// portField edits a TCP/UDP port (0-65535); random adds a button picking a
+// port from 1024-65535, like the WebUI.
+func portField(key, label, name string, random bool) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name, control: intControl{maxValue: 65535, random: random}}
 }
 
 func (intControl) decode(f *prefField, prefs qbt.Preferences) (prefValues, bool) {
@@ -67,8 +82,12 @@ func (c intControl) newEditor(f *prefField) prefEditor {
 		value, _ := values[key].(int64)
 		return strconv.FormatInt(value, 10)
 	}
+	maxValue := c.maxValue
+	if maxValue == 0 {
+		maxValue = maxPrefInt
+	}
 	parse := func(text string, values prefValues) error {
-		value, err := parsePrefInt(text, c.minValue)
+		value, err := parsePrefIntRange(text, c.minValue, maxValue)
 		if err != nil {
 			return err
 		}
@@ -77,17 +96,25 @@ func (c intControl) newEditor(f *prefField) prefEditor {
 		return nil
 	}
 
-	return newEntryEditor(f, c.unit, show, parse)
+	e := newEntryEditor(f, c.unit, show, parse)
+	if c.random {
+		e.button = widget.NewButton("Random", func() {
+			e.entry.SetText(strconv.Itoa(1024 + rand.IntN(65535-1024+1))) //nolint:gosec // not security-sensitive
+		})
+		e.view = container.NewBorder(nil, nil, nil, e.button, e.entry)
+	}
+
+	return e
 }
 
 // --- count with "Unlimited" (-1) ------------------------------------------------
 
-type unlimitedControl struct{}
+type unlimitedControl struct{ minValue int64 }
 
 // unlimitedIntField edits a count where the server uses -1 for unlimited, as
-// an "Unlimited" checkbox next to the number.
-func unlimitedIntField(key, label, name string) *prefField {
-	return &prefField{keys: []string{key}, label: label, name: name, control: unlimitedControl{}}
+// an "Unlimited" checkbox next to a number of at least minValue.
+func unlimitedIntField(key, label, name string, minValue int64) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name, control: unlimitedControl{minValue: minValue}}
 }
 
 func (unlimitedControl) decode(f *prefField, prefs qbt.Preferences) (prefValues, bool) {
@@ -103,8 +130,8 @@ func (unlimitedControl) format(f *prefField, values prefValues) string {
 	return strconv.FormatInt(value, 10)
 }
 
-func (unlimitedControl) newEditor(f *prefField) prefEditor {
-	e := &unlimitedEditor{field: f, entry: widget.NewEntry(), enabled: true}
+func (c unlimitedControl) newEditor(f *prefField) prefEditor {
+	e := &unlimitedEditor{field: f, entry: widget.NewEntry(), enabled: true, minValue: c.minValue}
 	e.unlimited = widget.NewCheck("Unlimited", func(bool) { e.syncEntry() })
 	e.box = container.NewBorder(nil, nil, nil, e.unlimited, e.entry)
 
@@ -117,6 +144,7 @@ type unlimitedEditor struct {
 	entry     *widget.Entry
 	box       fyne.CanvasObject
 	enabled   bool
+	minValue  int64
 }
 
 func (e *unlimitedEditor) object() fyne.CanvasObject { return e.box }
@@ -138,7 +166,7 @@ func (e *unlimitedEditor) store(values prefValues) error {
 		values[e.field.keys[0]] = int64(-1)
 		return nil
 	}
-	value, err := parsePrefInt(e.entry.Text, 0)
+	value, err := parsePrefInt(e.entry.Text, e.minValue)
 	if err != nil {
 		return fmt.Errorf("%s: %w, or tick Unlimited", e.field.name, err)
 	}
@@ -391,6 +419,41 @@ func (c textControl) newEditor(f *prefField) prefEditor {
 	}
 
 	return e
+}
+
+// --- IP address list ----------------------------------------------------------------
+
+// ipListControl edits a newline-separated IP list. The server drops invalid
+// entries, normalizes, sorts and de-duplicates it, so "not applied" compares
+// the lists as sets of normalized entries.
+type ipListControl struct{ textControl }
+
+func ipListField(key, label, name string) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name, control: ipListControl{textControl{multiLine: true}}}
+}
+
+func (ipListControl) equivalent(f *prefField, a, b prefValues) bool {
+	first, _ := a[f.keys[0]].(string)
+	second, _ := b[f.keys[0]].(string)
+
+	return slices.Equal(normalizeIPList(first), normalizeIPList(second))
+}
+
+func normalizeIPList(text string) []string {
+	var entries []string
+	for line := range strings.Lines(text) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if addr, err := netip.ParseAddr(line); err == nil {
+			line = addr.String()
+		}
+		entries = append(entries, line)
+	}
+	slices.Sort(entries)
+
+	return slices.Compact(entries)
 }
 
 // --- remote path ------------------------------------------------------------------

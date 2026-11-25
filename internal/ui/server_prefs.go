@@ -39,10 +39,34 @@ type prefField struct {
 	// reports and validation errors.
 	label string
 	name  string
-	// requires names boolean keys whose controls must all be on for this
-	// field to be editable (mirrors the WebUI's nested checkboxes).
-	requires []string
+	// requires lists conditions on other fields' current values that must
+	// all hold for this field to be editable (mirrors the WebUI's nested
+	// checkboxes and type-dependent inputs).
+	requires []prefCondition
 	control  prefControl
+}
+
+// prefCondition tests the value another field's editor currently holds.
+type prefCondition struct {
+	key   string
+	holds func(value any) bool
+}
+
+// on requires the checkbox for key to be ticked.
+func on(key string) prefCondition {
+	return prefCondition{key: key, holds: func(value any) bool { return value == true }}
+}
+
+// notIn requires the select for key to hold none of the given values.
+func notIn(key string, values ...any) prefCondition {
+	return prefCondition{key: key, holds: func(value any) bool {
+		for _, v := range values {
+			if value == v {
+				return false
+			}
+		}
+		return true
+	}}
 }
 
 func (f *prefField) format(values prefValues) string {
@@ -133,6 +157,7 @@ func (e *checkEditor) store(values prefValues) error {
 }
 
 func (e *checkEditor) setEnabled(enabled bool) { setWidgetEnabled(e.check, enabled) }
+func (e *checkEditor) onChange(fn func())      { e.check.OnChanged = func(bool) { fn() } }
 func (e *checkEditor) disabled() bool          { return e.check.Disabled() }
 
 // --- text entries (rate limits, times) ---------------------------------------
@@ -144,9 +169,19 @@ type entryEditor struct {
 	entry *widget.Entry
 	show  func(values prefValues) string
 	parse func(text string, values prefValues) error
+	// button is an optional action next to the entry (e.g. Random port);
+	// view then holds both.
+	button *widget.Button
+	view   fyne.CanvasObject
 }
 
-func (e *entryEditor) object() fyne.CanvasObject { return e.entry }
+func (e *entryEditor) object() fyne.CanvasObject {
+	if e.view != nil {
+		return e.view
+	}
+
+	return e.entry
+}
 
 func (e *entryEditor) load(values prefValues) { e.entry.SetText(e.show(values)) }
 
@@ -158,8 +193,13 @@ func (e *entryEditor) store(values prefValues) error {
 	return nil
 }
 
-func (e *entryEditor) setEnabled(enabled bool) { setWidgetEnabled(e.entry, enabled) }
-func (e *entryEditor) disabled() bool          { return e.entry.Disabled() }
+func (e *entryEditor) setEnabled(enabled bool) {
+	setWidgetEnabled(e.entry, enabled)
+	if e.button != nil {
+		setWidgetEnabled(e.button, enabled)
+	}
+}
+func (e *entryEditor) disabled() bool { return e.entry.Disabled() }
 
 func newEntryEditor(f *prefField, placeholder string, show func(prefValues) string, parse func(string, prefValues) error) *entryEditor {
 	return newEntryEditorFor(widget.NewEntry(), f, placeholder, show, parse)
@@ -350,6 +390,7 @@ func (e *enumEditor[T]) store(values prefValues) error {
 }
 
 func (e *enumEditor[T]) setEnabled(enabled bool) { setWidgetEnabled(e.selector, enabled) }
+func (e *enumEditor[T]) onChange(fn func())      { e.selector.OnChanged = func(string) { fn() } }
 func (e *enumEditor[T]) disabled() bool          { return e.selector.Disabled() }
 
 type disableable interface {
@@ -544,8 +585,9 @@ func (f *prefForm) sectionItems(section prefSection, supported map[*prefField]bo
 		}
 		editor := field.control.newEditor(field)
 		f.editors[field] = editor
-		if check, ok := editor.(*checkEditor); ok {
-			check.check.OnChanged = func(bool) { f.syncEnablement() }
+		// Switches (checkboxes, selects) re-evaluate dependent fields.
+		if notifier, ok := editor.(interface{ onChange(fn func()) }); ok {
+			notifier.onChange(f.syncEnablement)
 		}
 		items = append(items, widget.NewFormItem(field.label, editor.object()))
 	}
@@ -595,20 +637,22 @@ func (f *prefForm) fieldByKey(key string) *prefField {
 	return nil
 }
 
-// syncEnablement enables fields whose required switches are all on; a switch
-// this server does not report counts as on.
+// syncEnablement enables fields whose conditions all hold. A condition on a
+// field this server does not report counts as met.
 func (f *prefForm) syncEnablement() {
 	for _, field := range f.fields {
 		if len(field.requires) == 0 {
 			continue
 		}
 		enabled := true
-		for _, key := range field.requires {
-			switchField := f.fieldByKey(key)
+		for _, cond := range field.requires {
+			switchField := f.fieldByKey(cond.key)
 			if switchField == nil {
 				continue
 			}
-			if check, ok := f.editors[switchField].(*checkEditor); ok && !check.check.Checked {
+			current := prefValues{}
+			_ = f.editors[switchField].store(current) // switches always store
+			if value, ok := current[cond.key]; ok && !cond.holds(value) {
 				enabled = false
 			}
 		}

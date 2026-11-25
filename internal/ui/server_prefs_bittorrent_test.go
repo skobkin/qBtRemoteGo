@@ -22,7 +22,7 @@ func bitTorrentPrefsDoc() string {
 
 func TestUnlimitedIntControl(t *testing.T) {
 	test.NewTempApp(t)
-	field := unlimitedIntField("max_active_uploads", "Uploads", "Maximum active uploads")
+	field := unlimitedIntField("max_active_uploads", "Uploads", "Maximum active uploads", 0)
 	editor := field.control.newEditor(field).(*unlimitedEditor)
 	editor.setEnabled(true)
 
@@ -207,8 +207,8 @@ func TestNewControlFormatting(t *testing.T) {
 		values prefValues
 		want   string
 	}{
-		{unlimitedIntField("n", "", ""), prefValues{"n": int64(-1)}, "Unlimited"},
-		{unlimitedIntField("n", "", ""), prefValues{"n": int64(4)}, "4"},
+		{unlimitedIntField("n", "", "", 0), prefValues{"n": int64(-1)}, "Unlimited"},
+		{unlimitedIntField("n", "", "", 0), prefValues{"n": int64(4)}, "4"},
 		{intField("n", "", "", "KiB/s", 1), prefValues{"n": int64(5)}, "5 KiB/s"},
 		{intField("n", "", "", "", 0), prefValues{"n": int64(5)}, "5"},
 		{optionalRatioField("e", "v", "", ""), prefValues{"e": false, "v": float64(-1)}, "Off"},
@@ -310,7 +310,7 @@ func TestServerPrefTabsFollowWebUIOrder(t *testing.T) {
 	for _, tab := range serverPrefTabs(nil) {
 		titles = append(titles, tab.title)
 	}
-	if want := []string{"Downloads", "Speed", "BitTorrent"}; !reflect.DeepEqual(titles, want) {
+	if want := []string{"Downloads", "Connection", "Speed", "BitTorrent"}; !reflect.DeepEqual(titles, want) {
 		t.Fatalf("tabs = %v, want %v", titles, want)
 	}
 }
