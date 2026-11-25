@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -22,6 +24,7 @@ func newTorrentTableTestApp(t *testing.T) *application {
 		selection:    map[string]bool{},
 		detailsState: newTorrentDetailsState(),
 		rowTaps:      rowTapSequencer{interval: torrentDoubleTapInterval},
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	app.buildMainWindow()
 	// The test canvas defaults to a size that only fits a couple of rows; size

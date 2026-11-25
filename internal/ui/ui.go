@@ -1024,7 +1024,7 @@ func (a *application) openAddWindow(prefill *appcore.AddDialogPrefill) {
 	a.openAddWindowWith(prefill, addWindowOptions{})
 }
 
-func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts addWindowOptions) {
+func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts addWindowOptions) *addTorrentDialog {
 	win := a.fyApp.NewWindow("Add Torrent")
 
 	cfg := a.controller.Config()
@@ -1061,16 +1061,25 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		status.Show()
 	}
 
-	sourceSelect := widget.NewRadioGroup([]string{"Torrent file", "Magnet links"}, nil)
+	sourceSelect := widget.NewRadioGroup([]string{addSourceTorrentFile, addSourceMagnet}, nil)
 	if data.SourceType == qbt.SourceTorrentFile {
-		sourceSelect.SetSelected("Torrent file")
+		sourceSelect.SetSelected(addSourceTorrentFile)
 	} else {
-		sourceSelect.SetSelected("Magnet links")
+		sourceSelect.SetSelected(addSourceMagnet)
 	}
 
-	fileEntry := widget.NewEntry()
+	// submit is assigned below; the entries' Ctrl+Enter goes through trySubmit,
+	// which respects the disabled state.
+	var submit *widget.Button
+	trySubmit := func() {
+		if submit != nil && !submit.Disabled() {
+			submit.OnTapped()
+		}
+	}
+	closeWindow := func() { win.Close() }
+	fileEntry := newSubmitEntry(false, trySubmit, closeWindow)
 	fileEntry.SetText(data.TorrentFilePath)
-	magnetEntry := widget.NewMultiLineEntry()
+	magnetEntry := newSubmitEntry(true, trySubmit, closeWindow)
 	magnetEntry.SetMinRowsVisible(4)
 	magnetEntry.SetText(data.MagnetText)
 	sourceContainer := container.NewStack()
@@ -1123,7 +1132,7 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 	})
 
 	updateSource := func(selected string) {
-		if selected == "Torrent file" {
+		if selected == addSourceTorrentFile {
 			sourceContainer.Objects = []fyne.CanvasObject{
 				container.NewBorder(nil, nil, nil, browseButton, fileEntry),
 			}
@@ -1134,8 +1143,6 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		}
 		sourceContainer.Refresh()
 	}
-	sourceSelect.OnChanged = updateSource
-	updateSource(sourceSelect.Selected)
 
 	basicItems, advancedItems := buildAddTorrentFormSections(addTorrentFormControls{
 		sourceSelect:       sourceSelect,
@@ -1163,7 +1170,7 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		advancedAccordion,
 	)
 
-	var submit *widget.Button
+	var syncSubmit func()
 	submit = widget.NewButton("Add", func() {
 		data.TorrentFilePath = fileEntry.Text
 		data.MagnetText = magnetEntry.Text
@@ -1187,7 +1194,7 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		go func() {
 			err := a.controller.AddTorrent(context.Background(), data)
 			fyne.Do(func() {
-				submit.Enable()
+				syncSubmit()
 				if err != nil {
 					setStatus("Add torrent failed: " + err.Error())
 					return
@@ -1199,13 +1206,40 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		}()
 	})
 
-	cancel := widget.NewButton("Cancel", func() {
-		win.Close()
+	submit.Importance = widget.HighImportance
+	cancel := widget.NewButton("Cancel", closeWindow)
+	buttons := container.NewHBox(layout.NewSpacer(), cancel, submit)
+
+	// The Add button stays disabled until the active source has content.
+	syncSubmit = func() {
+		if addSourceReady(sourceSelect.Selected != addSourceTorrentFile, magnetEntry.Text, fileEntry.Text) {
+			submit.Enable()
+		} else {
+			submit.Disable()
+		}
+	}
+	magnetEntry.OnChanged = func(string) { syncSubmit() }
+	fileEntry.OnChanged = func(string) { syncSubmit() }
+	sourceSelect.OnChanged = func(selected string) {
+		updateSource(selected)
+		syncSubmit()
+	}
+	updateSource(sourceSelect.Selected)
+	syncSubmit()
+
+	// Window-level keys apply when no entry has focus.
+	win.Canvas().SetOnTypedKey(func(event *fyne.KeyEvent) {
+		if event.Name == fyne.KeyEscape {
+			closeWindow()
+		}
+	})
+	win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierShortcutDefault}, func(fyne.Shortcut) {
+		trySubmit()
 	})
 
 	content := container.NewBorder(
 		nil,
-		container.NewVBox(status, container.NewHBox(layout.NewSpacer(), submit, cancel)),
+		container.NewVBox(status, buttons),
 		nil,
 		nil,
 		container.NewVScroll(formContent),
@@ -1235,6 +1269,15 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 	if opts.browse {
 		browseButton.OnTapped()
 	}
+	dlg := &addTorrentDialog{
+		win:          win,
+		sourceSelect: sourceSelect,
+		magnetEntry:  magnetEntry,
+		fileEntry:    fileEntry,
+		submit:       submit,
+		cancel:       cancel,
+		buttons:      buttons,
+	}
 
 	if shouldFetchDefaultSavePath {
 		go func() {
@@ -1254,6 +1297,8 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 			})
 		}()
 	}
+
+	return dlg
 }
 
 func initialAddDialogSavePath(cfg config.UIConfig) (string, bool) {
