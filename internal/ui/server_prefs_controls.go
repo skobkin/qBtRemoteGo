@@ -61,6 +61,12 @@ func intField(key, label, name, unit string, minValue int64) *prefField {
 	return &prefField{keys: []string{key}, label: label, name: name, control: intControl{unit: unit, minValue: minValue}}
 }
 
+// intRangeField edits a whole number from minValue to maxValue.
+func intRangeField(key, label, name, unit string, minValue, maxValue int64) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name,
+		control: intControl{unit: unit, minValue: minValue, maxValue: maxValue}}
+}
+
 // portField edits a TCP/UDP port (0-65535); random adds a button picking a
 // port from 1024-65535, like the WebUI.
 func portField(key, label, name string, random bool) *prefField {

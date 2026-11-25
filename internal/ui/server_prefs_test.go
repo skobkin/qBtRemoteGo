@@ -272,7 +272,7 @@ func TestPrefFormShowsPlaceholderForUnsupportedTab(t *testing.T) {
 	if len(form.fields) != 0 {
 		t.Fatalf("fields = %v", fieldNames(form.fields))
 	}
-	if len(form.tabs.Items) != len(serverPrefTabs(nil)) || form.tabs.Items[0].Text != "Downloads" {
+	if len(form.tabs.Items) != len(serverPrefTabs(nil)) || form.tabs.Items[0].Text != "Behavior" {
 		t.Fatalf("tabs = %d", len(form.tabs.Items))
 	}
 	for _, item := range form.tabs.Items {

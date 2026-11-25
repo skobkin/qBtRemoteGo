@@ -7,7 +7,10 @@ package ui
 // serverPrefTabs lists the implemented tabs in WebUI order. dirs suggests
 // directories on the server for path fields (nil disables suggestions).
 func serverPrefTabs(dirs autocompleteFetcher) []prefTab {
-	return []prefTab{downloadsPrefTab(dirs), connectionPrefTab(dirs), speedPrefTab(), bitTorrentPrefTab()}
+	return []prefTab{
+		behaviorPrefTab(dirs), downloadsPrefTab(dirs), connectionPrefTab(dirs),
+		speedPrefTab(), bitTorrentPrefTab(), rssPrefTab(),
+	}
 }
 
 // requiring makes field editable only while all the given checkboxes are on.
@@ -280,6 +283,68 @@ func connectionPrefTab(dirs autocompleteFetcher) prefTab {
 			requiring(pathField("ip_filter_path", "Filter path (.dat, .p2p, .p2b)", "IP filter path", dirs), ipFilter),
 			checkField("ip_filter_trackers", "Apply to trackers", "IP filter for trackers"),
 			ipListField("banned_IPs", "Manually banned IP addresses", "Banned IP addresses"),
+		}},
+	}}
+}
+
+func logAgeUnitOptions() []prefOption[int64] {
+	return []prefOption[int64]{{0, "days"}, {1, "months"}, {2, "years"}}
+}
+
+// behaviorPrefTab mirrors the server-side part of the WebUI Behavior tab;
+// browser-only settings (color scheme, density, double-click actions...)
+// are not in the API.
+func behaviorPrefTab(dirs autocompleteFetcher) prefTab {
+	const (
+		searchJobs = "store_search_jobs"
+		fileLog    = "file_log_enabled"
+		logBackup  = "file_log_backup_enabled"
+		logDelete  = "file_log_delete_old"
+	)
+
+	return prefTab{title: "Behavior", sections: []prefSection{
+		{title: "Localization", hint: "Language code of the WebUI and the server's messages, e.g. en, ru or zh_CN.", fields: []*prefField{
+			textField("locale", "User interface language", "Interface language"),
+		}},
+		{title: "Transfer List", hint: "Applies to WebUI clients.", fields: []*prefField{
+			checkField("confirm_torrent_deletion", "Confirm when deleting torrents", "Confirm torrent deletion"),
+		}},
+		{title: "Status bar", hint: "Applies to WebUI clients.", fields: []*prefField{
+			checkField("status_bar_external_ip", "Show external IP", "Show external IP in status bar"),
+		}},
+		{title: "Search", fields: []*prefField{
+			checkField(searchJobs, "Save search tabs", "Save search tabs"),
+			requiring(checkField("store_search_job_results", "Also save search results", "Save search results"), searchJobs),
+		}},
+		{title: "Log Files", fields: []*prefField{
+			checkField(fileLog, "Write a log file", "Log file"),
+			requiring(pathField("file_log_path", "Save path", "Log file folder", dirs), fileLog),
+			requiring(checkField(logBackup, "Back up the log file when it grows", "Back up log file"), fileLog),
+			requiring(intRangeField("file_log_max_size", "Backup after (KiB)", "Log backup size", "KiB", 1, 1024000), fileLog, logBackup),
+			requiring(checkField(logDelete, "Delete old backup logs", "Delete old log backups"), fileLog),
+			requiring(intRangeField("file_log_age", "Delete backups older than", "Log backup age", "", 1, 365), fileLog, logDelete),
+			requiring(enumField("file_log_age_type", "Age unit", "Log backup age unit", logAgeUnitOptions()), fileLog, logDelete),
+			checkField("performance_warning", "Log performance warnings", "Log performance warnings"),
+		}},
+	}}
+}
+
+// rssPrefTab mirrors the WebUI RSS tab; the auto-downloading rule editor is
+// not part of the preferences.
+func rssPrefTab() prefTab {
+	return prefTab{title: "RSS", sections: []prefSection{
+		{title: "RSS Reader", fields: []*prefField{
+			checkField("rss_processing_enabled", "Enable fetching RSS feeds", "Fetch RSS feeds"),
+			intField("rss_refresh_interval", "Feeds refresh interval (min)", "RSS refresh interval", "min", 1),
+			intField("rss_fetch_delay", "Same host request delay (s)", "RSS same host delay", "s", 0),
+			intField("rss_max_articles_per_feed", "Maximum number of articles per feed", "RSS articles per feed", "", 0),
+		}},
+		{title: "RSS Torrent Auto Downloader", fields: []*prefField{
+			checkField("rss_auto_downloading_enabled", "Enable auto downloading of RSS torrents", "RSS auto downloading"),
+		}},
+		{title: "RSS Smart Episode Filter", hint: "Filters: one regular expression per line.", fields: []*prefField{
+			checkField("rss_download_repack_proper_episodes", "Download REPACK/PROPER episodes", "Download REPACK/PROPER episodes"),
+			textAreaField("rss_smart_episode_filters", "Filters", "Smart episode filters"),
 		}},
 	}}
 }
