@@ -8,6 +8,7 @@
 - `internal/config`: config schema, defaults, normalization, and load/save helpers.
 - `internal/platform`: OS-specific magnet handler, `.torrent` handler, and autostart integration.
 - `internal/resources/assets`: packaged SVG assets used by the GUI and release icon generation.
+- `docs/qbittorrent/`: cached qBittorrent WebAPI reference (OpenAPI, derived from the qBittorrent source of the named release; the source wins over the official wiki). Consult it before changing `internal/qbt`, and update it when the client starts using new endpoints or keys.
 - `.golangci.yml`, `.goreleaser.yml`, `.woodpecker/ci.yaml`, and `docs/windows.md`: CI/release files that should stay aligned with code and asset changes.
 
 ## Build, Test, and Development Commands

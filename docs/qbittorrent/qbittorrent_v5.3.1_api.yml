@@ -1,0 +1,1105 @@
+openapi: 3.1.0
+info:
+  title: qBittorrent WebUI API (as used by qBtRemoteGo)
+  version: "2.16.2"
+  description: |
+    Reference for the qBittorrent WebAPI **2.16.2** (qBittorrent **5.3.1**), cached for
+    qBtRemoteGo development.
+
+    **Source of truth:** the qBittorrent source at tag `release-5.3.1`, mainly
+    `src/webui/api/*controller.cpp`, `src/webui/api/serialize/`, `src/webui/webapplication.{h,cpp}`
+    and `WebAPI_Changelog.md`. The official wiki page
+    (https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-5.0)) was used as a
+    secondary reference for wording only. Where the wiki deviates from the source, this
+    file describes the source; deviations are marked with `# wiki deviation:` comments.
+
+    **Scope:** the endpoints qBtRemoteGo calls (`internal/qbt/client.go`) plus the
+    complete application preferences schema. Endpoints are added here when the app
+    starts using them.
+
+    **Updating for a new qBittorrent release:**
+    1. Read `WebAPI_Changelog.md` entries newer than the version above.
+    2. Re-read `AppController::preferencesAction()` / `setPreferencesAction()` in
+       `src/webui/api/appcontroller.cpp` and diff the key lists against `Preferences`.
+    3. Check `src/webui/webapplication.h` for HTTP method restrictions of used endpoints.
+    4. Update `info.version`, the file name and the `x-since` markers.
+
+    **Conventions used here:**
+    - `x-webui`: where the key appears in the WebUI Options window
+      (`Tab › Section › Label`). `(not shown)` = no WebUI control.
+    - `x-unit`: unit on the wire. `x-webui-unit`: unit the WebUI shows when it differs
+      (the WebUI converts).
+    - `x-requires-restart`: the server applies the value only after restart.
+    - `x-enum-names`: meaning of integer enum values, in `enum` order.
+    - `x-since`: WebAPI version that added the key, when known.
+
+    **Transport and errors:**
+    - Base path `/api/v2/<controller>/<action>`.
+    - Actions restricted to POST in `webapplication.h` return **405** on GET. Every other
+      action accepts GET or POST. qBtRemoteGo uses GET for reads and POST for writes.
+    - API errors map to: BadParams 400, Unauthorized 401, AccessDenied 403, NotFound 404,
+      Conflict 409, BadData 415. The error body is plain text.
+    - Unauthenticated requests get 403. API-key requests to `auth/*` also get 403.
+
+    **`app/setPreferences` semantics** (important for clients):
+    - The body is form field `json` = a JSON object holding only the keys to change.
+    - Keys are applied one by one in source order; unknown keys are silently ignored.
+    - **Not atomic.** `web_ui_username` and `web_ui_password` validation throws 400 midway;
+      keys applied before the error stay applied (in memory and in the session, while
+      `pref->apply()` is skipped). Always re-read the preferences after an error.
+    - **Paired keys.** `schedule_from_hour` + `schedule_from_min` (and the `_to_` pair) are
+      applied only when **both** keys of the pair are present in the same request.
+    - **Coupled keys.** `random_port: true` wins over `listen_port`. `max_*_enabled: false`
+      wins over the matching value key.
+    - The server normalises some values (e.g. speed limits are stored in whole KiB), so a
+      re-read can differ from what was sent.
+    - There is no revision/ETag. Concurrent edits can only be detected by re-reading.
+servers:
+  - url: "{baseUrl}/api/v2"
+    variables:
+      baseUrl:
+        default: http://localhost:8080
+security:
+  - cookieSession: []
+  - apiKey: []
+tags:
+  - name: auth
+  - name: app
+  - name: sync
+  - name: transfer
+  - name: torrents
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Start a cookie session
+      description: |
+        POST only. Sets the session cookie `QBT_SID_<webui port>`.
+        CSRF protection requires `Referer`/`Origin` to match `Host` (not checked for
+        API-key requests). If a session already exists, the call succeeds immediately.
+        # wiki deviation: the wiki says cookie name `SID` and failed login = 200 "Fails.";
+        # 5.3.1 uses `QBT_SID_<port>` and failed login = 401.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: {type: string}
+                password: {type: string}
+      responses:
+        "200": {description: Logged in (or already logged in).}
+        "401": {description: Wrong credentials.}
+        "403": {description: Client IP banned after too many failed attempts.}
+
+  /app/version:
+    get:
+      tags: [app]
+      summary: qBittorrent version
+      responses:
+        "200":
+          description: Plain text, e.g. `v5.3.1`.
+          content: {text/plain: {schema: {type: string}}}
+
+  /app/defaultSavePath:
+    get:
+      tags: [app]
+      summary: Default save path (server filesystem)
+      responses:
+        "200":
+          description: Plain text path.
+          content: {text/plain: {schema: {type: string}}}
+
+  /app/getDirectoryContent:
+    get:
+      tags: [app]
+      summary: List a directory on the server
+      description: Used for remote path autocomplete. # wiki deviation: not documented in the wiki.
+      parameters:
+        - {name: dirPath, in: query, required: true, schema: {type: string}, description: Absolute path on the server.}
+        - {name: mode, in: query, schema: {type: string, enum: [all, dirs, files], default: all}}
+        - {name: withMetadata, in: query, schema: {type: boolean, default: false}, description: Return objects (name, dates, size…) instead of plain paths.}
+      responses:
+        "200":
+          description: Array of absolute paths (strings), or metadata objects with `withMetadata`.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {type: string}
+        "400": {description: Invalid directory path or mode.}
+        "404": {description: Directory does not exist.}
+
+  /app/preferences:
+    get:
+      tags: [app]
+      summary: Read all application preferences
+      description: |
+        Returns every key in `Preferences` (unlike the wiki's claim, 5.3.1 always returns the
+        full set). Secrets such as `proxy_password`, `mail_notification_password`,
+        `dyndns_password` and `web_ui_api_key` are returned in clear text; `web_ui_password`
+        is never returned.
+      responses:
+        "200":
+          description: Preferences object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Preferences"}
+
+  /app/setPreferences:
+    post:
+      tags: [app]
+      summary: Change application preferences
+      description: POST only. See `info.description` for the non-atomic semantics.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [json]
+              properties:
+                json:
+                  type: string
+                  description: JSON object with the subset of `Preferences` keys to change.
+                  example: '{"dl_limit":1048576,"scheduler_enabled":true}'
+      responses:
+        "200": {description: Applied (unknown keys ignored). Empty body.}
+        "400": {description: A validated key was rejected (plain-text reason). Earlier keys are already applied.}
+
+  /sync/maindata:
+    get:
+      tags: [sync]
+      summary: Incremental snapshot of torrents, categories, tags and server state
+      parameters:
+        - {name: rid, in: query, schema: {type: integer, default: 0}, description: Last response id; 0 = full update.}
+      responses:
+        "200":
+          description: Main data.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MainData"}
+
+  /sync/torrentPeers:
+    get:
+      tags: [sync]
+      summary: Incremental peer list of one torrent
+      parameters:
+        - {name: hash, in: query, required: true, schema: {type: string}}
+        - {name: rid, in: query, schema: {type: integer, default: 0}}
+      responses:
+        "200":
+          description: |
+            Object with `rid`, `full_update`, `show_flags`, `peers` (map "ip:port" → Peer) and
+            `peers_removed` (array of keys).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TorrentPeers"}
+        "404": {description: Torrent not found.}
+
+  /transfer/info:
+    get:
+      tags: [transfer]
+      summary: Global transfer info
+      responses:
+        "200":
+          description: Transfer info.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TransferInfo"}
+
+  /transfer/toggleSpeedLimitsMode:
+    post:
+      tags: [transfer]
+      summary: Toggle alternative ("slow mode") speed limits
+      description: POST only.
+      responses:
+        "200": {description: Toggled.}
+
+  /torrents/info:
+    get:
+      tags: [torrents]
+      summary: List torrents
+      parameters:
+        - {name: filter, in: query, schema: {type: string, enum: [all, downloading, seeding, completed, stopped, running, active, inactive, stalled, stalled_uploading, stalled_downloading, checking, moving, errored]}}
+        - {name: category, in: query, schema: {type: string}, description: Empty string = uncategorised; absent = any.}
+        - {name: tag, in: query, schema: {type: string}, description: Empty string = untagged; absent = any.}
+        - {name: sort, in: query, schema: {type: string}, description: Any Torrent field name; 400 if invalid.}
+        - {name: reverse, in: query, schema: {type: boolean}}
+        - {name: limit, in: query, schema: {type: integer}}
+        - {name: offset, in: query, schema: {type: integer}}
+        - {name: hashes, in: query, schema: {type: string}, description: "`|`-separated."}
+        - {name: private, in: query, schema: {type: boolean}}
+        - {name: includeFiles, in: query, schema: {type: boolean}}
+        - {name: includeTrackers, in: query, schema: {type: boolean}}
+      responses:
+        "200":
+          description: Torrents.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Torrent"}
+        "400": {description: Invalid sort parameter.}
+
+  /torrents/properties:
+    get:
+      tags: [torrents]
+      summary: Generic properties of one torrent
+      parameters:
+        - {name: hash, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Properties.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TorrentProperties"}
+        "404": {description: Torrent not found.}
+
+  /torrents/trackers:
+    get:
+      tags: [torrents]
+      summary: Trackers of one torrent (first three rows are DHT, PeX, LSD pseudo-trackers)
+      parameters:
+        - {name: hash, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Trackers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Tracker"}
+        "404": {description: Torrent not found.}
+
+  /torrents/webseeds:
+    get:
+      tags: [torrents]
+      summary: Web seeds of one torrent
+      parameters:
+        - {name: hash, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Web seeds.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    url: {type: string}
+        "404": {description: Torrent not found.}
+
+  /torrents/files:
+    get:
+      tags: [torrents]
+      summary: Files of one torrent
+      parameters:
+        - {name: hash, in: query, required: true, schema: {type: string}}
+        - {name: indexes, in: query, schema: {type: string}, description: "`|`-separated file indexes."}
+      responses:
+        "200":
+          description: Files; an empty array when metadata is not available yet.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/TorrentFile"}
+        "404": {description: Torrent not found.}
+        "409": {description: Invalid or out-of-bounds index.}
+
+  /torrents/categories:
+    get:
+      tags: [torrents]
+      summary: All categories
+      responses:
+        "200":
+          description: Map of category name → Category.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {$ref: "#/components/schemas/Category"}
+
+  /torrents/tags:
+    get:
+      tags: [torrents]
+      summary: All tags
+      responses:
+        "200":
+          description: Tag names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {type: string}
+
+  /torrents/add:
+    post:
+      tags: [torrents]
+      summary: Add torrents from URLs/magnets and/or .torrent files
+      description: POST only, `multipart/form-data`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                urls: {type: string, description: Newline-separated URLs / magnet links.}
+                torrents: {type: string, format: binary, description: .torrent file content; may repeat.}
+                savepath: {type: string}
+                downloadPath: {type: string}
+                useDownloadPath: {type: boolean}
+                category: {type: string}
+                tags: {type: string, description: Comma-separated.}
+                rename: {type: string}
+                upLimit: {type: integer, x-unit: bytes/s}
+                dlLimit: {type: integer, x-unit: bytes/s}
+                ratioLimit: {type: number}
+                seedingTimeLimit: {type: integer, x-unit: minutes}
+                inactiveSeedingTimeLimit: {type: integer, x-unit: minutes}
+                shareLimitAction: {type: string, enum: [Default, Stop, Remove, RemoveWithContent, EnableSuperSeeding]}
+                shareLimitsMode: {type: string, enum: [Default, MatchAny, MatchAll]}
+                autoTMM: {type: boolean}
+                stopped: {type: boolean, description: "# wiki deviation: the wiki names it `paused`."}
+                stopCondition: {type: string, enum: [None, MetadataReceived, FilesChecked]}
+                contentLayout: {type: string, enum: [Original, Subfolder, NoSubfolder], description: "# wiki deviation: replaces `root_folder`."}
+                addToTopOfQueue: {type: boolean}
+                forced: {type: boolean}
+                seedMode: {type: boolean, description: Skip hash checking.}
+                sequentialDownload: {type: boolean}
+                firstLastPiecePrio: {type: boolean}
+                filePriorities: {type: string, description: Comma-separated priorities; single magnet with known metadata only.}
+      responses:
+        "200":
+          description: |
+            JSON result. # wiki deviation: the wiki says plain "Ok."/"Fails."; 5.3.1 returns an object.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success_count: {type: integer}
+                  failure_count: {type: integer}
+                  pending_count: {type: integer}
+                  added_torrent_ids: {type: array, items: {type: string}}
+        "202": {description: Some torrents are still pending (metadata download); same body.}
+        "400": {description: Invalid parameter.}
+        "409": {description: Nothing could be added.}
+        "415": {description: Not a valid torrent file.}
+
+  /torrents/delete:
+    post:
+      tags: [torrents]
+      summary: Remove torrents
+      description: POST only.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [hashes, deleteFiles]
+              properties:
+                hashes: {type: string, description: "`|`-separated or `all`."}
+                deleteFiles: {type: boolean}
+      responses:
+        "200": {description: Removed.}
+
+  /torrents/start:
+    post:
+      tags: [torrents]
+      summary: Start (resume) torrents
+      description: "POST only. # wiki deviation: older wiki/API names this `resume`."
+      requestBody: {$ref: "#/components/requestBodies/Hashes"}
+      responses:
+        "200": {description: Started.}
+
+  /torrents/stop:
+    post:
+      tags: [torrents]
+      summary: Stop (pause) torrents
+      description: "POST only. # wiki deviation: older wiki/API names this `pause`."
+      requestBody: {$ref: "#/components/requestBodies/Hashes"}
+      responses:
+        "200": {description: Stopped.}
+
+  /torrents/recheck:
+    post:
+      tags: [torrents]
+      summary: Force recheck
+      description: POST only.
+      requestBody: {$ref: "#/components/requestBodies/Hashes"}
+      responses:
+        "200": {description: Queued.}
+
+  /torrents/reannounce:
+    post:
+      tags: [torrents]
+      summary: Force reannounce
+      description: POST only. Optional `urls` (`|`-separated) restricts it to specific trackers.
+      requestBody: {$ref: "#/components/requestBodies/Hashes"}
+      responses:
+        "200": {description: Reannounced.}
+
+  /torrents/setLocation:
+    post:
+      tags: [torrents]
+      summary: Move torrents to another save path (server filesystem)
+      description: POST only.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [hashes, location]
+              properties:
+                hashes: {type: string}
+                location: {type: string, description: Created if missing.}
+      responses:
+        "200": {description: Moving.}
+        "400": {description: Empty save path.}
+        "409": {description: Cannot create the directory.}
+
+  /torrents/rename:
+    post:
+      tags: [torrents]
+      summary: Rename a torrent
+      description: POST only.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [hash, name]
+              properties:
+                hash: {type: string}
+                name: {type: string}
+      responses:
+        "200": {description: Renamed.}
+        "404": {description: Torrent not found.}
+        "409": {description: Empty/incorrect name.}
+
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: QBT_SID_8080
+      description: Session cookie from `auth/login`; the name is `QBT_SID_<webui port>`.
+    apiKey:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer qbt_…` (WebUI API key, `web_ui_api_key`). There are no scopes:
+        a key session has full access, the same as a logged-in user. CSRF checks are skipped.
+        # wiki deviation: API keys are not documented in the 5.0 wiki.
+
+  requestBodies:
+    Hashes:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required: [hashes]
+            properties:
+              hashes: {type: string, description: "`|`-separated hashes or `all`."}
+
+  schemas:
+    Category:
+      type: object
+      properties:
+        name: {type: string}
+        savePath: {type: string}
+        downloadPath: {description: "Path string when the category overrides it, `false` when explicitly disabled, `null` when it follows the global setting."}
+
+    TransferInfo:
+      type: object
+      properties:
+        dl_info_speed: {type: integer, x-unit: bytes/s}
+        dl_info_data: {type: integer, x-unit: bytes, description: Downloaded this session.}
+        up_info_speed: {type: integer, x-unit: bytes/s}
+        up_info_data: {type: integer, x-unit: bytes}
+        dl_rate_limit: {type: integer, x-unit: bytes/s, description: Currently effective limit; 0 = unlimited.}
+        up_rate_limit: {type: integer, x-unit: bytes/s}
+        dht_nodes: {type: integer}
+        connection_status: {type: string, enum: [connected, firewalled, disconnected]}
+
+    ServerState:
+      description: "`server_state` of sync/maindata. Incremental: only changed keys after the first response."
+      type: object
+      properties:
+        dl_info_speed: {type: integer, x-unit: bytes/s}
+        dl_info_data: {type: integer, x-unit: bytes}
+        up_info_speed: {type: integer, x-unit: bytes/s}
+        up_info_data: {type: integer, x-unit: bytes}
+        dl_rate_limit: {type: integer, x-unit: bytes/s}
+        up_rate_limit: {type: integer, x-unit: bytes/s}
+        dht_nodes: {type: integer}
+        connection_status: {type: string, enum: [connected, firewalled, disconnected]}
+        free_space_on_disk: {type: integer, x-unit: bytes, description: Free space at the default save path.}
+        use_alt_speed_limits: {type: boolean}
+        queueing: {type: boolean}
+        refresh_interval: {type: integer, x-unit: ms}
+        alltime_dl: {type: integer, x-unit: bytes}
+        alltime_ul: {type: integer, x-unit: bytes}
+        total_wasted_session: {type: integer, x-unit: bytes}
+        global_ratio: {type: string}
+        total_peer_connections: {type: integer}
+        queued_io_jobs: {type: integer}
+        average_time_queue: {type: integer, x-unit: ms}
+        total_buffers_size: {type: integer, x-unit: bytes}
+        total_queued_size: {type: integer, x-unit: bytes}
+        read_cache_hits: {type: string}
+        read_cache_overload: {type: string}
+        write_cache_overload: {type: string}
+        queued_tracker_announces: {type: integer}
+        last_external_address_v4: {type: string}
+        last_external_address_v6: {type: string}
+
+    MainData:
+      type: object
+      properties:
+        rid: {type: integer}
+        full_update: {type: boolean}
+        torrents: {type: object, additionalProperties: {$ref: "#/components/schemas/Torrent"}, description: hash → (partial) Torrent.}
+        torrents_removed: {type: array, items: {type: string}}
+        categories: {type: object, additionalProperties: {$ref: "#/components/schemas/Category"}}
+        categories_removed: {type: array, items: {type: string}}
+        tags: {type: array, items: {type: string}}
+        tags_removed: {type: array, items: {type: string}}
+        trackers: {type: object, additionalProperties: {type: array, items: {type: string}}, description: tracker URL → hashes.}
+        trackers_removed: {type: array, items: {type: string}}
+        server_state: {$ref: "#/components/schemas/ServerState"}
+
+    TorrentPeers:
+      type: object
+      properties:
+        rid: {type: integer}
+        full_update: {type: boolean}
+        show_flags: {type: boolean}
+        peers:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              ip: {type: string}
+              port: {type: integer}
+              client: {type: string}
+              peer_id_client: {type: string}
+              connection: {type: string}
+              country: {type: string}
+              country_code: {type: string}
+              flags: {type: string}
+              flags_desc: {type: string}
+              host_name: {type: string}
+              progress: {type: number, description: 0..1}
+              dl_speed: {type: integer, x-unit: bytes/s}
+              up_speed: {type: integer, x-unit: bytes/s}
+              downloaded: {type: integer, x-unit: bytes}
+              uploaded: {type: integer, x-unit: bytes}
+              relevance: {type: number}
+              files: {type: string}
+        peers_removed: {type: array, items: {type: string}}
+
+    Torrent:
+      type: object
+      properties:
+        hash: {type: string, description: Torrent ID (v1 hash, or truncated v2 for v2-only torrents).}
+        infohash_v1: {type: string}
+        infohash_v2: {type: string}
+        name: {type: string}
+        has_metadata: {type: boolean}
+        private: {type: [boolean, "null"], description: "null without metadata. # wiki deviation: the wiki names it `isPrivate`."}
+        created_by: {type: string}
+        creation_date: {type: integer, x-unit: unix seconds}
+        comment: {type: string}
+        magnet_uri: {type: string}
+        size: {type: integer, x-unit: bytes, description: Selected files.}
+        total_size: {type: integer, x-unit: bytes, description: All files.}
+        pieces_num: {type: integer}
+        piece_size: {type: integer, x-unit: bytes}
+        pieces_have: {type: integer}
+        progress: {type: number, description: 0..1}
+        total_wasted: {type: integer, x-unit: bytes}
+        dlspeed: {type: integer, x-unit: bytes/s}
+        upspeed: {type: integer, x-unit: bytes/s}
+        priority: {type: integer, description: Queue position (1-based); 0 when not queued.}
+        num_seeds: {type: integer}
+        num_complete: {type: integer}
+        num_leechs: {type: integer}
+        num_incomplete: {type: integer}
+        ratio: {type: number, description: Capped at 9999 (shown as ∞).}
+        popularity: {type: number}
+        eta: {type: integer, x-unit: seconds, description: 8640000 = infinity.}
+        state:
+          type: string
+          # wiki deviation: 5.x renamed pausedUP/pausedDL to stoppedUP/stoppedDL and added forcedMetaDL.
+          enum: [error, missingFiles, uploading, stoppedUP, queuedUP, stalledUP, checkingUP, forcedUP, downloading, metaDL, forcedMetaDL, stoppedDL, queuedDL, stalledDL, checkingDL, forcedDL, checkingResumeData, moving, unknown]
+        seq_dl: {type: boolean}
+        f_l_piece_prio: {type: boolean}
+        category: {type: string}
+        tags: {type: string, description: "Tags joined with \", \"."}
+        super_seeding: {type: boolean}
+        force_start: {type: boolean}
+        save_path: {type: string}
+        download_path: {type: string}
+        content_path: {type: string}
+        root_path: {type: string}
+        added_on: {type: integer, x-unit: unix seconds}
+        completion_on: {type: integer, x-unit: unix seconds}
+        tracker: {type: string, description: Current tracker URL.}
+        trackers_count: {type: integer}
+        dl_limit: {type: integer, x-unit: bytes/s}
+        up_limit: {type: integer, x-unit: bytes/s}
+        downloaded: {type: integer, x-unit: bytes}
+        uploaded: {type: integer, x-unit: bytes}
+        downloaded_session: {type: integer, x-unit: bytes}
+        uploaded_session: {type: integer, x-unit: bytes}
+        amount_left: {type: integer, x-unit: bytes}
+        completed: {type: integer, x-unit: bytes}
+        connections_count: {type: integer}
+        connections_limit: {type: integer}
+        max_ratio: {type: number, description: Effective ratio limit.}
+        max_seeding_time: {type: integer, x-unit: minutes}
+        max_inactive_seeding_time: {type: integer, x-unit: minutes}
+        ratio_limit: {type: number, description: Per-torrent setting; -2 = global, -1 = none.}
+        seeding_time_limit: {type: integer, x-unit: minutes}
+        inactive_seeding_time_limit: {type: integer, x-unit: minutes}
+        share_limits_mode: {type: string, enum: [Default, MatchAny, MatchAll]}
+        share_limit_action: {type: string, enum: [Default, Stop, Remove, RemoveWithContent, EnableSuperSeeding]}
+        seen_complete: {type: integer, x-unit: unix seconds}
+        last_activity: {type: integer, x-unit: unix seconds}
+        auto_tmm: {type: boolean}
+        time_active: {type: integer, x-unit: seconds}
+        seeding_time: {type: integer, x-unit: seconds}
+        availability: {type: number}
+        reannounce: {type: integer, x-unit: seconds}
+
+    TorrentProperties:
+      type: object
+      description: -1 marks unknown integer values.
+      properties:
+        hash: {type: string}
+        infohash_v1: {type: string}
+        infohash_v2: {type: string}
+        name: {type: string}
+        save_path: {type: string}
+        download_path: {type: string}
+        creation_date: {type: integer, x-unit: unix seconds}
+        addition_date: {type: integer, x-unit: unix seconds}
+        completion_date: {type: integer, x-unit: unix seconds}
+        last_seen: {type: integer, x-unit: unix seconds}
+        created_by: {type: string}
+        comment: {type: string}
+        piece_size: {type: integer, x-unit: bytes}
+        pieces_num: {type: integer}
+        pieces_have: {type: integer}
+        total_size: {type: integer, x-unit: bytes}
+        total_wasted: {type: integer, x-unit: bytes}
+        total_uploaded: {type: integer, x-unit: bytes}
+        total_uploaded_session: {type: integer, x-unit: bytes}
+        total_downloaded: {type: integer, x-unit: bytes}
+        total_downloaded_session: {type: integer, x-unit: bytes}
+        up_limit: {type: integer, x-unit: bytes/s}
+        dl_limit: {type: integer, x-unit: bytes/s}
+        up_speed: {type: integer, x-unit: bytes/s}
+        up_speed_avg: {type: integer, x-unit: bytes/s}
+        dl_speed: {type: integer, x-unit: bytes/s}
+        dl_speed_avg: {type: integer, x-unit: bytes/s}
+        time_elapsed: {type: integer, x-unit: seconds}
+        seeding_time: {type: integer, x-unit: seconds}
+        eta: {type: integer, x-unit: seconds}
+        nb_connections: {type: integer}
+        nb_connections_limit: {type: integer}
+        seeds: {type: integer}
+        seeds_total: {type: integer}
+        peers: {type: integer}
+        peers_total: {type: integer}
+        share_ratio: {type: number}
+        popularity: {type: number}
+        reannounce: {type: integer, x-unit: seconds}
+        progress: {type: number}
+        has_metadata: {type: boolean}
+        is_private: {type: boolean, description: "Deprecated alias of `private`. # wiki deviation: the wiki says `isPrivate`."}
+        private: {type: [boolean, "null"]}
+
+    Tracker:
+      type: object
+      properties:
+        url: {type: string, description: "Pseudo rows use `** [DHT] **`, `** [PeX] **`, `** [LSD] **`."}
+        status:
+          type: integer
+          # wiki deviation: the wiki lists 3 = updating; 5.x uses the separate `updating` flag and adds 5/6.
+          enum: [0, 1, 2, 4, 5, 6]
+          x-enum-names: [Disabled (DHT/PeX/LSD off or private), Not contacted, Working, Not working, Tracker error, Unreachable]
+        updating: {type: boolean}
+        tier: {type: integer, description: -1 for pseudo rows.}
+        msg: {type: string}
+        num_peers: {type: integer}
+        num_seeds: {type: integer}
+        num_leeches: {type: integer}
+        num_downloaded: {type: integer}
+        next_announce: {type: integer, x-unit: seconds}
+        min_announce: {type: integer, x-unit: seconds}
+        endpoints:
+          type: array
+          description: Per local endpoint and BitTorrent version.
+          items:
+            type: object
+            properties:
+              name: {type: string}
+              bt_version: {type: integer}
+              status: {type: integer}
+              updating: {type: boolean}
+              msg: {type: string}
+              num_peers: {type: integer}
+              num_seeds: {type: integer}
+              num_leeches: {type: integer}
+              num_downloaded: {type: integer}
+              next_announce: {type: integer}
+              min_announce: {type: integer}
+
+    TorrentFile:
+      type: object
+      properties:
+        index: {type: integer}
+        name: {type: string, description: Relative path inside the torrent.}
+        size: {type: integer, x-unit: bytes}
+        progress: {type: number}
+        priority:
+          type: integer
+          enum: [0, 1, 6, 7]
+          x-enum-names: [Do not download, Normal, High, Maximum]
+        is_seed: {type: boolean}
+        piece_range: {type: array, items: {type: integer}, minItems: 2, maxItems: 2}
+        availability: {type: number}
+
+    Preferences:
+      type: object
+      description: |
+        All application preferences (WebAPI 2.16.2). Every key is readable and writable
+        unless noted (`readOnly` / `writeOnly`). Keys appear in the order of
+        `preferencesAction()`, which follows the WebUI tabs.
+
+        WebUI controls that are stored only in the browser (not in this object): the
+        Behavior tab's color scheme, display density, date format, alternating row colors,
+        double-click actions, auto hide zero status filters and the "Custom WebUI settings".
+      additionalProperties: true
+      properties:
+        # ---------------------------------------------------------------- Behavior
+        locale: {type: string, description: UI language, e.g. en or en_GB., x-webui: Behavior › Localization › User interface language}
+        performance_warning: {type: boolean, x-webui: Behavior › Log performance warnings}
+        status_bar_external_ip: {type: boolean, x-webui: Behavior › Status bar › Show external IP}
+        confirm_torrent_deletion: {type: boolean, x-webui: Behavior › Transfer List › Confirm when deleting torrents}
+        store_search_jobs: {type: boolean, x-since: 2.16.1, x-webui: Behavior › Search › Save search tabs}
+        store_search_job_results: {type: boolean, x-since: 2.16.1, x-webui: Behavior › Search › Also save search results}
+        file_log_enabled: {type: boolean, x-webui: Behavior › Log Files (checkbox)}
+        file_log_path: {type: string, description: Server path., x-webui: Behavior › Log Files › Save path}
+        file_log_backup_enabled: {type: boolean, x-webui: Behavior › Log Files › Backup the log file after}
+        file_log_max_size: {type: integer, x-unit: KiB, x-webui: Behavior › Log Files › Backup the log file after (value)}
+        file_log_delete_old: {type: boolean, x-webui: Behavior › Log Files › Delete backup logs older than}
+        file_log_age: {type: integer, x-webui: Behavior › Log Files › Delete backup logs older than (value)}
+        file_log_age_type: {type: integer, enum: [0, 1, 2], x-enum-names: [days, months, years], x-webui: Behavior › Log Files › Delete backup logs older than (unit)}
+        delete_torrent_content_files: {type: boolean, description: Default of "also delete files" when removing torrents (desktop GUI)., x-webui: (not shown)}
+
+        # ---------------------------------------------------------------- Downloads
+        torrent_content_layout: {type: string, enum: [Original, Subfolder, NoSubfolder], x-webui: Downloads › When adding a torrent › Torrent content layout}
+        # wiki deviation: the wiki lists create_subfolder_enabled and start_paused_enabled, which 5.3.1 no longer has.
+        add_to_top_of_queue: {type: boolean, x-webui: Downloads › When adding a torrent › Add to top of queue}
+        add_stopped_enabled: {type: boolean, x-webui: Downloads › When adding a torrent › Do not start the download automatically}
+        torrent_stop_condition: {type: string, enum: [None, MetadataReceived, FilesChecked], x-webui: Downloads › When adding a torrent › Torrent stop condition}
+        merge_trackers: {type: boolean, x-webui: Downloads › When adding a duplicate torrent › Merge trackers to existing torrent}
+        auto_delete_mode:
+          type: integer
+          enum: [0, 1, 2]
+          x-enum-names: [Never, If added, Always (also when addition is cancelled)]
+          x-webui: Downloads › When adding a torrent › Delete .torrent files afterwards / Also when addition is cancelled
+          # wiki deviation: the wiki marks this TODO.
+        preallocate_all: {type: boolean, x-webui: Downloads › Pre-allocate disk space for all files}
+        incomplete_files_ext: {type: boolean, x-webui: Downloads › Append .!qB extension to incomplete files}
+        use_unwanted_folder: {type: boolean, x-webui: Downloads › Keep unselected files in ".unwanted" folder}
+        auto_tmm_enabled: {type: boolean, description: true = Automatic, false = Manual., x-webui: Downloads › Saving Management › Default Torrent Management Mode}
+        torrent_changed_tmm_enabled: {type: boolean, description: true = Relocate torrent, false = Switch torrent to Manual Mode., x-webui: Downloads › Saving Management › When Torrent Category changed}
+        save_path_changed_tmm_enabled: {type: boolean, description: true = Relocate affected torrents, false = Switch affected torrents to Manual Mode., x-webui: Downloads › Saving Management › When Default Save Path changed}
+        category_changed_tmm_enabled: {type: boolean, description: Same choice as above., x-webui: Downloads › Saving Management › When Category Save Path changed}
+        use_category_paths_in_manual_mode: {type: boolean, x-webui: Downloads › Saving Management › Use Category paths in Manual Mode}
+        save_path: {type: string, description: Server path., x-webui: Downloads › Saving Management › Default Save Path}
+        temp_path_enabled: {type: boolean, x-webui: Downloads › Saving Management › Use another path for incomplete torrents}
+        temp_path: {type: string, description: Server path., x-webui: Downloads › Saving Management › Use another path for incomplete torrents (path)}
+        # wiki deviation: export_dir/export_dir_fin were removed (2.16.0) and replaced by the torrent_files_backup_* keys.
+        torrent_files_backup_enabled: {type: boolean, x-webui: Downloads › Store backup .torrent file › Store backup in}
+        torrent_files_backup_dir: {type: string, x-webui: Downloads › Store backup .torrent file › Store backup in (path)}
+        torrent_files_finished_backup_dir_enabled: {type: boolean, x-webui: Downloads › Store backup .torrent file › When torrent finished move backup to}
+        torrent_files_finished_backup_dir: {type: string, x-webui: Downloads › Store backup .torrent file › When torrent finished move backup to (path)}
+        remove_torrent_file_backup: {type: boolean, x-webui: Downloads › Store backup .torrent file › Remove backup when removing torrent}
+        scan_dirs:
+          type: object
+          deprecated: true
+          description: |
+            Monitored folders: watched folder → 0 (save into the watched folder), 1 (default
+            save path) or a custom save path string. Setting it replaces the whole set
+            (folders not listed are removed). Deprecated in the source ("delete once replaced
+            by updated API method").
+          additionalProperties: {oneOf: [{type: integer, enum: [0, 1]}, {type: string}]}
+          x-webui: Downloads › Automatically add torrents from
+        excluded_file_names_enabled: {type: boolean, x-webui: Downloads › Excluded file names (checkbox)}
+        excluded_file_names: {type: string, description: Newline-separated patterns., x-webui: Downloads › Excluded file names}
+        mail_notification_enabled: {type: boolean, x-webui: Downloads › Email notification upon download completion (checkbox)}
+        mail_notification_sender: {type: string, x-webui: Downloads › Email notification › From}
+        mail_notification_email: {type: string, x-webui: Downloads › Email notification › To}
+        mail_notification_smtp: {type: string, x-webui: Downloads › Email notification › SMTP server}
+        mail_notification_encryption_type: {type: string, enum: [None, STARTTLS, SMTPS], x-since: 2.16.0, x-webui: Downloads › Email notification › SMTP encryption}
+        # wiki deviation: mail_notification_ssl_enabled was replaced by mail_notification_encryption_type.
+        mail_notification_auth_enabled: {type: boolean, x-webui: Downloads › Email notification › Authentication (checkbox)}
+        mail_notification_username: {type: string, x-webui: Downloads › Email notification › Authentication › Username}
+        mail_notification_password: {type: string, description: Returned in clear text., x-webui: Downloads › Email notification › Authentication › Password}
+        autorun_on_torrent_added_enabled: {type: boolean, x-webui: Downloads › Run external program › Run on torrent added}
+        autorun_on_torrent_added_program: {type: string, description: Trimmed by the server., x-webui: Downloads › Run external program › Run on torrent added (command)}
+        autorun_enabled: {type: boolean, x-webui: Downloads › Run external program › Run on torrent finished}
+        autorun_program: {type: string, description: "Trimmed by the server. Placeholders %N %L %G %F %R %D %C %Z %T %I %J %K %M.", x-webui: Downloads › Run external program › Run on torrent finished (command)}
+
+        # ---------------------------------------------------------------- Connection
+        bittorrent_protocol: {type: integer, enum: [0, 1, 2], x-enum-names: [TCP and µTP, TCP, µTP], x-webui: Connection › Peer connection protocol}
+        listen_port: {type: integer, minimum: 0, maximum: 65535, description: 0 = random port., x-webui: Connection › Listening Port › Port used for incoming connections}
+        random_port: {type: boolean, deprecated: true, description: Read = (listen_port == 0). Writing true sets the port to 0 and wins over listen_port., x-webui: (not shown; the "Random" button just generates a number)}
+        ssl_enabled: {type: boolean, description: SSL torrents listening., x-webui: (not shown)}
+        ssl_listen_port: {type: integer, x-webui: (not shown)}
+        upnp: {type: boolean, x-webui: Connection › Listening Port › Use UPnP / NAT-PMP port forwarding from my router}
+        max_connec: {type: integer, description: -1 = unlimited (WebUI checkbox unchecked)., x-webui: Connection › Connections Limits › Global maximum number of connections}
+        max_connec_per_torrent: {type: integer, description: -1 = unlimited., x-webui: Connection › Connections Limits › Maximum number of connections per torrent}
+        max_uploads: {type: integer, description: -1 = unlimited., x-webui: Connection › Connections Limits › Global maximum number of upload slots}
+        max_uploads_per_torrent: {type: integer, description: -1 = unlimited., x-webui: Connection › Connections Limits › Maximum number of upload slots per torrent}
+        i2p_enabled: {type: boolean, x-webui: Connection › I2P (Experimental) (checkbox)}
+        i2p_address: {type: string, x-webui: Connection › I2P › Host}
+        i2p_port: {type: integer, x-webui: Connection › I2P › Port}
+        i2p_mixed_mode: {type: boolean, x-webui: Connection › I2P › Mixed mode}
+        i2p_pex_enabled: {type: boolean, x-requires-restart: true, x-since: 2.16.2, x-webui: Connection › I2P › Enable I2P Peer Exchange (I2P PeX)}
+        i2p_inbound_quantity: {type: integer, x-webui: Advanced › libtorrent › I2P inbound quantity}
+        i2p_outbound_quantity: {type: integer, x-webui: Advanced › libtorrent › I2P outbound quantity}
+        i2p_inbound_length: {type: integer, x-webui: Advanced › libtorrent › I2P inbound length}
+        i2p_outbound_length: {type: integer, x-webui: Advanced › libtorrent › I2P outbound length}
+        i2p_inbound_length_variance: {type: integer, x-since: 2.16.2, x-webui: Advanced › libtorrent › I2P inbound length variance}
+        i2p_outbound_length_variance: {type: integer, x-since: 2.16.2, x-webui: Advanced › libtorrent › I2P outbound length variance}
+        proxy_type:
+          type: string
+          enum: [None, HTTP, SOCKS5, SOCKS4]
+          x-webui: Connection › Proxy Server › Type
+          # wiki deviation: the wiki documents an integer (-1, 1..5 with auth variants); 5.3.1 uses
+          # enum names, and authentication is the separate proxy_auth_enabled flag.
+        proxy_ip: {type: string, x-webui: Connection › Proxy Server › Host}
+        proxy_port: {type: integer, x-webui: Connection › Proxy Server › Port}
+        proxy_hostname_lookup: {type: boolean, x-webui: Connection › Proxy Server › Perform hostname lookup via proxy}
+        proxy_auth_enabled: {type: boolean, x-webui: Connection › Proxy Server › Authentication (checkbox)}
+        proxy_username: {type: string, x-webui: Connection › Proxy Server › Authentication › Username}
+        proxy_password: {type: string, description: Returned in clear text; stored unencrypted on the server., x-webui: Connection › Proxy Server › Authentication › Password}
+        proxy_bittorrent: {type: boolean, x-webui: Connection › Proxy Server › Use proxy for BitTorrent purposes}
+        proxy_peer_connections: {type: boolean, x-webui: Connection › Proxy Server › Use proxy for BitTorrent purposes › Use proxy for peer connections}
+        proxy_rss: {type: boolean, x-webui: Connection › Proxy Server › Use proxy for RSS purposes}
+        proxy_misc: {type: boolean, x-webui: Connection › Proxy Server › Use proxy for general purposes}
+        # wiki deviation: proxy_torrents_only no longer exists.
+        ip_filter_enabled: {type: boolean, x-webui: Connection › IP Filtering › Filter path (checkbox)}
+        ip_filter_path: {type: string, description: Server path to a .dat/.p2p/.p2b file., x-webui: Connection › IP Filtering › Filter path}
+        ip_filter_trackers: {type: boolean, x-webui: Connection › IP Filtering › Apply to trackers}
+        banned_IPs: {type: string, description: Newline-separated IPs., x-webui: Connection › IP Filtering › Manually banned IP addresses}
+
+        # ---------------------------------------------------------------- Speed
+        # wiki deviation (all four limits): the wiki says KiB/s with -1 = no limit. In 5.3.1 the wire
+        # unit is bytes/s, 0 = unlimited, negatives become 0. The server stores whole KiB
+        # (value/1024, rounded down; 1..1024 → 1 KiB), so send multiples of 1024.
+        up_limit: {type: integer, minimum: 0, x-unit: bytes/s, x-webui-unit: KiB/s, description: 0 = unlimited., x-webui: Speed › Global Rate Limits › Upload}
+        dl_limit: {type: integer, minimum: 0, x-unit: bytes/s, x-webui-unit: KiB/s, description: 0 = unlimited., x-webui: Speed › Global Rate Limits › Download}
+        alt_up_limit: {type: integer, minimum: 0, x-unit: bytes/s, x-webui-unit: KiB/s, description: 0 = unlimited., x-webui: Speed › Alternative Rate Limits › Upload}
+        alt_dl_limit: {type: integer, minimum: 0, x-unit: bytes/s, x-webui-unit: KiB/s, description: 0 = unlimited., x-webui: Speed › Alternative Rate Limits › Download}
+        scheduler_enabled: {type: boolean, x-webui: Speed › Alternative Rate Limits › Schedule the use of alternative rate limits}
+        schedule_from_hour: {type: integer, minimum: 0, maximum: 23, description: Applied only together with schedule_from_min in the same request., x-webui: Speed › Schedule › From (hours)}
+        schedule_from_min: {type: integer, minimum: 0, maximum: 59, description: Applied only together with schedule_from_hour., x-webui: Speed › Schedule › From (minutes)}
+        schedule_to_hour: {type: integer, minimum: 0, maximum: 23, description: Applied only together with schedule_to_min., x-webui: Speed › Schedule › To (hours)}
+        schedule_to_min: {type: integer, minimum: 0, maximum: 59, description: Applied only together with schedule_to_hour., x-webui: Speed › Schedule › To (minutes)}
+        scheduler_days:
+          type: integer
+          enum: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+          x-enum-names: [Every day, Weekdays, Weekends, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday]
+          x-webui: Speed › Schedule › When
+        limit_utp_rate: {type: boolean, x-webui: Speed › Rate Limits Settings › Apply rate limit to µTP protocol}
+        limit_tcp_overhead: {type: boolean, x-webui: Speed › Rate Limits Settings › Apply rate limit to transport overhead}
+        limit_lan_peers: {type: boolean, x-webui: Speed › Rate Limits Settings › Apply rate limit to peers on LAN}
+
+        # ---------------------------------------------------------------- BitTorrent
+        dht: {type: boolean, x-webui: BitTorrent › Privacy › Enable DHT}
+        pex: {type: boolean, x-webui: BitTorrent › Privacy › Enable Peer Exchange (PeX)}
+        lsd: {type: boolean, x-webui: BitTorrent › Privacy › Enable Local Peer Discovery}
+        encryption: {type: integer, enum: [0, 1, 2], x-enum-names: [Allow encryption (prefer), Require encryption, Disable encryption], x-webui: BitTorrent › Privacy › Encryption mode}
+        anonymous_mode: {type: boolean, x-webui: BitTorrent › Privacy › Enable anonymous mode}
+        max_active_checking_torrents: {type: integer, x-webui: BitTorrent › Max active checking torrents}
+        queueing_enabled: {type: boolean, x-webui: BitTorrent › Torrent Queueing (checkbox)}
+        max_active_downloads: {type: integer, description: -1 = unlimited., x-webui: BitTorrent › Torrent Queueing › Maximum active downloads}
+        max_active_uploads: {type: integer, description: -1 = unlimited., x-webui: BitTorrent › Torrent Queueing › Maximum active uploads}
+        max_active_torrents: {type: integer, description: -1 = unlimited., x-webui: BitTorrent › Torrent Queueing › Maximum active torrents}
+        dont_count_slow_torrents: {type: boolean, x-webui: BitTorrent › Torrent Queueing › Do not count slow torrents in these limits}
+        slow_torrent_dl_rate_threshold: {type: integer, x-unit: KiB/s, x-webui: BitTorrent › Torrent Queueing › Download rate threshold}
+        slow_torrent_ul_rate_threshold: {type: integer, x-unit: KiB/s, x-webui: BitTorrent › Torrent Queueing › Upload rate threshold}
+        slow_torrent_inactive_timer: {type: integer, x-unit: seconds, x-webui: BitTorrent › Torrent Queueing › Torrent inactivity timer}
+        max_ratio_enabled: {type: boolean, description: Read = (max_ratio >= 0). Writing false wins over max_ratio., x-webui: BitTorrent › Seeding Limits › When ratio reaches (checkbox)}
+        max_ratio: {type: number, description: -1 when disabled., x-webui: BitTorrent › Seeding Limits › When ratio reaches}
+        max_seeding_time_enabled: {type: boolean, x-webui: BitTorrent › Seeding Limits › When total seeding time reaches (checkbox)}
+        max_seeding_time: {type: integer, x-unit: minutes, description: -1 when disabled., x-webui: BitTorrent › Seeding Limits › When total seeding time reaches}
+        max_inactive_seeding_time_enabled: {type: boolean, x-webui: BitTorrent › Seeding Limits › When inactive seeding time reaches (checkbox)}
+        max_inactive_seeding_time: {type: integer, x-unit: minutes, description: -1 when disabled., x-webui: BitTorrent › Seeding Limits › When inactive seeding time reaches}
+        share_limits_mode: {type: string, enum: [MatchAny, MatchAll], description: "Server reads unknown values as MatchAny. (`Default` exists only per torrent.)", x-webui: BitTorrent › Seeding Limits › Any of the above / All the above}
+        max_ratio_act:
+          type: integer
+          enum: [0, 1, 2, 3]
+          x-enum-names: [Stop torrent, Remove torrent, Enable super seeding, Remove torrent and its files]
+          description: Unknown values are treated as 0.
+          x-webui: BitTorrent › Seeding Limits › then
+          # wiki deviation: the wiki lists only 0 = pause, 1 = remove.
+        add_trackers_enabled: {type: boolean, x-webui: BitTorrent › Automatically append these trackers to new downloads (checkbox)}
+        add_trackers: {type: string, description: Newline-separated tracker URLs (blank line = new tier)., x-webui: BitTorrent › Automatically append these trackers to new downloads}
+        add_trackers_from_url_enabled: {type: boolean, x-webui: BitTorrent › Automatically append trackers from URL to new downloads (checkbox)}
+        add_trackers_url: {type: string, x-webui: BitTorrent › Automatically append trackers from URL › URL}
+        add_trackers_url_list: {type: string, readOnly: true, description: Trackers fetched from add_trackers_url., x-webui: BitTorrent › Automatically append trackers from URL › Fetched trackers}
+
+        # ---------------------------------------------------------------- RSS
+        rss_refresh_interval: {type: integer, x-unit: minutes, x-webui: RSS › RSS Reader › Feeds refresh interval}
+        rss_fetch_delay: {type: integer, x-unit: seconds, x-webui: RSS › RSS Reader › Same host request delay}
+        rss_max_articles_per_feed: {type: integer, x-webui: RSS › RSS Reader › Maximum number of articles per feed}
+        rss_processing_enabled: {type: boolean, x-webui: RSS › RSS Reader › Enable fetching RSS feeds}
+        rss_auto_downloading_enabled: {type: boolean, x-webui: RSS › RSS Torrent Auto Downloader › Enable auto downloading of RSS torrents}
+        rss_download_repack_proper_episodes: {type: boolean, x-webui: RSS › RSS Smart Episode Filter › Download REPACK/PROPER episodes}
+        rss_smart_episode_filters: {type: string, description: Newline-separated regexes., x-webui: RSS › RSS Smart Episode Filter › Filters}
+
+        # ---------------------------------------------------------------- WebUI
+        # Changing these can lock clients out (port, address, HTTPS, auth, host validation).
+        web_ui_address: {type: string, description: Bind address; "*" or 0.0.0.0 = all., x-webui: WebUI › Web User Interface › IP address}
+        web_ui_port: {type: integer, minimum: 1, maximum: 65535, x-webui: WebUI › Web User Interface › Port}
+        web_ui_upnp: {type: boolean, x-webui: WebUI › Web User Interface › Use UPnP / NAT-PMP to forward the port}
+        use_https: {type: boolean, x-webui: WebUI › Use HTTPS instead of HTTP}
+        web_ui_https_cert_path: {type: string, description: Server path., x-webui: WebUI › Use HTTPS › Certificate}
+        web_ui_https_key_path: {type: string, description: Server path., x-webui: WebUI › Use HTTPS › Key}
+        web_ui_username: {type: string, minLength: 3, description: "No colon. Invalid → 400 mid-apply.", x-webui: WebUI › Authentication › User › Username}
+        web_ui_password: {type: string, writeOnly: true, minLength: 6, description: "Plain text; stored as PBKDF2. Never returned. Too short → 400 mid-apply.", x-webui: WebUI › Authentication › User › Password}
+        web_ui_api_key:
+          type: string
+          readOnly: true
+          description: |
+            Current API key in clear text (empty = none). Change it only through
+            `app/rotateAPIKey` / `app/deleteAPIKey` (not documented here yet).
+          x-webui: WebUI › Authentication › API Key
+        bypass_local_auth: {type: boolean, x-webui: WebUI › Authentication › Bypass authentication for clients on localhost}
+        bypass_auth_subnet_whitelist_enabled: {type: boolean, x-webui: WebUI › Authentication › Bypass authentication for clients in whitelisted IP subnets}
+        bypass_auth_subnet_whitelist: {type: string, description: "Read: newline-separated. Write: newline- or comma-separated. # wiki deviation: the wiki says comma-separated.", x-webui: WebUI › Authentication › (subnet list)}
+        web_ui_max_auth_fail_count: {type: integer, x-webui: WebUI › Authentication › Ban client after consecutive failures}
+        web_ui_ban_duration: {type: integer, x-unit: seconds, x-webui: WebUI › Authentication › ban for}
+        web_ui_session_timeout: {type: integer, x-unit: seconds, x-webui: WebUI › Authentication › Session timeout}
+        web_ui_sessions_count_limit: {type: integer, description: 0 = unlimited., x-since: 2.16.0, x-webui: WebUI › Authentication › Sessions count limit}
+        alternative_webui_enabled: {type: boolean, x-webui: WebUI › Use alternative WebUI}
+        alternative_webui_path: {type: string, x-webui: WebUI › Use alternative WebUI › Files location}
+        web_ui_clickjacking_protection_enabled: {type: boolean, x-webui: WebUI › Security › Enable clickjacking protection}
+        web_ui_csrf_protection_enabled: {type: boolean, x-webui: WebUI › Security › Enable Cross-Site Request Forgery (CSRF) protection}
+        web_ui_secure_cookie_enabled: {type: boolean, x-webui: WebUI › Security › Enable cookie Secure flag}
+        web_ui_host_header_validation_enabled: {type: boolean, x-webui: WebUI › Security › Enable Host header validation}
+        web_ui_domain_list: {type: string, description: Semicolon-separated server domains (* = any)., x-webui: WebUI › Security › Enable Host header validation › Server domains}
+        web_ui_use_custom_http_headers_enabled: {type: boolean, x-webui: WebUI › Add custom HTTP headers (checkbox)}
+        web_ui_custom_http_headers: {type: string, description: '"Header: value" pairs, one per line.', x-webui: WebUI › Add custom HTTP headers}
+        web_ui_reverse_proxy_enabled: {type: boolean, x-webui: WebUI › Enable reverse proxy support}
+        web_ui_reverse_proxies_list: {type: string, description: Trusted proxies., x-webui: WebUI › Enable reverse proxy support › Trusted proxies list}
+        dyndns_enabled: {type: boolean, x-webui: WebUI › Update my dynamic domain name (checkbox)}
+        dyndns_service: {type: integer, enum: [0, 1], x-enum-names: [DynDNS, No-IP], x-webui: WebUI › Update my dynamic domain name › service}
+        dyndns_domain: {type: string, x-webui: WebUI › Update my dynamic domain name › Domain name}
+        dyndns_username: {type: string, x-webui: WebUI › Update my dynamic domain name › Username}
+        dyndns_password: {type: string, description: Returned in clear text., x-webui: WebUI › Update my dynamic domain name › Password}
+
+        # ---------------------------------------------------------------- Advanced › qBittorrent
+        resume_data_storage_type: {type: string, enum: [Legacy, SQLite], x-enum-names: [Fastresume files, SQLite database (experimental)], x-requires-restart: true, x-webui: Advanced › qBittorrent › Resume data storage type}
+        torrent_content_remove_option: {type: string, enum: [Delete, MoveToTrash], x-enum-names: [Delete files permanently, Move files to trash (if possible)], x-webui: Advanced › qBittorrent › Torrent content removing mode}
+        memory_working_set_limit: {type: integer, x-unit: MiB, description: Shown only on platforms that support it (not Linux in the user's 5.3.1 screenshots)., x-webui: Advanced › qBittorrent › Physical memory (RAM) usage limit}
+        current_network_interface: {type: string, description: Interface ID; empty = any., x-webui: Advanced › qBittorrent › Network interface}
+        current_interface_name: {type: string, readOnly: true, description: Human-readable name of current_network_interface., x-webui: (not shown)}
+        current_interface_address: {type: string, description: Bind IP; empty = all addresses. Invalid IPs become empty., x-webui: Advanced › qBittorrent › Optional IP address to bind to}
+        save_resume_data_interval: {type: integer, x-unit: minutes, x-webui: Advanced › qBittorrent › Save resume data interval}
+        save_statistics_interval: {type: integer, x-unit: minutes, x-webui: Advanced › qBittorrent › Save statistics interval}
+        torrent_file_size_limit: {type: integer, x-unit: bytes, x-webui-unit: MiB, x-webui: Advanced › qBittorrent › .torrent file size limit}
+        confirm_torrent_recheck: {type: boolean, x-webui: Advanced › qBittorrent › Confirm torrent recheck}
+        recheck_completed_torrents: {type: boolean, x-webui: Advanced › qBittorrent › Recheck torrents on completion}
+        app_instance_name: {type: string, x-webui: Advanced › qBittorrent › Customize application instance name}
+        refresh_interval: {type: integer, x-unit: ms, x-webui: Advanced › qBittorrent › Refresh interval}
+        resolve_peer_host_names: {type: boolean, x-webui: Advanced › qBittorrent › Resolve peer host names}
+        resolve_peer_countries: {type: boolean, x-webui: Advanced › qBittorrent › Resolve peer countries}
+        confirm_remove_all_tags: {type: boolean, x-since: 2.16.2, x-webui: Advanced › qBittorrent › Confirm removal of all tags}
+        confirm_remove_tracker_from_all_torrents: {type: boolean, x-since: 2.16.2, x-webui: Advanced › qBittorrent › Confirm removal of tracker from all torrents}
+        reannounce_when_address_changed: {type: boolean, x-webui: Advanced › qBittorrent › Reannounce to all trackers when IP or port changed}
+        enable_embedded_tracker: {type: boolean, x-webui: Advanced › qBittorrent › Enable embedded tracker}
+        embedded_tracker_port: {type: integer, x-webui: Advanced › qBittorrent › Embedded tracker port}
+        embedded_tracker_port_forwarding: {type: boolean, x-webui: Advanced › qBittorrent › Enable port forwarding for embedded tracker}
+        mark_of_the_web: {type: boolean, description: macOS/Windows only., x-webui: Advanced › qBittorrent › Mark-of-the-Web (platform-dependent)}
+        ignore_ssl_errors: {type: boolean, x-webui: Advanced › qBittorrent › Ignore SSL errors}
+        python_executable_path: {type: string, description: Empty = auto-detect., x-requires-restart: true, x-webui: Advanced › qBittorrent › Python executable path}
+        start_paused: {type: boolean, x-webui: Advanced › qBittorrent › Start BitTorrent session in paused state}
+        shutdown_timeout: {type: integer, x-unit: seconds, description: -1 = unlimited., x-webui: Advanced › qBittorrent › BitTorrent session shutdown timeout}
+
+        # ---------------------------------------------------------------- Advanced › libtorrent
+        bdecode_depth_limit: {type: integer, x-webui: Advanced › libtorrent › Bdecode depth limit}
+        bdecode_token_limit: {type: integer, x-webui: Advanced › libtorrent › Bdecode token limit}
+        async_io_threads: {type: integer, x-webui: Advanced › libtorrent › Asynchronous I/O threads}
+        hashing_threads: {type: integer, x-webui: Advanced › libtorrent › Hashing threads}
+        file_pool_size: {type: integer, x-webui: Advanced › libtorrent › File pool size}
+        checking_memory_use: {type: integer, x-unit: MiB, x-webui: Advanced › libtorrent › Outstanding memory when checking torrents}
+        disk_cache: {type: integer, x-unit: MiB, description: -1 = auto. libtorrent 1.x builds only., x-webui: Advanced › libtorrent › Disk cache (lt 1.x only)}
+        disk_cache_ttl: {type: integer, x-unit: seconds, description: libtorrent 1.x builds only., x-webui: Advanced › libtorrent › Disk cache expiry interval (lt 1.x only)}
+        disk_queue_size: {type: integer, x-unit: bytes, x-webui-unit: KiB, x-webui: Advanced › libtorrent › Disk queue size}
+        disk_io_type:
+          type: integer
+          enum: [0, 1, 2, 3, 4]
+          x-enum-names: [Default, Memory mapped files, POSIX-compliant, Simple pread/pwrite, pread/pwrite (libtorrent ≥ 2.1)]
+          x-requires-restart: true
+          x-webui: Advanced › libtorrent › Disk IO type
+        disk_io_read_mode: {type: integer, enum: [0, 1], x-enum-names: [Disable OS cache, Enable OS cache], x-webui: Advanced › libtorrent › Disk IO read mode}
+        disk_io_write_mode: {type: integer, enum: [0, 1, 2], x-enum-names: [Disable OS cache, Enable OS cache, Write-through (libtorrent 2.x)], x-webui: Advanced › libtorrent › Disk IO write mode}
+        enable_coalesce_read_write: {type: boolean, description: libtorrent 1.x builds only., x-webui: Advanced › libtorrent › Coalesce reads & writes (lt 1.x only)}
+        enable_piece_extent_affinity: {type: boolean, x-webui: Advanced › libtorrent › Use piece extent affinity}
+        enable_upload_suggestions: {type: boolean, x-webui: Advanced › libtorrent › Send upload piece suggestions}
+        send_buffer_watermark: {type: integer, x-unit: KiB, x-webui: Advanced › libtorrent › Send buffer watermark}
+        send_buffer_low_watermark: {type: integer, x-unit: KiB, x-webui: Advanced › libtorrent › Send buffer low watermark}
+        send_buffer_watermark_factor: {type: integer, x-unit: "%", x-webui: Advanced › libtorrent › Send buffer watermark factor}
+        connection_speed: {type: integer, description: Outgoing connections per second., x-webui: Advanced › libtorrent › Outgoing connections per second}
+        seeding_outgoing_connections: {type: boolean, x-since: 2.16.0, x-webui: Advanced › libtorrent › Allow outgoing connections when seeding}
+        socket_send_buffer_size: {type: integer, x-unit: bytes, x-webui-unit: KiB, description: 0 = system default., x-webui: Advanced › libtorrent › Socket send buffer size}
+        socket_receive_buffer_size: {type: integer, x-unit: bytes, x-webui-unit: KiB, description: 0 = system default., x-webui: Advanced › libtorrent › Socket receive buffer size}
+        socket_backlog_size: {type: integer, x-webui: Advanced › libtorrent › Socket backlog size}
+        outgoing_ports_min: {type: integer, description: 0 = disabled., x-webui: Advanced › libtorrent › Outgoing ports (Min)}
+        outgoing_ports_max: {type: integer, description: 0 = disabled., x-webui: Advanced › libtorrent › Outgoing ports (Max)}
+        upnp_lease_duration: {type: integer, x-unit: seconds, description: 0 = permanent lease., x-webui: Advanced › libtorrent › UPnP lease duration}
+        peer_tos: {type: integer, description: DSCP value for peer connections., x-webui: Advanced › libtorrent › Differentiated Services Code Point (DSCP)}
+        utp_tcp_mixed_mode: {type: integer, enum: [0, 1], x-enum-names: [Prefer TCP, Peer proportional (throttles TCP)], x-webui: Advanced › libtorrent › µTP-TCP mixed mode algorithm}
+        hostname_cache_ttl: {type: integer, x-unit: seconds, x-webui: Advanced › libtorrent › Internal hostname resolver cache expiry interval}
+        idn_support_enabled: {type: boolean, x-webui: Advanced › libtorrent › Support internationalized domain name (IDN)}
+        enable_multi_connections_from_same_ip: {type: boolean, x-webui: Advanced › libtorrent › Allow multiple connections from the same IP address}
+        enable_multi_connections_from_same_peer_id: {type: boolean, x-since: 2.16.0, x-webui: Advanced › libtorrent › Allow multiple connections from the same Peer ID}
+        validate_https_tracker_certificate: {type: boolean, x-webui: Advanced › libtorrent › Validate HTTPS tracker certificate}
+        ssrf_mitigation: {type: boolean, x-webui: Advanced › libtorrent › Server-side request forgery (SSRF) mitigation}
+        block_peers_on_privileged_ports: {type: boolean, x-webui: Advanced › libtorrent › Disallow connection to peers on privileged ports}
+        upload_slots_behavior: {type: integer, enum: [0, 1], x-enum-names: [Fixed slots, Upload rate based], x-webui: Advanced › libtorrent › Upload slots behavior}
+        upload_choking_algorithm: {type: integer, enum: [0, 1, 2], x-enum-names: [Round-robin, Fastest upload, Anti-leech], x-webui: Advanced › libtorrent › Upload choking algorithm}
+        announce_to_all_trackers: {type: boolean, x-webui: Advanced › libtorrent › Always announce to all trackers in a tier}
+        announce_to_all_tiers: {type: boolean, x-webui: Advanced › libtorrent › Always announce to all tiers}
+        announce_ip: {type: string, x-requires-restart: true, x-webui: Advanced › libtorrent › IP address reported to trackers}
+        announce_port: {type: integer, description: 0 = listening port., x-requires-restart: true, x-webui: Advanced › libtorrent › Port reported to trackers}
+        max_concurrent_http_announces: {type: integer, x-webui: Advanced › libtorrent › Max concurrent HTTP announces}
+        stop_tracker_timeout: {type: integer, x-unit: seconds, description: 0 = disabled., x-webui: Advanced › libtorrent › Stop tracker timeout}
+        peer_turnover: {type: integer, x-unit: "%", x-webui: Advanced › libtorrent › Peer turnover disconnect percentage}
+        peer_turnover_cutoff: {type: integer, x-unit: "%", x-webui: Advanced › libtorrent › Peer turnover threshold percentage}
+        peer_turnover_interval: {type: integer, x-unit: seconds, x-webui: Advanced › libtorrent › Peer turnover disconnect interval}
+        request_queue_size: {type: integer, x-webui: Advanced › libtorrent › Maximum outstanding requests to a single peer}
+        max_outstanding_block_requests: {type: integer, x-since: 2.16.0, x-webui: Advanced › libtorrent › Maximum outstanding block requests from a peer}
+        dht_bootstrap_nodes: {type: string, description: Comma-separated host:port list., x-webui: Advanced › libtorrent › DHT bootstrap nodes}
+        webtorrent_stun_server: {type: string, x-since: 2.16.1, x-webui: Advanced › libtorrent › STUN server for WebTorrent NAT traversal}
