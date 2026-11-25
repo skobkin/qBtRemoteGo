@@ -69,16 +69,19 @@ type application struct {
 	updateChecker   updateChecker
 	checkingUpdates atomic.Bool
 
-	list           *widget.List
-	listRows       []*torrentListRow
-	tableHeader    *torrentHeaderRow
-	tablePreview   *canvas.Rectangle
-	tableScroll    *container.Scroll
-	statusLabel    *widget.Label
-	connectionIcon *hoverIcon
-	slowModeIcon   *hoverIcon
-	filterEntry    *widget.Entry
-	filterBy       *widget.Select
+	list              *widget.List
+	listRows          []*torrentListRow
+	tableHeader       *torrentHeaderRow
+	tablePreview      *canvas.Rectangle
+	tableScroll       *container.Scroll
+	statusLabel       *widget.Label
+	connectionIcon    *hoverIcon
+	slowModeIcon      *hoverIcon
+	filterEntry       *searchEntry
+	filterClear       *widget.Button
+	filterFieldButton *widget.Button
+	// filterField is what the search matches: "name" or "location".
+	filterField    string
 	tooltipLayer   *tooltipOverlay
 	tooltipManager *hoverTooltipManager
 	columnWidths   map[string]float32
@@ -242,40 +245,8 @@ func (a *application) buildMainWindow() {
 		a.openSettingsWindow()
 	})
 
-	a.filterEntry = widget.NewEntry()
-	a.filterEntry.SetPlaceHolder("Filter torrents")
-	a.filterEntry.OnChanged = func(value string) {
-		if a.filterTimer != nil {
-			a.filterTimer.Stop()
-		}
-		a.filterTimer = time.AfterFunc(200*time.Millisecond, func() {
-			fyne.Do(func() {
-				a.filterQuery = value
-				a.refreshVisibleTorrents()
-			})
-		})
-	}
-
-	a.filterBy = widget.NewSelect([]string{"Name", "Location"}, func(value string) {
-		filterBy := strings.ToLower(value)
-		err := a.controller.SaveLocalUI(func(cfg *config.AppConfig) {
-			cfg.UI.FilterBy = filterBy
-		})
-		if err != nil {
-			a.logger.Warn("persist filter_by", "error", err)
-		}
-		a.refreshVisibleTorrents()
-	})
-	if strings.EqualFold(a.controller.Config().UI.FilterBy, "location") {
-		a.filterBy.SetSelected("Location")
-	} else {
-		a.filterBy.SetSelected("Name")
-	}
-
 	a.stateSelect = a.buildStateFilterSelect()
-	filterLabel := widget.NewLabel("Filter by")
-	filterSelect := container.NewGridWrap(fyne.NewSize(140, a.filterBy.MinSize().Height), a.filterBy)
-	filterInput := container.NewGridWrap(fyne.NewSize(240, a.filterEntry.MinSize().Height), a.filterEntry)
+	searchBox := a.buildSearchBox()
 	leftTools := container.NewHBox(
 		addButton,
 		removeButton,
@@ -285,9 +256,7 @@ func (a *application) buildMainWindow() {
 	)
 	rightTools := container.NewHBox(
 		a.stateSelect,
-		filterLabel,
-		filterSelect,
-		filterInput,
+		searchBox,
 	)
 
 	a.statusLabel.Truncation = fyne.TextTruncateEllipsis
@@ -1344,7 +1313,7 @@ func (a *application) refreshVisibleTorrents() {
 	a.visibleTorrents = appcore.FilterAndSortTorrents(
 		a.allTorrents,
 		a.filterQuery,
-		strings.ToLower(a.filterBy.Selected),
+		a.filterField,
 		a.stateFilter,
 		cfg.UI.SortColumn,
 		cfg.UI.SortDescending,
