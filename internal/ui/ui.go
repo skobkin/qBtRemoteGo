@@ -1189,10 +1189,16 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 	})
 	basicForm := widget.NewForm(basicItems...)
 	advancedForm := widget.NewForm(advancedItems...)
-	advancedAccordion, advancedItem := newAdvancedAccordion(advancedForm, cfg.UI.AddTorrentAdvancedExpanded)
+	// refitWindow is assigned once the footer exists.
+	var refitWindow func()
+	advancedSection := newDisclosureSection("Advanced", advancedForm, cfg.UI.AddTorrentAdvancedExpanded, func(bool) {
+		if refitWindow != nil {
+			refitWindow()
+		}
+	})
 	formContent := container.NewVBox(
 		basicForm,
-		advancedAccordion,
+		advancedSection.root,
 	)
 
 	var syncSubmit func()
@@ -1263,14 +1269,21 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 	})
 
 	footer := container.NewVBox(status, buttons)
-	body := container.New(&cappedHeightLayout{maxHeight: addDialogMaxBodyHeight}, container.NewVScroll(formContent))
+	bodyScroll := container.NewVScroll(formContent)
+	body := container.New(&cappedHeightLayout{maxHeight: addDialogMaxBodyHeight}, bodyScroll)
 	content := container.NewBorder(nil, footer, nil, nil, body)
+	// Expanding or collapsing Advanced changes the form height: refit the
+	// window both ways and keep the scroll offset inside the form.
+	refitWindow = func() {
+		fitAddWindow(win)
+		clampScrollOffset(bodyScroll)
+	}
 
 	defaultSavePathCtx, cancelDefaultSavePath := context.WithCancel(context.Background())
 	var addWindowClosed atomic.Bool
 
 	win.SetContent(content)
-	win.Resize(addTorrentWindowSize(formContent.MinSize(), footer.MinSize()))
+	fitAddWindow(win)
 	win.SetOnClosed(func() {
 		addWindowClosed.Store(true)
 		cancelDefaultSavePath()
@@ -1278,10 +1291,10 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		tagsEntry.Close()
 
 		current := a.controller.Config()
-		if current.UI.AddTorrentAdvancedExpanded == advancedItem.Open {
+		if current.UI.AddTorrentAdvancedExpanded == advancedSection.Open() {
 			return
 		}
-		expanded := advancedItem.Open
+		expanded := advancedSection.Open()
 		if err := a.controller.SaveLocalUI(func(cfg *config.AppConfig) {
 			cfg.UI.AddTorrentAdvancedExpanded = expanded
 		}); err != nil {
@@ -1303,6 +1316,9 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		submit:          submit,
 		cancel:          cancel,
 		buttons:         buttons,
+		advanced:        advancedSection,
+		bodyScroll:      bodyScroll,
+		form:            formContent,
 		categoryPaths:   categoryPaths,
 		initialSavePath: data.SavePath,
 	}

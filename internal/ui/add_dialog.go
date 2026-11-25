@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -28,6 +29,9 @@ type addTorrentDialog struct {
 	submit        *widget.Button
 	cancel        *widget.Button
 	buttons       *fyne.Container
+	advanced      *disclosureSection
+	bodyScroll    *container.Scroll
+	form          *fyne.Container
 
 	// categoryPaths maps category names to their server save paths.
 	categoryPaths map[string]string
@@ -109,12 +113,23 @@ const (
 	addDialogMaxBodyHeight = float32(640)
 )
 
-// addTorrentWindowSize sizes the Add dialog to its form and footer, so it
-// opens without the empty space a fixed size left under a short form.
-func addTorrentWindowSize(content fyne.Size, footer fyne.Size) fyne.Size {
-	width := max(addDialogMinWidth, content.Width, footer.Width)
-	height := min(content.Height, addDialogMaxBodyHeight) + footer.Height
-	return fyne.NewSize(width, height)
+// addTorrentWindowSize sizes the Add dialog to fit its content (the capped
+// form plus footer, as measured by the window content's minimum size) and
+// the window's own padding, so it opens without empty space or a scrollbar.
+func addTorrentWindowSize(contentMin fyne.Size, windowPadding float32) fyne.Size {
+	return fyne.NewSize(
+		max(addDialogMinWidth, contentMin.Width+windowPadding*2),
+		contentMin.Height+windowPadding*2,
+	)
+}
+
+// fitAddWindow resizes an Add dialog window to its content.
+func fitAddWindow(win fyne.Window) {
+	padding := float32(0)
+	if win.Padded() {
+		padding = theme.Padding()
+	}
+	win.Resize(addTorrentWindowSize(win.Content().MinSize(), padding))
 }
 
 // cappedHeightLayout gives a scroll container its content's natural size up
@@ -154,4 +169,57 @@ func clipboardMagnets(text string) []string {
 		}
 	}
 	return out
+}
+
+// disclosureSection is a titled section that expands and collapses its
+// detail. Unlike widget.Accordion it reports every toggle, so the owner can
+// refit its window and scroll position when the content height changes.
+type disclosureSection struct {
+	toggle   *widget.Button
+	detail   fyne.CanvasObject
+	root     *fyne.Container
+	open     bool
+	onToggle func(open bool)
+}
+
+func newDisclosureSection(title string, detail fyne.CanvasObject, open bool, onToggle func(open bool)) *disclosureSection {
+	s := &disclosureSection{detail: detail, onToggle: onToggle}
+	s.toggle = widget.NewButton(title, func() {
+		s.setOpen(!s.open)
+		if s.onToggle != nil {
+			s.onToggle(s.open)
+		}
+	})
+	s.toggle.Alignment = widget.ButtonAlignLeading
+	s.toggle.IconPlacement = widget.ButtonIconLeadingText
+	s.toggle.Importance = widget.LowImportance
+	s.root = container.NewVBox(container.NewHBox(s.toggle), detail)
+	s.setOpen(open)
+	return s
+}
+
+// Open reports whether the detail is shown.
+func (s *disclosureSection) Open() bool {
+	return s.open
+}
+
+func (s *disclosureSection) setOpen(open bool) {
+	s.open = open
+	if open {
+		s.toggle.SetIcon(theme.MenuDropDownIcon())
+		s.detail.Show()
+	} else {
+		s.toggle.SetIcon(theme.MenuExpandIcon())
+		s.detail.Hide()
+	}
+	s.root.Refresh()
+}
+
+// clampScrollOffset pulls a vertical scroll offset back inside its content,
+// which Fyne's Scroll doesn't do when the content shrinks.
+func clampScrollOffset(scroll *container.Scroll) {
+	maxOffset := max(0, scroll.Content.MinSize().Height-scroll.Size().Height)
+	if scroll.Offset.Y > maxOffset {
+		scroll.ScrollToOffset(fyne.NewPos(scroll.Offset.X, maxOffset))
+	}
 }

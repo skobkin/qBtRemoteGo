@@ -159,3 +159,51 @@ func TestAddDialogTagsEntrySuggestsKnownTags(t *testing.T) {
 		t.Fatal("tags entry should be a tag autocomplete entry")
 	}
 }
+
+func TestDisclosureSectionTogglesDetail(t *testing.T) {
+	test.NewTempApp(t)
+	var toggles []bool
+	detail := widget.NewLabel("advanced")
+	section := newDisclosureSection("Advanced", detail, false, func(open bool) { toggles = append(toggles, open) })
+
+	if detail.Visible() || section.Open() {
+		t.Fatal("section should start collapsed")
+	}
+	test.Tap(section.toggle)
+	if !detail.Visible() || !section.Open() {
+		t.Fatal("tapping should expand the section")
+	}
+	test.Tap(section.toggle)
+	if detail.Visible() || section.Open() {
+		t.Fatal("tapping again should collapse the section")
+	}
+	if len(toggles) != 2 || !toggles[0] || toggles[1] {
+		t.Fatalf("toggle callbacks %v, want [true false]", toggles)
+	}
+}
+
+// Collapsing Advanced while scrolled down used to leave the scroll offset
+// past the shorter form, drawing it entirely above the viewport (a blank
+// dialog). The toggle must clamp the offset and refit the window both ways.
+func TestAddDialogAdvancedToggleRefitsWindowAndScroll(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	d := app.openAddWindowWith(nil, addWindowOptions{})
+	t.Cleanup(d.win.Close)
+	collapsed := d.win.Canvas().Size()
+
+	test.Tap(d.advanced.toggle)
+	expanded := d.win.Canvas().Size()
+	if expanded.Height <= collapsed.Height {
+		t.Fatalf("window height %.0f after expanding, want more than %.0f", expanded.Height, collapsed.Height)
+	}
+
+	d.bodyScroll.ScrollToOffset(fyne.NewPos(0, 300))
+	test.Tap(d.advanced.toggle)
+
+	if d.bodyScroll.Offset.Y != 0 {
+		t.Fatalf("scroll offset %.0f after collapsing, want 0", d.bodyScroll.Offset.Y)
+	}
+	if got := d.win.Canvas().Size().Height; got != collapsed.Height {
+		t.Fatalf("window height %.0f after collapsing, want %.0f", got, collapsed.Height)
+	}
+}

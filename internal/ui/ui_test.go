@@ -308,16 +308,16 @@ func TestAddTorrentWindowSizeFitsContent(t *testing.T) {
 	tests := []struct {
 		name    string
 		content fyne.Size
-		footer  fyne.Size
+		padding float32
 		want    fyne.Size
 	}{
-		{"short form keeps the minimum width", fyne.NewSize(500, 300), fyne.NewSize(200, 40), fyne.NewSize(720, 340)},
-		{"wide form widens the window", fyne.NewSize(800, 300), fyne.NewSize(200, 40), fyne.NewSize(800, 340)},
-		{"tall form is capped", fyne.NewSize(500, 2000), fyne.NewSize(200, 40), fyne.NewSize(720, addDialogMaxBodyHeight+40)},
+		{"short form keeps the minimum width", fyne.NewSize(500, 340), 4, fyne.NewSize(720, 348)},
+		{"wide form widens the window", fyne.NewSize(800, 340), 4, fyne.NewSize(808, 348)},
+		{"unpadded window", fyne.NewSize(500, 340), 0, fyne.NewSize(720, 340)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := addTorrentWindowSize(tt.content, tt.footer); got != tt.want {
+			if got := addTorrentWindowSize(tt.content, tt.padding); got != tt.want {
 				t.Fatalf("addTorrentWindowSize = %v, want %v", got, tt.want)
 			}
 		})
