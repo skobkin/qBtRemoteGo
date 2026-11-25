@@ -4,9 +4,10 @@ package ui
 // WebUI Options tabs; the key-to-field map is in docs/qbittorrent/ and on
 // issue #32.
 
-// serverPrefTabs lists the implemented tabs in WebUI order.
-func serverPrefTabs() []prefTab {
-	return []prefTab{speedPrefTab(), bitTorrentPrefTab()}
+// serverPrefTabs lists the implemented tabs in WebUI order. dirs suggests
+// directories on the server for path fields (nil disables suggestions).
+func serverPrefTabs(dirs autocompleteFetcher) []prefTab {
+	return []prefTab{downloadsPrefTab(dirs), speedPrefTab(), bitTorrentPrefTab()}
 }
 
 // requiring makes field editable only while all the given switches are on.
@@ -104,6 +105,109 @@ func bitTorrentPrefTab() prefTab {
 			checkField(fromURL, "Append trackers from URL to new downloads", "Append trackers from URL"),
 			requiring(textField("add_trackers_url", "URL", "Trackers URL"), fromURL),
 			readOnlyTextField("add_trackers_url_list", "Fetched trackers", "Fetched trackers"),
+		}},
+	}}
+}
+
+func contentLayoutOptions() []prefOption[string] {
+	return []prefOption[string]{{"Original", "Original"}, {"Subfolder", "Create subfolder"}, {"NoSubfolder", "Don't create subfolder"}}
+}
+
+func stopConditionOptions() []prefOption[string] {
+	return []prefOption[string]{{"None", "None"}, {"MetadataReceived", "Metadata received"}, {"FilesChecked", "Files checked"}}
+}
+
+func autoDeleteModeOptions() []prefOption[int64] {
+	return []prefOption[int64]{{0, "Never"}, {1, "If added"}, {2, "Always (also when addition is cancelled)"}}
+}
+
+func tmmModeOptions() []prefOption[bool] {
+	return []prefOption[bool]{{false, "Manual"}, {true, "Automatic"}}
+}
+
+func relocateTorrentOptions() []prefOption[bool] {
+	return []prefOption[bool]{{true, "Relocate torrent"}, {false, "Switch torrent to Manual Mode"}}
+}
+
+func relocateAffectedOptions() []prefOption[bool] {
+	return []prefOption[bool]{{true, "Relocate affected torrents"}, {false, "Switch affected torrents to Manual Mode"}}
+}
+
+func smtpEncryptionOptions() []prefOption[string] {
+	return []prefOption[string]{{"None", "None"}, {"STARTTLS", "STARTTLS"}, {"SMTPS", "SMTPS"}}
+}
+
+const autorunParametersHint = `Supported parameters (case sensitive): %N torrent name, %L category, ` +
+	`%G tags (comma separated), %F content path, %R root path, %D save path, %C number of files, ` +
+	`%Z torrent size (bytes), %T current tracker, %I info hash v1, %J info hash v2, %K torrent ID, ` +
+	`%M comment. Quote parameters to keep whitespace, e.g. "%N".`
+
+// downloadsPrefTab mirrors the WebUI Downloads tab. "Automatically add
+// torrents from" (scan_dirs, deprecated) is not shown.
+func downloadsPrefTab(dirs autocompleteFetcher) prefTab {
+	const (
+		backup         = "torrent_files_backup_enabled"
+		finishedBackup = "torrent_files_finished_backup_dir_enabled"
+		tempPath       = "temp_path_enabled"
+		excluded       = "excluded_file_names_enabled"
+		mail           = "mail_notification_enabled"
+		mailAuth       = "mail_notification_auth_enabled"
+		runOnAdded     = "autorun_on_torrent_added_enabled"
+		runOnFinished  = "autorun_enabled"
+	)
+
+	return prefTab{title: "Downloads", sections: []prefSection{
+		{title: "When adding a torrent", fields: []*prefField{
+			textEnumField("torrent_content_layout", "Torrent content layout", "Torrent content layout", contentLayoutOptions()),
+			checkField("add_to_top_of_queue", "Add to top of queue", "Add to top of queue"),
+			checkField("add_stopped_enabled", "Do not start the download automatically", "Add torrents stopped"),
+			textEnumField("torrent_stop_condition", "Torrent stop condition", "Torrent stop condition", stopConditionOptions()),
+		}},
+		{title: "When adding a duplicate torrent", fields: []*prefField{
+			checkField("merge_trackers", "Merge trackers to existing torrent", "Merge trackers of duplicates"),
+		}},
+		{title: "Torrent files", fields: []*prefField{
+			checkField(backup, "Store backup .torrent file", "Store .torrent backups"),
+			requiring(pathField("torrent_files_backup_dir", "Store backup in", "Backup .torrent folder", dirs), backup),
+			requiring(checkField(finishedBackup, "Move backup when torrent finished", "Move finished .torrent backups"), backup),
+			requiring(pathField("torrent_files_finished_backup_dir", "Finished backup folder", "Finished .torrent backup folder", dirs), backup, finishedBackup),
+			requiring(checkField("remove_torrent_file_backup", "Remove backup when removing torrent", "Remove .torrent backup with torrent"), backup),
+			enumField("auto_delete_mode", "Delete .torrent files afterwards", "Delete .torrent files", autoDeleteModeOptions()),
+		}},
+		{title: "Files", fields: []*prefField{
+			checkField("preallocate_all", "Pre-allocate disk space for all files", "Pre-allocate disk space"),
+			checkField("incomplete_files_ext", "Append .!qB extension to incomplete files", "Append .!qB extension"),
+			checkField("use_unwanted_folder", `Keep unselected files in ".unwanted" folder`, "Keep unselected files in .unwanted"),
+		}},
+		{title: "Saving Management", fields: []*prefField{
+			boolEnumField("auto_tmm_enabled", "Default Torrent Management Mode", "Default torrent management mode", tmmModeOptions()),
+			boolEnumField("torrent_changed_tmm_enabled", "When Torrent Category changed", "When torrent category changed", relocateTorrentOptions()),
+			boolEnumField("save_path_changed_tmm_enabled", "When Default Save Path changed", "When default save path changed", relocateAffectedOptions()),
+			boolEnumField("category_changed_tmm_enabled", "When Category Save Path changed", "When category save path changed", relocateAffectedOptions()),
+			checkField("use_category_paths_in_manual_mode", "Use Category paths in Manual Mode", "Use category paths in manual mode"),
+			pathField("save_path", "Default Save Path", "Default save path", dirs),
+			checkField(tempPath, "Use another path for incomplete torrents", "Separate path for incomplete torrents"),
+			requiring(pathField("temp_path", "Incomplete torrents path", "Incomplete torrents path", dirs), tempPath),
+		}},
+		{title: "Excluded file names", hint: "One name or wildcard pattern per line.", fields: []*prefField{
+			checkField(excluded, "Exclude matching file names", "Excluded file names"),
+			requiring(textAreaField("excluded_file_names", "Excluded names", "Excluded file name list"), excluded),
+		}},
+		{title: "Email notification upon download completion", fields: []*prefField{
+			checkField(mail, "Send email notifications", "Email notification"),
+			requiring(textField("mail_notification_sender", "From", "Notification sender"), mail),
+			requiring(textField("mail_notification_email", "To", "Notification recipients"), mail),
+			requiring(textField("mail_notification_smtp", "SMTP server", "SMTP server"), mail),
+			requiring(textEnumField("mail_notification_encryption_type", "SMTP encryption", "SMTP encryption", smtpEncryptionOptions()), mail),
+			requiring(checkField(mailAuth, "Authentication", "SMTP authentication"), mail),
+			requiring(textField("mail_notification_username", "Username", "SMTP username"), mail, mailAuth),
+			requiring(passwordField("mail_notification_password", "Password", "SMTP password"), mail, mailAuth),
+		}},
+		{title: "Run external program", hint: autorunParametersHint, fields: []*prefField{
+			checkField(runOnAdded, "Run on torrent added", "Run program on torrent added"),
+			requiring(textField("autorun_on_torrent_added_program", "Command", "Command on torrent added"), runOnAdded),
+			checkField(runOnFinished, "Run on torrent finished", "Run program on torrent finished"),
+			requiring(textField("autorun_program", "Command", "Command on torrent finished"), runOnFinished),
 		}},
 	}}
 }

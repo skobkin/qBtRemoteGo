@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path"
 	"strconv"
 	"strings"
 
@@ -310,11 +311,20 @@ func (e *optionalLimitEditor) syncEntry() {
 
 // --- text -----------------------------------------------------------------------------
 
-type textControl struct{ multiLine bool }
+type textControl struct {
+	multiLine bool
+	secret    bool // password: masked entry, never shown in summaries
+}
 
 // textField edits a single-line string such as a URL.
 func textField(key, label, name string) *prefField {
 	return &prefField{keys: []string{key}, label: label, name: name, control: textControl{}}
+}
+
+// passwordField edits a secret. The server returns it in clear text, but the
+// UI masks it and summaries never show it.
+func passwordField(key, label, name string) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name, control: textControl{secret: true}}
 }
 
 // textAreaField edits a multi-line string such as a tracker list.
@@ -352,6 +362,10 @@ func (textControl) decode(f *prefField, prefs qbt.Preferences) (prefValues, bool
 
 func (c textControl) format(f *prefField, values prefValues) string {
 	text, _ := values[f.keys[0]].(string)
+	if c.secret && text != "" {
+		return "••••••••"
+	}
+
 	return formatText(text, c.multiLine)
 }
 
@@ -366,6 +380,9 @@ func (c textControl) newEditor(f *prefField) prefEditor {
 		values[key] = text
 		return nil
 	}
+	if c.secret {
+		return newEntryEditorFor(widget.NewPasswordEntry(), f, "", show, parse)
+	}
 	e := newEntryEditor(f, "", show, parse)
 	if c.multiLine {
 		e.entry.MultiLine = true
@@ -375,6 +392,74 @@ func (c textControl) newEditor(f *prefField) prefEditor {
 
 	return e
 }
+
+// --- remote path ------------------------------------------------------------------
+
+// pathControl edits a path on the qBittorrent server's filesystem, with
+// directory suggestions from the server.
+type pathControl struct{ dirs autocompleteFetcher }
+
+func pathField(key, label, name string, dirs autocompleteFetcher) *prefField {
+	return &prefField{keys: []string{key}, label: label, name: name, control: pathControl{dirs: dirs}}
+}
+
+func (pathControl) decode(f *prefField, prefs qbt.Preferences) (prefValues, bool) {
+	return decodeString(f, prefs)
+}
+
+func (pathControl) format(f *prefField, values prefValues) string {
+	text, _ := values[f.keys[0]].(string)
+	return formatText(text, false)
+}
+
+// equivalent treats paths the server only respelled (cleaned, or with native
+// separators) as the same; a relative path it resolved still differs.
+func (pathControl) equivalent(f *prefField, a, b prefValues) bool {
+	first, _ := a[f.keys[0]].(string)
+	second, _ := b[f.keys[0]].(string)
+
+	return normalizeRemotePath(first) == normalizeRemotePath(second)
+}
+
+func normalizeRemotePath(p string) string {
+	if p == "" {
+		return ""
+	}
+
+	return path.Clean(strings.ReplaceAll(p, `\`, "/"))
+}
+
+func (c pathControl) newEditor(f *prefField) prefEditor {
+	entry := newPathAutocompleteEntry(nil, c.dirs, nil)
+	entry.SetPlaceHolder("Path on the server")
+
+	return &pathEditor{field: f, entry: entry}
+}
+
+type pathEditor struct {
+	field *prefField
+	entry *pathAutocompleteEntry
+}
+
+func (e *pathEditor) object() fyne.CanvasObject { return e.entry }
+
+// load shows the value without starting a directory lookup.
+func (e *pathEditor) load(values prefValues) {
+	text, _ := values[e.field.keys[0]].(string)
+	e.entry.suppressChange = true
+	e.entry.SetText(text)
+	e.entry.suppressChange = false
+}
+
+// store sends the path as typed; the server normalizes it.
+func (e *pathEditor) store(values prefValues) error {
+	values[e.field.keys[0]] = e.entry.Text
+	return nil
+}
+
+func (e *pathEditor) setEnabled(enabled bool) { setWidgetEnabled(e.entry, enabled) }
+func (e *pathEditor) disabled() bool          { return e.entry.Disabled() }
+func (e *pathEditor) close()                  { e.entry.Close() }
 
 // --- read-only text -----------------------------------------------------------------
 

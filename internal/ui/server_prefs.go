@@ -162,7 +162,10 @@ func (e *entryEditor) setEnabled(enabled bool) { setWidgetEnabled(e.entry, enabl
 func (e *entryEditor) disabled() bool          { return e.entry.Disabled() }
 
 func newEntryEditor(f *prefField, placeholder string, show func(prefValues) string, parse func(string, prefValues) error) *entryEditor {
-	entry := widget.NewEntry()
+	return newEntryEditorFor(widget.NewEntry(), f, placeholder, show, parse)
+}
+
+func newEntryEditorFor(entry *widget.Entry, f *prefField, placeholder string, show func(prefValues) string, parse func(string, prefValues) error) *entryEditor {
 	entry.SetPlaceHolder(placeholder)
 	entry.Validator = func(text string) error { return parse(text, prefValues{}) }
 
@@ -264,6 +267,13 @@ type enumControl[T comparable] struct {
 // enumField is a select over an integer-coded preference.
 func enumField(key, label, name string, options []prefOption[int64]) *prefField {
 	control := enumControl[int64]{options: options, decodeValue: qbt.Preferences.Int}
+	return &prefField{keys: []string{key}, label: label, name: name, control: control}
+}
+
+// boolEnumField is a select over a boolean preference, for switches the
+// WebUI shows as a choice between two modes.
+func boolEnumField(key, label, name string, options []prefOption[bool]) *prefField {
+	control := enumControl[bool]{options: options, decodeValue: qbt.Preferences.Bool}
 	return &prefField{keys: []string{key}, label: label, name: name, control: control}
 }
 
@@ -439,9 +449,21 @@ func conflictingFields(changed []*prefField, baseline, fresh prefValues) []*pref
 	return filterFields(changed, func(f *prefField) bool { return fieldDiffers(f, baseline, fresh) })
 }
 
-// unappliedFields lists sent fields the server does not report back as sent.
+// prefEquivalence is implemented by controls whose values the server may
+// store in another spelling (e.g. normalized paths).
+type prefEquivalence interface {
+	equivalent(f *prefField, a, b prefValues) bool
+}
+
+// unappliedFields lists sent fields the server does not report back as sent
+// (or as an equivalent spelling).
 func unappliedFields(sent []*prefField, sentValues, reread prefValues) []*prefField {
-	return filterFields(sent, func(f *prefField) bool { return fieldDiffers(f, sentValues, reread) })
+	return filterFields(sent, func(f *prefField) bool {
+		if eq, ok := f.control.(prefEquivalence); ok {
+			return !eq.equivalent(f, sentValues, reread)
+		}
+		return fieldDiffers(f, sentValues, reread)
+	})
 }
 
 // --- form -------------------------------------------------------------------
@@ -491,6 +513,7 @@ func newPrefForm(tabs []prefTab, prefs qbt.Preferences) *prefForm {
 			content := []fyne.CanvasObject{widget.NewForm(items...)}
 			if section.hint != "" {
 				hint := widget.NewLabelWithStyle(section.hint, fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+				hint.Wrapping = fyne.TextWrapWord
 				content = append(content, hint)
 			}
 			if len(sections) > 0 {
@@ -549,6 +572,15 @@ func (f *prefForm) edited() (prefValues, error) {
 	}
 
 	return values, nil
+}
+
+// close releases editors that hold background resources (path lookups).
+func (f *prefForm) close() {
+	for _, editor := range f.editors {
+		if c, ok := editor.(interface{ close() }); ok {
+			c.close()
+		}
+	}
 }
 
 func (f *prefForm) fieldByKey(key string) *prefField {

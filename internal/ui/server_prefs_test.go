@@ -207,7 +207,7 @@ func TestPrefFieldFormatting(t *testing.T) {
 
 func TestPrefFormDisablesFieldsWhoseSwitchIsOff(t *testing.T) {
 	test.NewTempApp(t)
-	form := newPrefForm(serverPrefTabs(), rawPrefs(t, speedPrefsDoc()))
+	form := newPrefForm(serverPrefTabs(nil), rawPrefs(t, speedPrefsDoc()))
 
 	from := form.fieldByKey("schedule_from_hour")
 	days := form.fieldByKey("scheduler_days")
@@ -227,7 +227,7 @@ func TestPrefFormDisablesFieldsWhoseSwitchIsOff(t *testing.T) {
 
 func TestPrefFormRoundTripHasNoChanges(t *testing.T) {
 	test.NewTempApp(t)
-	form := newPrefForm(serverPrefTabs(), rawPrefs(t, speedPrefsDoc()))
+	form := newPrefForm(serverPrefTabs(nil), rawPrefs(t, speedPrefsDoc()))
 
 	edited, err := form.edited()
 	if err != nil {
@@ -253,7 +253,7 @@ func TestPrefFormRoundTripHasNoChanges(t *testing.T) {
 
 func TestPrefFormReportsInvalidFieldByName(t *testing.T) {
 	test.NewTempApp(t)
-	form := newPrefForm(serverPrefTabs(), rawPrefs(t, speedPrefsDoc()))
+	form := newPrefForm(serverPrefTabs(nil), rawPrefs(t, speedPrefsDoc()))
 	form.editors[form.fieldByKey("schedule_to_hour")].(*entryEditor).entry.SetText("25:00")
 
 	_, err := form.edited()
@@ -267,12 +267,12 @@ func TestPrefFormReportsInvalidFieldByName(t *testing.T) {
 
 func TestPrefFormShowsPlaceholderForUnsupportedTab(t *testing.T) {
 	test.NewTempApp(t)
-	form := newPrefForm(serverPrefTabs(), rawPrefs(t, `{"unrelated":1}`))
+	form := newPrefForm(serverPrefTabs(nil), rawPrefs(t, `{"unrelated":1}`))
 
 	if len(form.fields) != 0 {
 		t.Fatalf("fields = %v", fieldNames(form.fields))
 	}
-	if len(form.tabs.Items) != len(serverPrefTabs()) || form.tabs.Items[0].Text != "Speed" {
+	if len(form.tabs.Items) != len(serverPrefTabs(nil)) || form.tabs.Items[0].Text != "Downloads" {
 		t.Fatalf("tabs = %d", len(form.tabs.Items))
 	}
 	for _, item := range form.tabs.Items {

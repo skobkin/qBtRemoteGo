@@ -229,7 +229,7 @@ func TestNewControlFormatting(t *testing.T) {
 
 func TestBitTorrentTabRoundTripHasNoChanges(t *testing.T) {
 	test.NewTempApp(t)
-	form := newPrefForm(serverPrefTabs(), rawPrefs(t, bitTorrentPrefsDoc()))
+	form := newPrefForm(serverPrefTabs(nil), rawPrefs(t, bitTorrentPrefsDoc()))
 
 	if len(form.fields) == 0 || form.fieldByKey("max_ratio") == nil || form.fieldByKey("add_trackers_url_list") == nil {
 		t.Fatalf("BitTorrent fields missing: %v", fieldNames(form.fields))
@@ -245,7 +245,7 @@ func TestBitTorrentTabRoundTripHasNoChanges(t *testing.T) {
 
 func TestSeedingLimitSendsSwitchAndValueTogether(t *testing.T) {
 	test.NewTempApp(t)
-	form := newPrefForm(serverPrefTabs(), rawPrefs(t, bitTorrentPrefsDoc()))
+	form := newPrefForm(serverPrefTabs(nil), rawPrefs(t, bitTorrentPrefsDoc()))
 
 	ratio := form.editors[form.fieldByKey("max_ratio")].(*optionalLimitEditor)
 	ratio.check.SetChecked(true)
@@ -264,7 +264,7 @@ func TestSeedingLimitSendsSwitchAndValueTogether(t *testing.T) {
 
 func TestSlowTorrentFieldsRequireQueueingAndSwitch(t *testing.T) {
 	test.NewTempApp(t)
-	form := newPrefForm(serverPrefTabs(), rawPrefs(t, bitTorrentPrefsDoc()))
+	form := newPrefForm(serverPrefTabs(nil), rawPrefs(t, bitTorrentPrefsDoc()))
 
 	threshold := form.editors[form.fieldByKey("slow_torrent_dl_rate_threshold")]
 	downloads := form.editors[form.fieldByKey("max_active_downloads")]
@@ -286,7 +286,7 @@ func TestSlowTorrentFieldsRequireQueueingAndSwitch(t *testing.T) {
 
 func TestFetchedTrackersAreReadOnly(t *testing.T) {
 	test.NewTempApp(t)
-	form := newPrefForm(serverPrefTabs(), rawPrefs(t, bitTorrentPrefsDoc()))
+	form := newPrefForm(serverPrefTabs(nil), rawPrefs(t, bitTorrentPrefsDoc()))
 
 	list := form.editors[form.fieldByKey("add_trackers_url_list")]
 	form.editors[form.fieldByKey("add_trackers_from_url_enabled")].(*checkEditor).check.SetChecked(true)
@@ -307,10 +307,10 @@ func TestFetchedTrackersAreReadOnly(t *testing.T) {
 
 func TestServerPrefTabsFollowWebUIOrder(t *testing.T) {
 	var titles []string
-	for _, tab := range serverPrefTabs() {
+	for _, tab := range serverPrefTabs(nil) {
 		titles = append(titles, tab.title)
 	}
-	if want := []string{"Speed", "BitTorrent"}; !reflect.DeepEqual(titles, want) {
+	if want := []string{"Downloads", "Speed", "BitTorrent"}; !reflect.DeepEqual(titles, want) {
 		t.Fatalf("tabs = %v, want %v", titles, want)
 	}
 }

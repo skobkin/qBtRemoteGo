@@ -47,6 +47,10 @@ func (b *fakePrefsBackend) FetchPreferences(context.Context) (qbt.Preferences, e
 	return prefs, err
 }
 
+func (b *fakePrefsBackend) SuggestDirectories(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 func (b *fakePrefsBackend) ApplyPreferences(_ context.Context, changes map[string]any) error {
 	b.applied = append(b.applied, changes)
 	for key, value := range changes {
@@ -249,6 +253,23 @@ func TestServerSettingsCloseAsksOnlyWhenDirty(t *testing.T) {
 	w.requestClose()
 	if rec.confirmTitle != "Discard changes?" {
 		t.Fatalf("dirty close confirm %q", rec.confirmTitle)
+	}
+}
+
+func TestServerSettingsReloadClosesOldPathEntries(t *testing.T) {
+	backend := newFakePrefsBackend(t)
+	backend.prefs["save_path"] = "/data/downloads"
+	w, _ := newTestServerSettings(t, backend)
+
+	old := w.form.editors[w.form.fieldByKey("save_path")].(*pathEditor)
+	w.load()
+	if !old.entry.closed {
+		t.Fatal("reloading left the old form's path entry running")
+	}
+	current := w.form.editors[w.form.fieldByKey("save_path")].(*pathEditor)
+	w.dispose()
+	if !current.entry.closed {
+		t.Fatal("dispose left the path entry running")
 	}
 }
 

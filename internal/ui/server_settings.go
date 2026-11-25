@@ -25,6 +25,7 @@ const serverPrefsTimeout = 20 * time.Second
 type serverPrefsBackend interface {
 	FetchPreferences(ctx context.Context) (qbt.Preferences, error)
 	ApplyPreferences(ctx context.Context, changes map[string]any) error
+	SuggestDirectories(ctx context.Context, path string) ([]string, error)
 }
 
 // serverSettingsWindow edits the qBittorrent server's global preferences.
@@ -63,6 +64,7 @@ func (a *application) openServerSettingsWindow() {
 	w.openConfig = a.openSettingsWindow
 	a.serverSettings = w
 	w.win.SetOnClosed(func() {
+		w.dispose()
 		if a.serverSettings == w {
 			a.serverSettings = nil
 		}
@@ -168,16 +170,24 @@ func (w *serverSettingsWindow) load() {
 		prefs, err = w.backend.FetchPreferences(ctx)
 	}, func() {
 		w.setBusy(false)
+		w.dispose()
 		if err != nil {
-			w.form = nil
 			w.setBody(w.loadErrorView(err))
 			w.syncButtons()
 			return
 		}
-		w.form = newPrefForm(serverPrefTabs(), prefs)
+		w.form = newPrefForm(serverPrefTabs(w.backend.SuggestDirectories), prefs)
 		w.setBody(w.form.tabs)
 		w.syncButtons()
 	})
+}
+
+// dispose releases the current form's background resources and drops it.
+func (w *serverSettingsWindow) dispose() {
+	if w.form != nil {
+		w.form.close()
+		w.form = nil
+	}
 }
 
 func (w *serverSettingsWindow) loadErrorView(err error) fyne.CanvasObject {
