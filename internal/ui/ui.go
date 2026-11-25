@@ -1095,11 +1095,15 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		setStatus,
 	)
 	savePathEntry.SetText(data.SavePath)
-	categoryEntry := widget.NewSelectEntry(categories)
-	tagsEntry := widget.NewEntry()
-	if len(tags) > 0 {
-		tagsEntry.SetPlaceHolder("Known tags: " + strings.Join(tags, ", "))
+	categoryNames := make([]string, 0, len(categories))
+	categoryPaths := make(map[string]string, len(categories))
+	for _, category := range categories {
+		categoryNames = append(categoryNames, category.Name)
+		categoryPaths[category.Name] = category.SavePath
 	}
+	categoryEntry := widget.NewSelectEntry(categoryNames)
+	tagsEntry := newTagAutocompleteEntry(tags)
+	tagsEntry.SetPlaceHolder("Comma-separated")
 	managementSelect := widget.NewSelect([]string{"Manual", "Auto"}, nil)
 	managementSelect.SetSelected(data.ManagementMode)
 	stopSelect := widget.NewSelect([]string{"None", "Metadata received", "Files checked"}, nil)
@@ -1255,6 +1259,7 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		addWindowClosed.Store(true)
 		cancelDefaultSavePath()
 		savePathEntry.Close()
+		tagsEntry.Close()
 
 		current := a.controller.Config()
 		if current.UI.AddTorrentAdvancedExpanded == advancedItem.Open {
@@ -1272,14 +1277,20 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 		browseButton.OnTapped()
 	}
 	dlg := &addTorrentDialog{
-		win:          win,
-		sourceSelect: sourceSelect,
-		magnetEntry:  magnetEntry,
-		fileEntry:    fileEntry,
-		submit:       submit,
-		cancel:       cancel,
-		buttons:      buttons,
+		win:             win,
+		sourceSelect:    sourceSelect,
+		magnetEntry:     magnetEntry,
+		fileEntry:       fileEntry,
+		savePathEntry:   savePathEntry,
+		categoryEntry:   categoryEntry,
+		tagsEntry:       tagsEntry,
+		submit:          submit,
+		cancel:          cancel,
+		buttons:         buttons,
+		categoryPaths:   categoryPaths,
+		initialSavePath: data.SavePath,
 	}
+	categoryEntry.OnChanged = dlg.onCategoryChanged
 
 	if shouldFetchDefaultSavePath {
 		go func() {
@@ -1295,7 +1306,10 @@ func (a *application) openAddWindowWith(prefill *appcore.AddDialogPrefill, opts 
 				if addWindowClosed.Load() || !shouldApplyLazySavePath(savePathEntry.Text, defaultSavePath) {
 					return
 				}
-				savePathEntry.SetText(strings.TrimSpace(defaultSavePath))
+				// The server default counts as dialog-filled, so a category
+				// picked later may still replace it.
+				dlg.autoSavePath = strings.TrimSpace(defaultSavePath)
+				savePathEntry.SetText(dlg.autoSavePath)
 			})
 		}()
 	}

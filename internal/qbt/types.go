@@ -17,6 +17,13 @@ type Torrent struct {
 	AddedAt    time.Time `json:"-"`
 }
 
+// Category is a qBittorrent category and its save path (empty means the
+// server default).
+type Category struct {
+	Name     string
+	SavePath string
+}
+
 type TransferInfo struct {
 	DownloadSpeed    int64  `json:"dl_info_speed"`
 	UploadSpeed      int64  `json:"up_info_speed"`

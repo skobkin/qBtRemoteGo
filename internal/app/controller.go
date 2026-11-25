@@ -343,13 +343,16 @@ func (c *Controller) FetchServerVersion(ctx context.Context) (string, error) {
 	return client.Version(ctx)
 }
 
-func (c *Controller) FetchCategoriesAndTags(ctx context.Context) ([]string, []string, error) {
+// FetchCategoriesAndTags loads the server's categories (with their save
+// paths) and tags for the Add dialog. Either half may fail on its own; the
+// joined error is returned alongside whatever loaded.
+func (c *Controller) FetchCategoriesAndTags(ctx context.Context) ([]qbt.Category, []string, error) {
 	client, err := c.client()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	categories, catErr := client.Categories(ctx)
+	categories, catErr := client.CategoriesDetailed(ctx)
 	tags, tagErr := client.Tags(ctx)
 	if catErr != nil && tagErr != nil {
 		return nil, nil, fmt.Errorf("load categories and tags: %w", errors.Join(catErr, tagErr))

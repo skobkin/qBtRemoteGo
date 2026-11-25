@@ -31,6 +31,15 @@ type pathAutocompleteEntry struct {
 	fetcher     autocompleteFetcher
 	status      func(string)
 
+	// localSuggest overrides the local suggestion source (default: recent
+	// paths matching the text). applySuggestion turns an accepted suggestion
+	// into the new text (default: the suggestion itself). acceptOnSpace lets
+	// Space accept the highlighted suggestion, which suits paths but not
+	// values that may contain spaces.
+	localSuggest    func(text string) []string
+	applySuggestion func(text string, suggestion string) string
+	acceptOnSpace   bool
+
 	debounceDelay time.Duration
 
 	suggestions    []string
@@ -66,6 +75,7 @@ func newPathAutocompleteEntryWithDelay(recentPaths []string, delay time.Duration
 		debounceDelay: delay,
 		suggestions:   filterMatchingPaths(recentPaths, ""),
 		selected:      -1,
+		acceptOnSpace: true,
 	}
 	entry.ExtendBaseWidget(entry)
 	entry.Wrapping = fyne.TextWrapOff
@@ -127,7 +137,7 @@ func (e *pathAutocompleteEntry) TypedKey(event *fyne.KeyEvent) {
 			return
 		}
 		if len(e.suggestions) == 0 {
-			e.setSuggestions(filterMatchingPaths(e.recentPaths, e.Text))
+			e.setSuggestions(e.localSuggestions(e.Text))
 		}
 		e.showPopup()
 		return
@@ -153,7 +163,7 @@ func (e *pathAutocompleteEntry) TypedKey(event *fyne.KeyEvent) {
 		}
 		e.hidePopup()
 	case fyne.KeySpace:
-		if e.popupVisible() && len(e.suggestions) > 0 {
+		if e.acceptOnSpace && e.popupVisible() && len(e.suggestions) > 0 {
 			e.acceptSuggestion(e.highlightedIndex())
 			return
 		}
@@ -171,7 +181,7 @@ func (e *pathAutocompleteEntry) handleChanged(value string) {
 		e.status("")
 	}
 
-	local := filterMatchingPaths(e.recentPaths, value)
+	local := e.localSuggestions(value)
 	e.setSuggestions(local)
 	e.scheduleRemoteFetch(value)
 }
@@ -533,10 +543,21 @@ func (e *pathAutocompleteEntry) highlightedIndex() int {
 	return 0
 }
 
+// localSuggestions returns the suggestions available without a remote fetch.
+func (e *pathAutocompleteEntry) localSuggestions(text string) []string {
+	if e.localSuggest != nil {
+		return e.localSuggest(text)
+	}
+	return filterMatchingPaths(e.recentPaths, text)
+}
+
 func (e *pathAutocompleteEntry) acceptSuggestion(index int) {
 	value := e.suggestionAt(index)
 	if value == "" {
 		return
+	}
+	if e.applySuggestion != nil {
+		value = e.applySuggestion(e.Text, value)
 	}
 	e.suppressChange = true
 	e.SetText(value)

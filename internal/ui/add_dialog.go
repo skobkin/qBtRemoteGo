@@ -18,13 +18,34 @@ const (
 // addTorrentDialog holds the Add dialog widgets that other code (and tests)
 // needs after the window is built.
 type addTorrentDialog struct {
-	win          fyne.Window
-	sourceSelect *widget.RadioGroup
-	magnetEntry  *submitEntry
-	fileEntry    *submitEntry
-	submit       *widget.Button
-	cancel       *widget.Button
-	buttons      *fyne.Container
+	win           fyne.Window
+	sourceSelect  *widget.RadioGroup
+	magnetEntry   *submitEntry
+	fileEntry     *submitEntry
+	savePathEntry *pathAutocompleteEntry
+	categoryEntry *widget.SelectEntry
+	tagsEntry     *pathAutocompleteEntry
+	submit        *widget.Button
+	cancel        *widget.Button
+	buttons       *fyne.Container
+
+	// categoryPaths maps category names to their server save paths.
+	categoryPaths map[string]string
+	// initialSavePath and autoSavePath are the save path values the dialog
+	// filled in itself; a category may replace them, but not a user edit.
+	initialSavePath string
+	autoSavePath    string
+}
+
+// onCategoryChanged fills the save path from the chosen category's path while
+// the user hasn't typed their own.
+func (d *addTorrentDialog) onCategoryChanged(name string) {
+	path := strings.TrimSpace(d.categoryPaths[strings.TrimSpace(name)])
+	if path == "" || !shouldAutofillSavePath(d.savePathEntry.Text, d.initialSavePath, d.autoSavePath) {
+		return
+	}
+	d.autoSavePath = path
+	d.savePathEntry.SetText(path)
 }
 
 // addSourceReady reports whether the active source has something to add.

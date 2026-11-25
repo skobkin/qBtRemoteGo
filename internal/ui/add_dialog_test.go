@@ -126,3 +126,36 @@ func TestAddDialogPrefillsMagnetsFromClipboard(t *testing.T) {
 		t.Fatal("source entries need placeholders")
 	}
 }
+
+func TestAddDialogCategoryFillsSavePathUntilEdited(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	d := app.openAddWindowWith(nil, addWindowOptions{})
+	t.Cleanup(d.win.Close)
+	d.categoryPaths = map[string]string{"movies": "/data/movies", "iso": "/data/iso", "plain": ""}
+
+	d.categoryEntry.SetText("movies")
+	if d.savePathEntry.Text != "/data/movies" {
+		t.Fatalf("save path %q after picking movies, want /data/movies", d.savePathEntry.Text)
+	}
+
+	d.categoryEntry.SetText("plain")
+	if d.savePathEntry.Text != "/data/movies" {
+		t.Fatalf("save path %q after a category without a path, want it unchanged", d.savePathEntry.Text)
+	}
+
+	d.savePathEntry.SetText("/mine")
+	d.categoryEntry.SetText("iso")
+	if d.savePathEntry.Text != "/mine" {
+		t.Fatalf("save path %q after the user edited it, want /mine kept", d.savePathEntry.Text)
+	}
+}
+
+func TestAddDialogTagsEntrySuggestsKnownTags(t *testing.T) {
+	app := newTorrentTableTestApp(t)
+	d := app.openAddWindowWith(nil, addWindowOptions{})
+	t.Cleanup(d.win.Close)
+
+	if d.tagsEntry.localSuggest == nil || d.tagsEntry.acceptOnSpace {
+		t.Fatal("tags entry should be a tag autocomplete entry")
+	}
+}

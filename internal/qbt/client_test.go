@@ -1583,3 +1583,41 @@ func TestToggleSpeedLimitsModePostsToTransferEndpoint(t *testing.T) {
 		t.Fatalf("toggle endpoint called %d times, want 1", toggled)
 	}
 }
+
+func TestCategoriesDetailedReturnsSortedSavePaths(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = io.WriteString(w, "Ok.")
+		case "/api/v2/torrents/categories":
+			_, _ = io.WriteString(w, `{"movies":{"name":"movies","savePath":"/data/movies"},"iso":{"name":"iso","savePath":""}}`)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{URL: server.URL, Username: "user", Password: "pass"}, slog.Default())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	got, err := client.CategoriesDetailed(context.Background())
+	if err != nil {
+		t.Fatalf("categories: %v", err)
+	}
+	want := []Category{{Name: "iso"}, {Name: "movies", SavePath: "/data/movies"}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("categories = %+v, want %+v", got, want)
+	}
+
+	names, err := client.Categories(context.Background())
+	if err != nil {
+		t.Fatalf("category names: %v", err)
+	}
+	if len(names) != 2 || names[0] != "iso" || names[1] != "movies" {
+		t.Fatalf("category names = %v, want [iso movies]", names)
+	}
+}

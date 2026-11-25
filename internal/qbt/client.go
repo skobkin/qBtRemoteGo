@@ -349,16 +349,34 @@ func (c *Client) TorrentPeers(ctx context.Context, hash string, rid int) (Torren
 }
 
 func (c *Client) Categories(ctx context.Context) ([]string, error) {
-	var raw map[string]json.RawMessage
+	categories, err := c.CategoriesDetailed(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, len(categories))
+	for _, category := range categories {
+		out = append(out, category.Name)
+	}
+
+	return out, nil
+}
+
+// CategoriesDetailed returns the server's categories with their save paths,
+// sorted by name. An empty save path means the category uses the default.
+func (c *Client) CategoriesDetailed(ctx context.Context) ([]Category, error) {
+	var raw map[string]struct {
+		SavePath string `json:"savePath"`
+	}
 	if err := c.getJSON(ctx, "torrents/categories", nil, &raw); err != nil {
 		return nil, err
 	}
 
-	out := make([]string, 0, len(raw))
-	for name := range raw {
-		out = append(out, name)
+	out := make([]Category, 0, len(raw))
+	for name, category := range raw {
+		out = append(out, Category{Name: name, SavePath: strings.TrimSpace(category.SavePath)})
 	}
-	slices.Sort(out)
+	slices.SortFunc(out, func(a, b Category) int { return strings.Compare(a.Name, b.Name) })
 
 	return out, nil
 }
